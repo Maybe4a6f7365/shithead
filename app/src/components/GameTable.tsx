@@ -2,7 +2,9 @@ import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSPGame } from '../sp/SPSinglePlayer'
 import type { Card } from '../engine'
-import { canPlay, getCurrentPlayer, getTopCard, pileSize } from '../engine'
+import {
+  canPlay, getCurrentPlayer, getTopCard, pileSize,
+} from '../engine'
 import { Card as CardView } from './Card'
 
 export function GameTable() {
@@ -150,7 +152,7 @@ export function GameTable() {
 }
 
 function RearrangeUI({ player, onSwap, onReady }: {
-  player: Player; onSwap: (h: number, u: number) => void; onReady: () => void
+  player: import('../engine').Player; onSwap: (h: number, u: number) => void; onReady: () => void
 }) {
   const [selectedHand, setSelectedHand] = useStateSafe<number | null>(null)
   return (

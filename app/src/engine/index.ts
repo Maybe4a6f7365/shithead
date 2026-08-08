@@ -305,7 +305,7 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
   })
 
   // Determine phase transition
-  let phase = state.phase
+  let phase: Phase = state.phase
   if (stock.length === 0) {
     const someoneNeedsToPlayFromTable = nextPlayers.some(p =>
       !p.isOut && p.hand.length === 0 && (p.faceUp.length > 0 || p.faceDown.length > 0)
@@ -389,7 +389,7 @@ export function pickUpPile(state: GameState, playerId: string): PlayResult {
   }
 
   // Phase transition
-  let phase = state.phase
+  let phase: Phase = state.phase
   if (stock.length === 0) {
     const someoneNeedsToPlayFromTable = players.some(p =>
       !p.isOut && p.hand.length === 0 && (p.faceUp.length > 0 || p.faceDown.length > 0)

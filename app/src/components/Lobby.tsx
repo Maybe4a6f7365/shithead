@@ -1,12 +1,18 @@
 import { useState } from 'react'
 import { useSPGame } from '../sp/SPSinglePlayer'
 
+interface PlayerConfig {
+  name: string
+  isAI: boolean
+  difficulty?: 'easy' | 'medium' | 'hard'
+}
+
 export function Lobby() {
   const initGame = useSPGame(s => s.initGame)
-  const [players, setPlayers] = useState([
+  const [players, setPlayers] = useState<PlayerConfig[]>([
     { name: 'You', isAI: false },
-    { name: 'Hans', isAI: true, difficulty: 'medium' as const },
-    { name: 'Greta', isAI: true, difficulty: 'easy' as const },
+    { name: 'Hans', isAI: true, difficulty: 'medium' },
+    { name: 'Greta', isAI: true, difficulty: 'easy' },
   ])
 
   const addPlayer = () => {

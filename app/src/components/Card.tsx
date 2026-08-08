@@ -1,4 +1,4 @@
-import type { Card as CardType, Rank, Suit } from '../game/types'
+import type { Card as CardType, Rank, Suit } from '../engine'
 
 const SUIT_COLORS: Record<string, string> = { '♠': '#1a1a1a', '♣': '#1a1a1a', '♥': '#a23a1e', '♦': '#a23a1e' }
 const SUIT_PATH: Record<string, string> = {
