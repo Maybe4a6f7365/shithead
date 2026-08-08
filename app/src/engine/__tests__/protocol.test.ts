@@ -6,13 +6,21 @@ import { initGame } from '../index'
 import { isClientMsg, serializeGameState, toPlayerSummary } from '../protocol'
 
 describe('isClientMsg', () => {
-  it('accepts valid message types', () => {
+  it('accepts valid message types and resume payloads', () => {
     expect(isClientMsg({ type: 'CREATE_ROOM', playerName: 'X' })).toBe(true)
     expect(isClientMsg({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'X' })).toBe(true)
+    expect(isClientMsg({ type: 'RESUME_ROOM', playerId: 'player-id' })).toBe(true)
     expect(isClientMsg({ type: 'PING' })).toBe(true)
     expect(isClientMsg({ type: 'CHAT', text: 'hi' })).toBe(true)
   })
-  it('rejects invalid types', () => {
+
+  it('rejects malformed or oversized payloads', () => {
+    expect(isClientMsg({ type: 'CREATE_ROOM' })).toBe(false)
+    expect(isClientMsg({ type: 'CREATE_ROOM', playerName: 'X', maxPlayers: 99 })).toBe(false)
+    expect(isClientMsg({ type: 'JOIN_ROOM', code: 'bad', playerName: 'X' })).toBe(false)
+    expect(isClientMsg({ type: 'RESUME_ROOM', playerId: '' })).toBe(false)
+    expect(isClientMsg({ type: 'PLAY', cards: [] })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(201) })).toBe(false)
     expect(isClientMsg({ type: 'NOPE' })).toBe(false)
     expect(isClientMsg({})).toBe(false)
     expect(isClientMsg(null)).toBe(false)
@@ -22,40 +30,45 @@ describe('isClientMsg', () => {
 })
 
 describe('serializeGameState (security)', () => {
-  it('hides other players face-down cards', () => {
+  it('hides opponent hands while preserving card IDs and counts', () => {
+    const state = initGame({
+      players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
+      rng: () => 0,
+    })
+    const original = state.players.find(p => p.id === 'opponent')!
+    const serialized = serializeGameState(state, 'viewer')
+    const opponent = serialized.players.find(p => p.id === 'opponent')!
+
+    expect(opponent.hand).toHaveLength(original.hand.length)
+    expect(opponent.hand[0].id).toBe(original.hand[0].id)
+    expect(opponent.hand[0].rank).toBe('3')
+    expect(opponent.hand[0].suit).toBe(null)
+  })
+
+  it('hides every face-down card, including the viewers own blind cards', () => {
     const state = initGame({
       players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
       rng: () => 0,
     })
     const serialized = serializeGameState(state, 'viewer')
-    const opponent = serialized.players.find(p => p.id === 'opponent')!
-    // Opponent's face-down cards are masked with dummy data (rank 3, no suit)
-    expect(opponent.faceDown.length).toBe(3)
-    expect(opponent.faceDown[0].rank).toBe('3')
-    expect(opponent.faceDown[0].suit).toBe(null)
+
+    for (const player of serialized.players) {
+      expect(player.faceDown).toHaveLength(3)
+      expect(player.faceDown.every(card => card.rank === '3' && card.suit === null)).toBe(true)
+    }
   })
-  it('shows your own face-down cards', () => {
+
+  it('shows the viewers hand and every public face-up card', () => {
     const state = initGame({
       players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
       rng: () => 0,
     })
     const serialized = serializeGameState(state, 'viewer')
     const viewer = serialized.players.find(p => p.id === 'viewer')!
-    // Viewer's face-down cards keep their real rank
-    expect(viewer.faceDown.length).toBe(3)
-    expect(['A','2','3','4','5','6','7','8','9','10','J','Q','K']).toContain(viewer.faceDown[0].rank)
-  })
-  it('shows all face-up and hand cards (public info)', () => {
-    const state = initGame({
-      players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
-      rng: () => 0,
-    })
-    const serialized = serializeGameState(state, 'viewer')
     const opponent = serialized.players.find(p => p.id === 'opponent')!
-    // Hand cards have real data
-    expect(opponent.hand[0].rank).not.toBe('3') // hand wasn't masked
-    // Face-up has real data
-    expect(['A','2','3','4','5','6','7','8','9','10','J','Q','K']).toContain(opponent.faceUp[0].rank)
+
+    expect(viewer.hand).toEqual(state.players.find(p => p.id === 'viewer')!.hand)
+    expect(opponent.faceUp).toEqual(state.players.find(p => p.id === 'opponent')!.faceUp)
   })
 })
 
