@@ -11,10 +11,9 @@ import type {
 } from '../engine'
 import {
   initGame, rearrange, startPlay, playCards, pickUpPile,
-  getCurrentPlayer, pileSize, getTopCard, makeDeck,
 } from '../engine'
 import type {
-  ClientMsg, ServerMsg, RoomSummary, PlayerSummary, ErrorCode,
+  ClientMsg, ServerMsg, RoomSummary,
 } from '../engine/protocol'
 import {
   isClientMsg, serializeGameState, toPlayerSummary,
@@ -22,7 +21,7 @@ import {
 
 interface Env {
   ROOM: DurableObjectNamespace
-  ASSETS: Fetcher  // static asset binding (for serving PWA)
+  ASSETS: Fetcher
 }
 
 interface Session {
@@ -42,20 +41,19 @@ interface RoomData {
   lastActivity: number
 }
 
-// Allowed origins for WebSocket upgrade — strict in prod
 const ALLOWED_ORIGINS_LIST = [
   'https://shithead.pages.dev',
   'https://shithead.maybe4a6f7365.workers.dev',
+  'https://shithead.not4a6f7365.workers.dev',
   'http://localhost:5173',
   'http://localhost:8787',
 ]
 
 function ALLOWED_ORIGINS(origin: string | null): boolean {
   if (!origin) return false
-  return ALLOWED_ORIGINS_LIST.some(allowed => origin.startsWith(allowed))
+  return ALLOWED_ORIGINS_LIST.some(allowed => origin === allowed)
 }
 
-// In-memory storage (Durable Object instance state)
 const rooms = new Map<string, RoomData>()
 
 export class Room {
@@ -74,19 +72,18 @@ export class Room {
     const url = new URL(request.url)
     const path = url.pathname
 
-    // WebSocket upgrade
-    if (path === '/ws') {
+    // The outer Worker forwards the original /api/room/:id/ws URL to the DO.
+    if (path === '/ws' || path.endsWith('/ws')) {
       const origin = request.headers.get('Origin')
       if (!ALLOWED_ORIGINS(origin)) {
         return new Response('Forbidden origin', { status: 403 })
       }
-      if (request.headers.get('Upgrade') !== 'websocket') {
+      if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
         return new Response('Expected WebSocket upgrade', { status: 426 })
       }
       return this.handleWebSocket(request)
     }
 
-    // HTTP REST for room metadata (used by lobby for room list)
     if (path === '/meta') {
       const data = rooms.get(this.code)
       if (!data) return new Response('Not found', { status: 404 })
@@ -94,6 +91,7 @@ export class Room {
     }
 
     if (path === '/health') return new Response('OK')
+    if (path === '/init' && request.method === 'POST') return new Response(null, { status: 204 })
 
     return new Response('Not found', { status: 404 })
   }
@@ -118,7 +116,6 @@ export class Room {
     server.addEventListener('close', () => this.onClose(sessionId))
     server.addEventListener('error', () => this.onClose(sessionId))
 
-    // Send WELCOME with playerId after handshake completes (on first CREATE_ROOM or JOIN_ROOM)
     return new Response(null, { status: 101, webSocket: client })
   }
 
@@ -131,12 +128,11 @@ export class Room {
       const parsed = JSON.parse(raw)
       if (!isClientMsg(parsed)) throw new Error('Invalid message type')
       msg = parsed
-    } catch (e) {
+    } catch {
       this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Bad message format' })
       return
     }
 
-    // Rate limit (cheap): 10 msgs/sec per session
     if (!this.checkRateLimit(sessionId)) {
       this.send(session, { type: 'ERROR', code: 'RATE_LIMITED', message: 'Slow down' })
       return
@@ -160,12 +156,9 @@ export class Room {
     const session = this.sessions.get(sessionId)
     if (!session) return
     this.sessions.delete(sessionId)
-    // Mark player as disconnected, don't kick — they can reconnect with same playerId
-    // (future: store playerId in cookie/sessionStorage on client)
     this.broadcastRoom()
   }
 
-  // ----- Rate limit -----
   private rateLimits = new Map<string, number[]>()
   private checkRateLimit(sessionId: string): boolean {
     const now = Date.now()
@@ -175,8 +168,6 @@ export class Room {
     this.rateLimits.set(sessionId, arr)
     return true
   }
-
-  // ----- Handlers -----
 
   private handleCreate(session: Session, playerName: string, maxPlayers = 5) {
     if (session.playerId) {
@@ -245,11 +236,7 @@ export class Room {
     session.playerId = playerId
     session.playerName = playerName
 
-    // If game already in rearrange phase, give them their dealt hand
-    if (data.state) {
-      // Re-deal not supported — instead kick back to lobby
-      data.state = null
-    }
+    if (data.state) data.state = null
     data.players.push(player)
     data.lastActivity = Date.now()
 
@@ -276,7 +263,6 @@ export class Room {
       return
     }
 
-    // Optionally fill with AIs
     const playerConfigs = data.players.map(p => ({
       id: p.id, name: p.name, isAI: p.isAI, aiDifficulty: p.aiDifficulty as any,
     }))
@@ -355,16 +341,10 @@ export class Room {
     })
   }
 
-  // ----- Broadcast helpers -----
-
   private broadcast(msg: ServerMsg) {
     const data = JSON.stringify(msg)
     for (const session of this.sessions.values()) {
-      try {
-        session.webSocket.send(data)
-      } catch {
-        // ignore
-      }
+      try { session.webSocket.send(data) } catch {}
     }
   }
 
@@ -377,7 +357,7 @@ export class Room {
   private broadcastGameState() {
     const data = rooms.get(this.code)
     if (!data || !data.state) return
-    for (const [sessionId, session] of this.sessions) {
+    for (const session of this.sessions.values()) {
       if (!session.playerId) continue
       const sanitized = serializeGameState(data.state, session.playerId)
       try {
@@ -387,9 +367,7 @@ export class Room {
   }
 
   private send(session: Session, msg: ServerMsg) {
-    try {
-      session.webSocket.send(JSON.stringify(msg))
-    } catch {}
+    try { session.webSocket.send(JSON.stringify(msg)) } catch {}
   }
 
   private toSummary(data: RoomData): RoomSummary {
@@ -425,81 +403,28 @@ export class Room {
   }
 }
 
-// ============================================================================
-// Worker entry point — HTTP routing + static asset serving
-// ============================================================================
-
 function generateRoomCode(): string {
-  // 6-char alphanumeric, avoiding confusable chars
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let code = ''
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)]
-  }
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)]
   return code
 }
 
 export { generateRoomCode }
-
-// ---------- Entry ----------
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname
 
-    // CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: corsHeaders(request.headers.get('Origin')),
-      })
+      return new Response(null, { headers: corsHeaders(request.headers.get('Origin')) })
     }
 
-    // API routes
     if (path === '/api/health') {
       return new Response('OK', { headers: corsHeaders(request.headers.get('Origin')) })
     }
 
     if (path === '/api/room/new') {
-      // Create a new room and return its code
       const id = env.ROOM.newUniqueId()
-      const room = env.ROOM.get(id)
-      // Initialize room state by calling fetch with a special init path
-      await room.fetch(new Request('https://internal/init', { method: 'POST' }))
-      return Response.json({ roomId: id.toString() }, { headers: corsHeaders(request.headers.get('Origin')) })
-    }
-
-    // WebSocket upgrade for room
-    if (path.startsWith('/api/room/') && path.endsWith('/ws')) {
-      const roomId = path.split('/')[3]
-      const id = env.ROOM.idFromString(roomId)
-      const room = env.ROOM.get(id)
-      return room.fetch(request)
-    }
-
-    // Static assets (built PWA)
-    if (env.ASSETS) {
-      const assetResp = await env.ASSETS.fetch(request)
-      if (assetResp.status !== 404) return assetResp
-    }
-
-    // SPA fallback — serve index.html for any non-API path
-    if (request.method === 'GET' && !path.startsWith('/api/')) {
-      const indexReq = new Request(new URL('/index.html', request.url))
-      return env.ASSETS.fetch(indexReq)
-    }
-
-    return new Response('Not found', { status: 404, headers: corsHeaders(request.headers.get('Origin')) })
-  },
-}
-
-function corsHeaders(origin: string | null): HeadersInit {
-  const allowed = origin && ALLOWED_ORIGINS(origin) ? origin : '*'
-  return {
-    'Access-Control-Allow-Origin': allowed,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-    'Vary': 'Origin',
-  }
-}
+      const room = env.ROOM
