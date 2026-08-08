@@ -1,20 +1,50 @@
-import { useEffect,useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMultiplayerRoom } from '../net/useMultiplayerRoom'
 import type { GameState } from '../engine'
-import { canPlay,getCurrentPlayer,getTopCard,pileSize } from '../engine'
+import { canPlay, getCurrentPlayer, getTopCard, pileSize } from '../engine'
 import { Card as CardView } from './Card'
-interface Props{roomId:string;onLeave:()=>void}
-export function MultiplayerGameTable({roomId,onLeave}:Props){const{status,room,gameState,error,playerId,send}=useMultiplayerRoom(roomId);const[playerName]=useState(()=>sessionStorage.getItem(`shithead:name:${roomId}`)??'Player')
- useEffect(()=>{if(status!=='connected')return;const intent=sessionStorage.getItem(`shithead:intent:${roomId}`)??'create';send(intent==='join'?{type:'JOIN_ROOM',code:roomId,playerName}:{type:'CREATE_ROOM',playerName})},[status,roomId,playerName])
- if(status==='connecting'||status==='idle')return <Loading message="Connecting to room…"/>
- if(status==='error'||status==='disconnected')return <Shell><h2 className="text-xl font-black text-[#a23a1e]">Connection lost</h2><p className="my-3 text-sm">{error??'Reconnecting…'}</p><button onClick={onLeave}>Leave</button></Shell>
- if(!room||!playerId)return <Loading message="Joining room…"/>
- if(room.phase==='waiting')return <Shell><div className="text-xs uppercase opacity-50">Room Code</div><div className="text-5xl font-mono font-black text-[#a23a1e] tracking-widest my-2">{room.code}</div><p className="text-xs opacity-60 mb-4">Share this code with friends</p><div className="space-y-2 mb-4">{room.players.map(p=><div key={p.id} className="flex justify-between p-3 bg-[#2d4a2b]/10 rounded-lg"><b>{p.name}{p.id===playerId?' (you)':''}</b><span className="text-xs">{p.connected?'CONNECTED':'OFFLINE'}</span></div>)}</div>{playerId===room.hostId?<button onClick={()=>send({type:'START_GAME'})} disabled={room.players.length<2} className="w-full py-3 rounded-xl bg-[#a23a1e] text-white font-black disabled:opacity-50">{room.players.length<2?'WAITING FOR PLAYERS…':'START GAME'}</button>:<p>Waiting for host to start…</p>}<button onClick={onLeave} className="mt-4 text-xs">← Leave room</button></Shell>
- if(!gameState)return <Loading message="Loading game…"/>
- if(gameState.phase==='rearrange')return <Rearrange state={gameState} id={playerId} swap={(h,u)=>send({type:'REARRANGE',handIdx:h,upIdx:u})} ready={()=>send({type:'READY'})}/>
- if(gameState.phase==='gameOver'){const loser=gameState.players.find(p=>p.id===gameState.loserId);return <Shell><div className="text-6xl">🤡</div><h2 className="text-2xl font-bold">{loser?.name}</h2><h1 className="text-5xl font-black text-[#a23a1e]">SHITHEAD</h1><button onClick={onLeave} className="mt-4">LEAVE</button></Shell>}
- const cur=getCurrentPlayer(gameState),top=getTopCard(gameState),ps=pileSize(gameState),me=gameState.players.find(p=>p.id===playerId),turn=cur?.id===playerId
- return <div className="min-h-screen bg-[#2d4a2b] flex flex-col p-3 max-w-lg mx-auto text-[#faf8f3]"><div className="flex justify-between text-xs"><span>Stock: {gameState.stock.length} · Pile: {ps}</span><span>{room.code}</span></div><div className="grid grid-cols-4 gap-1 my-3">{gameState.players.filter(p=>p.id!==playerId).map(p=><div key={p.id} className={`p-2 rounded text-center text-xs ${p.id===cur?.id?'bg-[#a23a1e]':'bg-white/10'}`}>{p.name}<br/>H{p.hand.length} U{p.faceUp.length} D{p.faceDown.length}</div>)}</div><div className="flex-1 flex items-center justify-center gap-8"><div><div className="text-xs text-center">PILE</div>{top?<CardView card={top} size="md"/>:<CardView faceDown size="md"/>}</div></div><div className="bg-white/5 rounded-2xl p-3"><div className="flex justify-between"><b>{me?.name}</b><span className="text-xs">{turn?'YOUR TURN':cur?`${cur.name}'s turn`:''}</span></div><div className="flex justify-center gap-2 flex-wrap my-2">{me?.hand.map(c=>{const ok=turn&&canPlay(c,top?.rank??null);return <CardView key={c.id} card={c} size="md" playable={ok} onClick={()=>ok&&send({type:'PLAY',cards:[c]})}/>})}</div>{me?.hand.length===0&&<div className="flex justify-center gap-2 flex-wrap">{me.faceUp.map(c=>{const ok=turn&&canPlay(c,top?.rank??null);return <CardView key={c.id} card={c} size="md" playable={ok} onClick={()=>ok&&send({type:'PLAY',cards:[c]})}/>})}</div>}{turn&&<button onClick={()=>send({type:'PICK_UP'})} disabled={!ps} className="w-full mt-2 py-2 bg-[#a23a1e] rounded disabled:opacity-30">PICK UP {ps?`(${ps})`:''}</button>}</div><button onClick={onLeave} className="mt-3 text-xs opacity-50">Leave</button></div>}
-function Shell({children}:{children:React.ReactNode}){return <div className="min-h-screen bg-[#2d4a2b] flex items-center justify-center p-4"><div className="max-w-md w-full bg-[#faf8f3] rounded-2xl p-6 text-center text-[#1a1a1a]">{children}</div></div>}
-function Loading({message}:{message:string}){return <div className="min-h-screen bg-[#2d4a2b] flex items-center justify-center text-[#faf8f3]"><div className="text-center"><div className="text-4xl animate-pulse">♠</div><p>{message}</p></div></div>}
-function Rearrange({state,id,swap,ready}:{state:GameState;id:string;swap:(h:number,u:number)=>void;ready:()=>void}){const me=state.players.find(p=>p.id===id),[sel,setSel]=useState<number|null>(null);if(!me)return <Loading message="Joining…"/>;return <div className="min-h-screen bg-[#2d4a2b] p-4 text-white"><h2 className="text-center font-bold mb-3">Choose your face-up cards</h2><div className="flex justify-center gap-2 mb-4">{me.faceUp.map((c,i)=><CardView key={c.id} card={c} size="md" playable={sel!==null} onClick={()=>{if(sel!==null){swap(sel,i);setSel(null)}}}/>)}</div><div className="flex justify-center gap-2 flex-wrap">{me.hand.map((c,i)=><CardView key={c.id} card={c} size="md" selected={sel===i} onClick={()=>setSel(i)}/>)}</div><button onClick={ready} className="mt-6 w-full py-4 bg-[#a23a1e] rounded-xl font-black">READY TO PLAY →</button></div>}
+
+interface Props { roomId: string; onLeave: () => void }
+
+export function MultiplayerGameTable({ roomId, onLeave }: Props) {
+  const { status, room, gameState, error, playerId, send } = useMultiplayerRoom(roomId)
+  const [playerName] = useState(() => sessionStorage.getItem(`shithead:name:${roomId}`) ?? 'Player')
+
+  useEffect(() => {
+    if (status !== 'connected') return
+
+    const savedPlayerId = sessionStorage.getItem(`shithead:player:${roomId}`)
+    if (savedPlayerId) {
+      send({ type: 'RESUME_ROOM', playerId: savedPlayerId })
+      return
+    }
+
+    const intent = sessionStorage.getItem(`shithead:intent:${roomId}`) ?? 'create'
+    send(intent === 'join'
+      ? { type: 'JOIN_ROOM', code: roomId, playerName }
+      : { type: 'CREATE_ROOM', playerName })
+  }, [status, roomId, playerName, send])
+
+  const leave = () => {
+    send({ type: 'LEAVE_ROOM' })
+    sessionStorage.removeItem(`shithead:player:${roomId}`)
+    sessionStorage.removeItem(`shithead:intent:${roomId}`)
+    sessionStorage.removeItem(`shithead:name:${roomId}`)
+    onLeave()
+  }
+
+  if (status === 'connecting' || status === 'idle') return <Loading message="Connecting to room…" />
+  if (status === 'error' || status === 'disconnected') return <Shell><h2 className="text-xl font-black text-[#a23a1e]">Connection lost</h2><p className="my-3 text-sm">{error ?? 'Reconnecting…'}</p><button onClick={leave}>Leave</button></Shell>
+  if (!room || !playerId) return <Loading message="Joining room…" />
+  if (room.phase === 'waiting') return <Shell><div className="text-xs uppercase opacity-50">Room Code</div><div className="text-5xl font-mono font-black text-[#a23a1e] tracking-widest my-2">{room.code}</div><p className="text-xs opacity-60 mb-4">Share this code with friends</p><div className="space-y-2 mb-4">{room.players.map(p => <div key={p.id} className="flex justify-between p-3 bg-[#2d4a2b]/10 rounded-lg"><b>{p.name}{p.id === playerId ? ' (you)' : ''}</b><span className="text-xs">{p.connected ? 'CONNECTED' : 'OFFLINE'}</span></div>)}</div>{playerId === room.hostId ? <button onClick={() => send({ type: 'START_GAME' })} disabled={room.players.length < 2} className="w-full py-3 rounded-xl bg-[#a23a1e] text-white font-black disabled:opacity-50">{room.players.length < 2 ? 'WAITING FOR PLAYERS…' : 'START GAME'}</button> : <p>Waiting for host to start…</p>}<button onClick={leave} className="mt-4 text-xs">← Leave room</button></Shell>
+  if (!gameState) return <Loading message="Loading game…" />
+  if (gameState.phase === 'rearrange') return <Rearrange state={gameState} id={playerId} swap={(h, u) => send({ type: 'REARRANGE', handIdx: h, upIdx: u })} ready={() => send({ type: 'READY' })} />
+  if (gameState.phase === 'gameOver') { const loser = gameState.players.find(p => p.id === gameState.loserId); return <Shell><div className="text-6xl">🤡</div><h2 className="text-2xl font-bold">{loser?.name}</h2><h1 className="text-5xl font-black text-[#a23a1e]">SHITHEAD</h1><button onClick={leave} className="mt-4">LEAVE</button></Shell> }
+
+  const cur = getCurrentPlayer(gameState), top = getTopCard(gameState), ps = pileSize(gameState), me = gameState.players.find(p => p.id === playerId), turn = cur?.id === playerId
+  return <div className="min-h-screen bg-[#2d4a2b] flex flex-col p-3 max-w-lg mx-auto text-[#faf8f3]"><div className="flex justify-between text-xs"><span>Stock: {gameState.stock.length} · Pile: {ps}</span><span>{room.code}</span></div><div className="grid grid-cols-4 gap-1 my-3">{gameState.players.filter(p => p.id !== playerId).map(p => <div key={p.id} className={`p-2 rounded text-center text-xs ${p.id === cur?.id ? 'bg-[#a23a1e]' : 'bg-white/10'}`}>{p.name}<br />H{p.hand.length} U{p.faceUp.length} D{p.faceDown.length}</div>)}</div><div className="flex-1 flex items-center justify-center gap-8"><div><div className="text-xs text-center">PILE</div>{top ? <CardView card={top} size="md" /> : <CardView faceDown size="md" />}</div></div><div className="bg-white/5 rounded-2xl p-3"><div className="flex justify-between"><b>{me?.name}</b><span className="text-xs">{turn ? 'YOUR TURN' : cur ? `${cur.name}'s turn` : ''}</span></div><div className="flex justify-center gap-2 flex-wrap my-2">{me?.hand.map(c => { const ok = turn && canPlay(c, top?.rank ?? null); return <CardView key={c.id} card={c} size="md" playable={ok} onClick={() => ok && send({ type: 'PLAY', cards: [c] })} /> })}</div>{me?.hand.length === 0 && <div className="flex justify-center gap-2 flex-wrap">{me.faceUp.map(c => { const ok = turn && canPlay(c, top?.rank ?? null); return <CardView key={c.id} card={c} size="md" playable={ok} onClick={() => ok && send({ type: 'PLAY', cards: [c] })} /> })}</div>}{turn && <button onClick={() => send({ type: 'PICK_UP' })} disabled={!ps} className="w-full mt-2 py-2 bg-[#a23a1e] rounded disabled:opacity-30">PICK UP {ps ? `(${ps})` : ''}</button>}</div><button onClick={leave} className="mt-3 text-xs opacity-50">Leave</button></div>
+}
+
+function Shell({ children }: { children: React.ReactNode }) { return <div className="min-h-screen bg-[#2d4a2b] flex items-center justify-center p-4"><div className="max-w-md w-full bg-[#faf8f3] rounded-2xl p-6 text-center text-[#1a1a1a]">{children}</div></div> }
+function Loading({ message }: { message: string }) { return <div className="min-h-screen bg-[#2d4a2b] flex items-center justify-center text-[#faf8f3]"><div className="text-center"><div className="text-4xl animate-pulse">♠</div><p>{message}</p></div></div> }
+function Rearrange({ state, id, swap, ready }: { state: GameState; id: string; swap: (h: number, u: number) => void; ready: () => void }) { const me = state.players.find(p => p.id === id), [sel, setSel] = useState<number | null>(null); if (!me) return <Loading message="Joining…" />; return <div className="min-h-screen bg-[#2d4a2b] p-4 text-white"><h2 className="text-center font-bold mb-3">Choose your face-up cards</h2><div className="flex justify-center gap-2 mb-4">{me.faceUp.map((c, i) => <CardView key={c.id} card={c} size="md" playable={sel !== null} onClick={() => { if (sel !== null) { swap(sel, i); setSel(null) } }} />)}</div><div className="flex justify-center gap-2 flex-wrap">{me.hand.map((c, i) => <CardView key={c.id} card={c} size="md" selected={sel === i} onClick={() => setSel(i)} />)}</div><button onClick={ready} className="mt-6 w-full py-4 bg-[#a23a1e] rounded-xl font-black">READY TO PLAY →</button></div> }
