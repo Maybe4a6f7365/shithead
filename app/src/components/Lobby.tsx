@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { useGame } from '../game/state'
+import { useSPGame } from '../sp/SPSinglePlayer'
 
 export function Lobby() {
-  const initGame = useGame(s => s.initGame)
+  const initGame = useSPGame(s => s.initGame)
   const [players, setPlayers] = useState([
     { name: 'You', isAI: false },
     { name: 'Hans', isAI: true, difficulty: 'medium' as const },
-    { name: 'Greta', isAI: true, difficulty: 'easy' as const }
+    { name: 'Greta', isAI: true, difficulty: 'easy' as const },
   ])
 
   const addPlayer = () => {
@@ -50,7 +50,7 @@ export function Lobby() {
               {p.isAI && (
                 <select
                   value={p.difficulty}
-                  onChange={e => setDiff(i, e.target.value as any)}
+                  onChange={e => setDiff(i, e.target.value as 'easy' | 'medium' | 'hard')}
                   className="px-2 py-2 rounded-lg border border-[#2d4a2b]/20 bg-white text-xs"
                 >
                   <option value="easy">Easy</option>
@@ -65,18 +65,11 @@ export function Lobby() {
           ))}
         </div>
 
-        <button
-          onClick={addPlayer}
-          disabled={players.length >= 5}
-          className="w-full py-2 rounded-lg border-2 border-dashed border-[#2d4a2b]/40 text-[#2d4a2b]/70 mb-4 disabled:opacity-30"
-        >
+        <button onClick={addPlayer} disabled={players.length >= 5} className="w-full py-2 rounded-lg border-2 border-dashed border-[#2d4a2b]/40 text-[#2d4a2b]/70 mb-4 disabled:opacity-30">
           + Add Player ({players.length}/5)
         </button>
 
-        <button
-          onClick={() => initGame(players)}
-          className="w-full py-4 rounded-xl bg-[#a23a1e] text-[#faf8f3] font-black text-xl shadow-lg active:scale-95 transition"
-        >
+        <button onClick={() => initGame(players)} className="w-full py-4 rounded-xl bg-[#a23a1e] text-[#faf8f3] font-black text-xl shadow-lg active:scale-95 transition">
           DEAL
         </button>
       </div>

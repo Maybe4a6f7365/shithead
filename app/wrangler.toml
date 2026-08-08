@@ -1,0 +1,30 @@
+# ============================================================================
+# Shithead — Cloudflare Workers configuration
+# ============================================================================
+name = "shithead"
+main = "src/worker/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Static assets (built PWA)
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+# Durable Object for game rooms
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Room"]
+
+# WebSocket hibernation support
+[durable_objects]
+limits = { allowed_publishers = 100 }
+
+# Environment vars (set via wrangler secret or dashboard)
+[vars]
+ENVIRONMENT = "production"
+ALLOWED_ORIGINS = "https://shithead.pages.dev,http://localhost:5173"

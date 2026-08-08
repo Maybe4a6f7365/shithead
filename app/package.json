@@ -1,34 +1,45 @@
 {
-  "name": "shithead",
+  "name": "shithead-game",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Shithead — the classic shedding card game. PWA + multiplayer.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "worker:dev": "wrangler dev --local",
+    "worker:deploy": "wrangler deploy",
+    "worker:tail": "wrangler tail",
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@xstate/react": "^5.0.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.11.17",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "xstate": "^5.18.2",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241112.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
+    "@vitest/coverage-v8": "^2.1.4",
     "autoprefixer": "^10.5.4",
     "postcss": "^8.5.26",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vite-plugin-pwa": "^0.21.1",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "wrangler": "^3.91.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
