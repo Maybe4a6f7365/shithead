@@ -137,3 +137,4 @@ Woodcut-inspired palette:
 ## 📜 License
 
 Apache 2.0 — see LICENSE.
+<!-- build trigger Sat Aug  8 03:25:44 PM UTC 2026 -->
