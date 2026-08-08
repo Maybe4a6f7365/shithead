@@ -1,32 +1,59 @@
-name: Deploy to Cloudflare Workers
+name: Multiplayer CI and Production Smoke
+
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 concurrency:
-  group: production-deploy
+  group: multiplayer-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
-  deploy:
+  verify:
+    name: Test and build
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npm test
-      - name: Typecheck Worker
-        run: npx tsc -p tsconfig.worker.json
+      - run: npm run typecheck:worker
       - run: npm run build
-      - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
+
+  production-smoke:
+    name: Verify deployed multiplayer
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ./app
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          workingDirectory: ./app
-          command: deploy
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Install WebSocket smoke-test client
+        run: npm install --no-save --no-package-lock ws@8
+      - name: Exercise production multiplayer end to end
+        run: node scripts/smoke-multiplayer.mjs
+        env:
+          BASE_URL: https://shithead.not4a6f7365.workers.dev
+          EXPECTED_COMMIT: ${{ github.sha }}
+          DEPLOYMENT_TIMEOUT_MS: '600000'
