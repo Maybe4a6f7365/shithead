@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shithead",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "app/src/worker/index.ts",
+  "assets": {
+    "directory": "./app/dist",
+    "binding": "ASSETS"
+  },
+  "build": {
+    "command": "cd app && npm install && npm run build"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOM",
+        "class_name": "Room"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["Room"]
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ALLOWED_ORIGINS": "https://shithead.pages.dev,https://shithead.not4a6f7365.workers.dev,http://localhost:5173"
+  }
+}
