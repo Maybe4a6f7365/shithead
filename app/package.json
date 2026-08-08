@@ -11,8 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "generate:build-meta": "node scripts/write-build-meta.mjs",
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "deploy:build": "npm run generate:build-meta && npm run typecheck:worker && npm run build",
     "worker:dev": "wrangler dev --local",
-    "worker:deploy": "wrangler deploy",
+    "worker:deploy": "npm run deploy:build && wrangler deploy",
     "worker:tail": "wrangler tail",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit"
