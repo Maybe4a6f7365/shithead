@@ -1,19 +1,21 @@
 # ============================================================================
-# Shithead — Cloudflare Workers configuration
-# Builds the PWA + deploys the Worker (Durable Object) + serves static assets
+# Shithead — Cloudflare Workers (root config for CF Git integration)
+# CF runs `npx wrangler deploy` from the REPO ROOT, so config goes here.
+# The build command installs deps + builds PWA into app/dist, then deploys
+# the Worker (which serves the static assets via the ASSETS binding).
 # ============================================================================
 name = "shithead"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
-main = "src/worker/index.ts"
+main = "app/src/worker/index.ts"
 
-# Build the PWA before deploying (Vite → ./dist)
+# Build the PWA before deploying
 [build]
-command = "npm install && npm run build"
+command = "cd app && npm install && npm run build"
 
-# Static assets (built PWA) — served from the Worker via ASSETS binding
+# Static assets (built PWA)
 [assets]
-directory = "./dist"
+directory = "./app/dist"
 binding = "ASSETS"
 
 # Durable Object for game rooms
