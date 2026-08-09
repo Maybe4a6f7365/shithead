@@ -141,13 +141,6 @@ function Imprint() {
         <p>This is not a production website or commercial service. It is a demo tool provided solely for internal fun.</p>
       </div>
 
-      <h3>Contact</h3>
-      <address>
-        <strong>Schalt-werk</strong><br />
-        Muffendorfer Straße 32<br />
-        53177 Bonn<br />
-        Deutschland
-      </address>
       <p>Represented by José Manuel Matas Villavicencio</p>
       <p>
         <a href="mailto:kontakt@schalt-werk.com">kontakt@schalt-werk.com</a><br />
