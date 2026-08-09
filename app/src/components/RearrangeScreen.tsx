@@ -61,14 +61,18 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
   }, [player.faceUp])
 
   return (
-    <div className="app-viewport rearrange-screen bg-felt text-cream flex flex-col table-select-none overflow-y-auto">
+    <div
+      className="app-viewport last-call-screen phase-screen phase-screen--rearrange rearrange-screen bg-felt text-cream flex flex-col table-select-none overflow-y-auto"
+      data-waiting={waitingForOthers ? 'true' : 'false'}
+      data-selection={selectedHand === null ? 'none' : 'hand'}
+    >
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
 
-      <header className="px-s4 pt-s2 text-center">
-        <div className="text-label font-bold tracking-label uppercase text-cream-dim">Rearrange phase</div>
-        <div className="font-display text-title font-semibold mt-s1">{player.name}</div>
-        <p className="text-feed text-cream-dim mt-s1 min-h-[18px]">
+      <header className="phase-header rearrange-header px-s4 pt-s2 text-center">
+        <div className="phase-header__kicker text-label font-bold tracking-label uppercase text-cream-dim">Final row · {player.name}</div>
+        <h1 className="phase-header__title font-display text-title font-semibold mt-s1">Choose your final three</h1>
+        <p className="phase-header__copy text-feed text-cream-dim mt-s1 min-h-[18px]" role="status">
           {waitingForOthers
             ? 'Waiting for the rest of the table…'
             : selectedHand !== null
@@ -77,7 +81,7 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
         </p>
       </header>
 
-      <main className="flex-1 flex flex-col justify-center min-h-0">
+      <main className="phase-main rearrange-main flex-1 flex flex-col justify-center min-h-0">
         <TableauWell
           faceUp={player.faceUp}
           faceDown={player.faceDown}
@@ -88,13 +92,13 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
         />
       </main>
 
-      <footer className="app-bottom-zone">
-        <div className="px-s4 min-h-[var(--actionbar-h)] flex items-center">
+      <footer className="app-bottom-zone phase-footer rearrange-footer">
+        <div className="phase-footer__actions px-s4 min-h-[var(--actionbar-h)] flex items-center">
           <button
             type="button"
             onClick={onReady}
             disabled={waitingForOthers}
-            className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase disabled:opacity-50"
+            className="phase-action phase-action--primary primary-action w-full px-s5 text-button font-bold tracking-button uppercase disabled:opacity-50"
           >
             {waitingForOthers ? 'Ready ✓' : 'Ready to play'}
           </button>

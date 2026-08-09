@@ -1,34 +1,34 @@
 // ============================================================================
-// Tailwind mirror of the midnight game palette in styles/index.css.
+// Tailwind mirror of the “Last Call” card-table palette in styles/index.css.
 // ============================================================================
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        felt: '#0b1120',
-        'felt-raised': '#17233a',
-        'felt-deep': '#070c17',
-        cream: '#f8fafc',
-        'cream-dim': 'rgba(226, 232, 240, 0.70)',
-        ink: '#0b1020',
-        'ink-soft': '#526075',
-        burgundy: '#d33656',
-        gold: '#f6b94b',
-        'gold-bright': '#4de0c4',
-        success: '#24c9ad',
-        danger: '#d33656',
-        'danger-bright': '#ff7b91',
-        'muted-felt': '#93a4ba',
-        online: '#43dfb9',
-        hairline: 'rgba(148, 163, 184, 0.18)',
-        scrim: 'rgba(3, 7, 18, 0.82)',
-        'card-edge': 'rgba(15, 23, 42, 0.13)',
-        'slot-dash': 'rgba(148, 163, 184, 0.42)',
-        joinable: 'rgba(77, 224, 196, 0.68)',
+        felt: '#173d2f',
+        'felt-raised': '#234b3a',
+        'felt-deep': '#0c2b21',
+        cream: '#f1e5c7',
+        'cream-dim': 'rgba(241, 229, 199, 0.74)',
+        ink: '#17241d',
+        'ink-soft': '#566158',
+        burgundy: '#b43c32',
+        gold: '#d0a64d',
+        'gold-bright': '#f1e5c7',
+        success: '#92b89a',
+        danger: '#b43c32',
+        'danger-bright': '#f08072',
+        'muted-felt': '#b7aa8e',
+        online: '#a7c8aa',
+        hairline: 'rgba(241, 229, 199, 0.20)',
+        scrim: 'rgba(6, 25, 18, 0.86)',
+        'card-edge': 'rgba(23, 36, 29, 0.20)',
+        'slot-dash': 'rgba(241, 229, 199, 0.36)',
+        joinable: 'rgba(208, 166, 77, 0.78)',
       },
       fontFamily: {
-        display: ['ui-sans-serif', 'system-ui', '-apple-system', '"Segoe UI"', 'sans-serif'],
+        display: ['Impact', 'Haettenschweiler', '"Arial Narrow Bold"', '"Arial Black"', 'sans-serif'],
         ui: ['ui-sans-serif', 'system-ui', '-apple-system', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
       },
       fontSize: {
@@ -53,8 +53,8 @@ export default {
         s5: '24px', s6: '32px', s7: '48px', s8: '64px',
       },
       borderRadius: {
-        well: '12px',
-        button: '14px',
+        well: '10px',
+        button: '8px',
       },
       transitionDuration: {
         'dur-1': '120ms',

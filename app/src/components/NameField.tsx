@@ -24,11 +24,11 @@ export function saveName(name: string): void {
 
 export function NameField({ id, label, value, onChange, placeholder = 'Your name', onDark }: NameFieldProps) {
   return (
-    <div>
+    <div className="name-field setup-field">
       <label
         htmlFor={id}
         className={clsx(
-          'block text-label font-bold tracking-label uppercase mb-s1',
+          'form-label block text-label font-bold tracking-label uppercase mb-s1',
           onDark ? 'text-cream-dim' : 'text-ink-soft',
         )}
       >
@@ -42,7 +42,7 @@ export function NameField({ id, label, value, onChange, placeholder = 'Your name
         maxLength={12}
         autoComplete="off"
         className={clsx(
-          'w-full min-h-[48px] px-s3 rounded-button text-body',
+          'modern-input player-name-input w-full min-h-[48px] px-s3 rounded-button text-body',
           onDark
             ? 'bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline'
             : 'bg-cream text-ink placeholder:text-ink-soft border border-card-edge',

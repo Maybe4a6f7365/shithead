@@ -366,7 +366,12 @@ export function TableScreen({
   // ---- Keyboard (§6.5): P play, U pick up, Esc clear ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return
+      const target = e.target
+      const editing = target instanceof Element && Boolean(target.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+      ))
+      if (editing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (document.querySelector('[aria-modal="true"], [role="menu"]')) return
       if (e.key === 'Escape') setSelection([])
       if ((e.key === 'b' || e.key === 'B') && canBurnIn) commitBurnIn()
       if (!viewerActive) return
@@ -385,19 +390,28 @@ export function TableScreen({
     : undefined
 
   return (
-    <div className="app-viewport game-screen bg-felt text-cream flex flex-col table-select-none">
+    <div
+      className="app-viewport last-call-screen game-screen bg-felt text-cream flex flex-col table-select-none"
+      data-game-phase={state.phase}
+      data-viewer-active={viewerActive ? 'true' : 'false'}
+      data-active-zone={zone ?? undefined}
+      data-selection-count={selection.length}
+    >
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
       <EmoteFeedback event={displayedEmote} playerName={emotePlayer} />
 
-      <div className="game-shell">
-      <header className="game-header">
-        <div className="game-topbar">
-          <div className="game-connection">{connectionBadge}</div>
-          <div className="game-turn-label" aria-live="polite">
+      <div className="game-shell table-shell">
+      <header className="game-header table-header">
+        <div className="game-topbar table-topbar">
+          <div className="game-connection table-connection">{connectionBadge}</div>
+          <div
+            className="game-turn-label table-turn-label"
+            data-my-turn={isViewerTurn && viewerActive ? 'true' : 'false'}
+          >
             <span>{isViewerTurn && viewerActive ? 'Your turn' : `${current?.name ?? 'Table'}'s turn`}</span>
           </div>
-          <div className="game-tools">
+          <div className="game-tools table-tools" aria-label="Table controls">
             <EmoteButton onSend={sendEmote} />
             <QuietMenu
               onOpenRules={onOpenRules}
@@ -412,7 +426,9 @@ export function TableScreen({
       </header>
 
       <main
-        className="game-center"
+        className="game-center table-playfield"
+        aria-label="Play area"
+        data-empty-pile={ps === 0 ? 'true' : 'false'}
         onClick={() => { setSelection([]); setPickupArmed(false) }}
       >
         <PileArea
@@ -423,7 +439,7 @@ export function TableScreen({
           burning={burning}
           teachHint={ps === 0 && viewerActive}
         />
-        <div className="game-feed">
+        <div className="game-feed table-feed">
           <ActionFeed text={feed.text} feedKey={feed.key} tone={feed.tone} />
         </div>
       </main>
@@ -442,8 +458,12 @@ export function TableScreen({
       />
 
       {/* Z4 — ActionBar + hand fan, flush to safe-area bottom */}
-      <footer className="app-bottom-zone game-footer">
-        <div onClick={e => e.stopPropagation()}>
+      <footer
+        className="app-bottom-zone game-footer table-hand-zone"
+        data-hand-count={viewer.hand.length}
+        data-active-zone={zone ?? undefined}
+      >
+        <div className="table-hand-zone__inner" onClick={e => e.stopPropagation()}>
           {(viewerActive || canBurnIn) && (
             <ActionBar
               selectionCount={selection.length}

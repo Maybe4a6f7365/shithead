@@ -55,38 +55,40 @@ export function LegalSheet({ kind, open, onClose }: LegalSheetProps) {
 
   const title = kind === 'privacy' ? 'Privacy' : 'Impressum'
   return (
-    <div className="legal-scrim fixed inset-0 z-scrim bg-scrim flex items-end sm:items-center justify-center p-s3 sm:p-s4" role="presentation" onMouseDown={event => {
+    <div className="sheet-scrim legal-scrim fixed inset-0 z-scrim bg-scrim flex items-end sm:items-center justify-center p-s3 sm:p-s4" role="presentation" data-sheet={kind} onMouseDown={event => {
       if (event.target === event.currentTarget) onClose()
     }}>
       <section
         ref={dialog}
-        className="legal-sheet surface-panel w-full max-w-[520px] max-h-[min(86dvh,720px)] overflow-y-auto bg-cream text-ink rounded-[24px] p-s5"
+        className="sheet-panel legal-sheet surface-panel w-full max-w-[520px] max-h-[min(86dvh,720px)] overflow-y-auto bg-cream text-ink rounded-[24px] p-s5"
         role="dialog"
         aria-modal="true"
         aria-labelledby={`legal-${kind}-title`}
       >
-        <div className="flex items-start justify-between gap-s3">
+        <header className="sheet-header legal-sheet__header flex items-start justify-between gap-s3">
           <div>
-            <p className="text-label font-bold tracking-label uppercase text-ink-soft">Shithead demo</p>
-            <h2 id={`legal-${kind}-title`} className="font-display text-title font-semibold mt-s1">{title}</h2>
+            <p className="sheet-kicker text-label font-bold tracking-label uppercase text-ink-soft">Shithead demo</p>
+            <h2 id={`legal-${kind}-title`} className="sheet-title font-display text-title font-semibold mt-s1">{title}</h2>
           </div>
           <button
             ref={closeButton}
             type="button"
             onClick={onClose}
-            className="legal-close"
+            className="sheet-close legal-close"
             aria-label={`Close ${title}`}
           >
             <span aria-hidden="true">×</span>
           </button>
-        </div>
+        </header>
 
-        {kind === 'privacy' ? <PrivacyNotice /> : <Imprint />}
+        <div className="sheet-body legal-sheet__body">
+          {kind === 'privacy' ? <PrivacyNotice /> : <Imprint />}
+        </div>
 
         <button
           type="button"
           onClick={onClose}
-          className="primary-action mt-s5 w-full px-s5 text-button font-bold tracking-button uppercase"
+          className="sheet-action phase-action phase-action--primary primary-action mt-s5 w-full px-s5 text-button font-bold tracking-button uppercase"
         >
           Close
         </button>

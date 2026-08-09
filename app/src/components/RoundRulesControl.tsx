@@ -35,30 +35,35 @@ export function RoundRulesControl({
 
   const options: Array<{
     key: 'includeJokers' | 'winnerSwapsFaceUp'
+    modifier: string
     title: string
     description: string
   }> = [
     {
       key: 'includeJokers',
+      modifier: 'jokers',
       title: 'Jokers',
       description: 'Add both Jokers to the deck.',
     },
     {
       key: 'winnerSwapsFaceUp',
+      modifier: 'winner-exchange',
       title: 'Winner exchange',
       description: 'Next round, the winner may swap one of their three face-up final cards with one face-up final card belonging to the last-place player.',
     },
   ]
 
   return (
-    <fieldset className={`${compact ? 'round-rules round-rules--compact' : 'round-rules'} ${tone === 'paper' ? 'round-rules--paper' : ''}`}>
-      <legend className={`text-label font-bold tracking-label uppercase ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>{label}</legend>
-      <div className="mt-s2 flex flex-col">
-        <div className="round-rule-row">
-          <span className="min-w-0 pr-s3">
-            <span className={`block text-body font-semibold ${tone === 'paper' ? 'text-ink' : 'text-cream'}`}>Decks</span>
+    <fieldset className={`${compact ? 'round-rules round-rules--compact' : 'round-rules'} ${tone === 'paper' ? 'round-rules--paper' : 'round-rules--felt'} ${editable ? 'round-rules--editable' : 'round-rules--locked'}`}>
+      <legend className={`round-rules__legend text-label font-bold tracking-label uppercase ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>
+        <span aria-hidden="true">♣</span> {label}
+      </legend>
+      <div className="round-rules__list mt-s2 flex flex-col">
+        <div className="round-rule-row round-rule-row--decks">
+          <span className="round-rule-row__content min-w-0 pr-s3">
+            <span className={`round-rule-row__title block text-body font-semibold ${tone === 'paper' ? 'text-ink' : 'text-cream'}`}>Decks</span>
             {!compact && (
-              <span className={`block text-small mt-s1 ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>
+              <span className={`round-rule-row__description block text-small mt-s1 ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>
                 Use more decks for a longer round. Equal-rank burns still work the same.
               </span>
             )}
@@ -84,10 +89,10 @@ export function RoundRulesControl({
         {options.map(option => {
           const checked = rules[option.key]
           return (
-            <label key={option.key} className="round-rule-row">
-              <span className="min-w-0 pr-s3">
-                <span className={`block text-body font-semibold ${tone === 'paper' ? 'text-ink' : 'text-cream'}`}>{option.title}</span>
-                {!compact && <span className={`block text-small mt-s1 ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>{option.description}</span>}
+            <label key={option.key} className={`round-rule-row round-rule-row--${option.modifier}`}>
+              <span className="round-rule-row__content min-w-0 pr-s3">
+                <span className={`round-rule-row__title block text-body font-semibold ${tone === 'paper' ? 'text-ink' : 'text-cream'}`}>{option.title}</span>
+                {!compact && <span className={`round-rule-row__description block text-small mt-s1 ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>{option.description}</span>}
               </span>
               <input
                 type="checkbox"
@@ -103,7 +108,7 @@ export function RoundRulesControl({
         })}
       </div>
       {!editable && !compact && (
-        <p className={`text-small mt-s2 ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>Only the host can change these rules.</p>
+        <p className={`round-rules__note text-small mt-s2 ${tone === 'paper' ? 'text-ink-soft' : 'text-cream-dim'}`}>Only the host can change these rules.</p>
       )}
     </fieldset>
   )

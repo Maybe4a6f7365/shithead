@@ -39,11 +39,15 @@ export const OpponentSeat = memo(function OpponentSeat({ seat, active }: { seat:
         seat.offline && 'opponent-seat--offline',
         player.isOut && 'opponent-seat--out',
       )}
+      data-active={active ? 'true' : 'false'}
+      data-offline={seat.offline ? 'true' : 'false'}
+      data-out={player.isOut ? 'true' : 'false'}
+      data-hand-count={seat.handCount}
       aria-label={`${player.name}: ${seat.handCount} in hand, ${seat.faceUp.length} face up, ${seat.faceDownCount} face down${active ? ', their turn' : ''}${seat.offline ? ', offline' : ''}${player.isOut ? ', out' : ''}`}
     >
       <span
         className={clsx(
-          'text-feed font-medium truncate max-w-full',
+          'opponent-seat__name text-feed font-medium truncate max-w-full',
           active ? 'text-gold-bright' : 'text-cream-dim',
           player.isOut && 'line-through',
         )}
@@ -51,7 +55,7 @@ export const OpponentSeat = memo(function OpponentSeat({ seat, active }: { seat:
         {name}
       </span>
       <div className="opponent-seat__cards">
-        <div className="opponent-hand-count" role="img" aria-label={`${seat.handCount} cards in hand`}>
+        <div className="opponent-hand-count" role="img" aria-label={`${seat.handCount} cards in hand`} data-count={seat.handCount}>
           <span className="absolute inset-0 flex items-center justify-center text-micro font-semibold text-cream" aria-hidden="true">
             {seat.handCount}
           </span>
@@ -87,11 +91,11 @@ export const OpponentSeat = memo(function OpponentSeat({ seat, active }: { seat:
         </div>
       </div>
       {seat.offline ? (
-        <span className="text-micro font-semibold tracking-micro text-danger-bright">offline</span>
+        <span className="opponent-seat__status text-micro font-semibold tracking-micro text-danger-bright">offline</span>
       ) : (
         <span
           aria-hidden="true"
-          className={clsx('w-6 h-[2px] rounded-full', active ? 'bg-gold-bright' : 'bg-transparent')}
+          className={clsx('opponent-seat__turn-marker w-6 h-[2px] rounded-full', active ? 'bg-gold-bright' : 'bg-transparent')}
         />
       )}
     </div>
@@ -109,9 +113,10 @@ export function OpponentStrip({ seats, activeSeatId }: OpponentStripProps) {
       className="opponent-strip"
       role="list"
       aria-label="Opponents"
+      data-seat-count={seats.length}
     >
       {seats.map(s => (
-        <div role="listitem" key={s.player.id}>
+        <div className="opponent-strip__item" role="listitem" key={s.player.id}>
           <OpponentSeat seat={s} active={s.player.id === activeSeatId} />
         </div>
       ))}

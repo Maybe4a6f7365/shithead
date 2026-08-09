@@ -103,6 +103,7 @@ function CardInner({ card, faceDown, state = 'rest', size = 'full', onActivate, 
         style={style}
         onClick={onActivate}
         aria-label={label}
+        aria-pressed={state === 'selected'}
       >
         {body}
       </button>

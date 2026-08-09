@@ -47,22 +47,27 @@ export function TributeScreen({ winner, loser, viewerId, onSwap, onSkip, error }
   }
 
   return (
-    <div className="app-viewport tribute-screen bg-felt text-cream table-select-none overflow-y-auto">
+    <div
+      className="app-viewport last-call-screen phase-screen phase-screen--tribute tribute-screen bg-felt text-cream table-select-none overflow-y-auto"
+      data-role={canChoose ? 'winner' : 'observer'}
+      data-submitting={submitting ? 'true' : 'false'}
+      data-selection-complete={winnerCardId && loserCardId ? 'true' : 'false'}
+    >
       <CardDefs />
-      <main className="w-full max-w-[560px] min-h-full mx-auto px-s4 py-s5 flex flex-col">
-        <header className="text-center">
-          <div className="text-label font-bold tracking-label uppercase text-cream-dim">Winner exchange</div>
-          <h1 className="font-display text-title font-semibold mt-s1">
+      <main className="phase-main tribute-main w-full max-w-[560px] min-h-full mx-auto px-s4 py-s5 flex flex-col">
+        <header className="phase-header tribute-header text-center">
+          <div className="phase-header__kicker text-label font-bold tracking-label uppercase text-cream-dim">Winner's privilege</div>
+          <h1 className="phase-header__title font-display text-title font-semibold mt-s1">
             {canChoose ? 'Choose two face-up cards' : `${winner.name} is choosing`}
           </h1>
-          <p className="text-feed text-cream-dim mt-s2">
+          <p className="phase-header__copy text-feed text-cream-dim mt-s2">
             {canChoose
               ? `Swap one of your final cards with one of ${loser.name}'s, or keep both rows as they are.`
               : `Only ${winner.name}, the previous winner, may make this optional exchange.`}
           </p>
         </header>
 
-        <div className="flex-1 flex flex-col justify-center gap-s5 py-s5">
+        <div className="tribute-choices flex-1 flex flex-col justify-center gap-s5 py-s5">
           <TributeRow
             title={`${winner.name}'s final cards`}
             player={winner}
@@ -81,14 +86,14 @@ export function TributeScreen({ winner, loser, viewerId, onSwap, onSkip, error }
           />
         </div>
 
-        {error && <p role="alert" className="text-small text-danger-bright text-center mb-s2">{error} You can try again.</p>}
+        {error && <p role="alert" className="phase-error tribute-error text-small text-danger-bright text-center mb-s2">{error} You can try again.</p>}
         {canChoose ? (
-          <footer className="app-bottom-zone flex gap-s2">
+          <footer className="app-bottom-zone phase-footer tribute-footer flex gap-s2">
             <button
               type="button"
               disabled={submitting}
               onClick={() => submit(onSkip)}
-              className="flex-1 min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-cream/80 disabled:opacity-50"
+              className="phase-action phase-action--quiet flex-1 min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-cream/80 disabled:opacity-50"
             >
               Keep cards
             </button>
@@ -96,13 +101,13 @@ export function TributeScreen({ winner, loser, viewerId, onSwap, onSkip, error }
               type="button"
               disabled={!winnerCardId || !loserCardId || submitting}
               onClick={swap}
-              className="primary-action flex-1 px-s3 text-button font-bold tracking-button uppercase disabled:opacity-45"
+              className="phase-action phase-action--primary primary-action flex-1 px-s3 text-button font-bold tracking-button uppercase disabled:opacity-45"
             >
               {submitting ? 'Exchanging…' : 'Exchange'}
             </button>
           </footer>
         ) : (
-          <p className="app-bottom-zone min-h-[48px] flex items-center justify-center text-body text-cream-dim">Waiting for the winner…</p>
+          <p className="app-bottom-zone phase-footer phase-footer--waiting min-h-[48px] flex items-center justify-center text-body text-cream-dim" role="status">Waiting for the winner…</p>
         )}
       </main>
     </div>
@@ -120,13 +125,13 @@ function TributeRow({
   hint: string
 }) {
   return (
-    <section aria-label={title}>
-      <h2 className="text-label font-bold tracking-label uppercase text-cream-dim text-center mb-s2">{title}</h2>
+    <section className="tribute-choice" aria-label={title} data-selected={selectedId ? 'true' : 'false'}>
+      <h2 className="tribute-choice__title text-label font-bold tracking-label uppercase text-cream-dim text-center mb-s2">{title}</h2>
       <div className="tribute-row flex justify-center gap-s2 overflow-x-auto px-s2 pt-s3">
         {player.faceUp.map((card, index) => {
           const state: CardVisualState = selectedId === card.id ? 'selected' : disabled ? 'rest' : 'playable'
           return (
-            <div key={card.id} className="shrink-0 pb-s4">
+            <div key={card.id} className="tribute-card shrink-0 pb-s4" data-selected={selectedId === card.id ? 'true' : 'false'}>
               <Card
                 card={card}
                 state={state}

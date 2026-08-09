@@ -106,39 +106,48 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
   }
 
   return (
-    <div className="app-viewport bg-felt text-cream flex flex-col">
-      <main className="waiting-room-main screen-content flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5 flex flex-col justify-start">
-        <div className="room-code-panel text-center mb-s5">
-          {heading && <h1 className="font-display text-title font-semibold mb-s3">{heading}</h1>}
-          <div className="text-label font-bold tracking-label uppercase text-cream-dim">Room code</div>
-          <div className="font-display text-code font-semibold tracking-code text-cream mt-s1" aria-label={`Room code ${room.code.split('').join(' ')}`}>
+    <div className="app-viewport pregame-screen pregame-screen--waiting bg-felt text-cream flex flex-col">
+      <main className="waiting-room-main screen-content pregame-shell flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5 flex flex-col justify-start">
+        <header className="pregame-header waiting-room-header">
+          <p className="pregame-kicker">
+            <span aria-hidden="true">♠</span> Private table
+          </p>
+          <h1 className="pregame-title font-display text-title font-semibold">{heading ?? 'Waiting room'}</h1>
+          <p className="pregame-intro text-body text-cream-dim">Share the code and get everyone to the table.</p>
+        </header>
+
+        <section className="room-code-ticket room-code-panel text-center" aria-labelledby="room-code-label">
+          <span className="room-code-ticket__pip room-code-ticket__pip--left" aria-hidden="true" />
+          <span className="room-code-ticket__pip room-code-ticket__pip--right" aria-hidden="true" />
+          <div id="room-code-label" className="room-code-ticket__label text-label font-bold tracking-label uppercase text-cream-dim">Room code</div>
+          <div className="room-code-ticket__code font-display text-code font-semibold tracking-code text-cream mt-s1" aria-label={`Room code ${room.code.split('').join(' ')}`}>
             {room.code}
           </div>
-          <div className="flex justify-center gap-s2 mt-s2">
+          <div className="room-code-ticket__actions flex justify-center gap-s2 mt-s2">
             <button
               type="button"
               onClick={copy}
-              className="min-h-[44px] min-w-[88px] px-s4 text-label font-bold tracking-label uppercase text-cream/80"
+              className="room-code-action min-h-[44px] min-w-[88px] px-s4 text-label font-bold tracking-label uppercase text-cream/80"
             >
-              Copy code
+              <span aria-hidden="true">♣</span> Copy code
             </button>
             <button
               type="button"
               onClick={invite}
-              className="min-h-[44px] min-w-[88px] px-s4 text-label font-bold tracking-label uppercase text-cream/80"
+              className="room-code-action room-code-action--invite min-h-[44px] min-w-[88px] px-s4 text-label font-bold tracking-label uppercase text-cream/80"
             >
-              Invite
+              Invite <span aria-hidden="true">↗</span>
             </button>
           </div>
           <p
-            className={`min-h-[20px] mt-s1 text-small ${shareStatus?.failed ? 'text-danger-bright' : 'text-gold-bright'}`}
+            className={`room-code-ticket__status min-h-[20px] mt-s1 text-small ${shareStatus?.failed ? 'text-danger-bright' : 'text-gold-bright'}`}
             role={shareStatus?.failed ? 'alert' : 'status'}
             aria-live={shareStatus?.failed ? 'assertive' : 'polite'}
           >
             {shareStatus?.message ?? ''}
           </p>
           {shareStatus?.failed && (
-            <label className="block mt-s2 text-left text-label font-bold tracking-label uppercase text-cream-dim">
+            <label className="room-code-ticket__fallback block mt-s2 text-left text-label font-bold tracking-label uppercase text-cream-dim">
               Invite link
               <input
                 readOnly
@@ -148,38 +157,48 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
               />
             </label>
           )}
-        </div>
+        </section>
 
-        <div role="list" aria-label="Players in room">
-          {room.players.map(p => (
-            <div key={p.id} role="listitem" className="flex items-center justify-between py-s3 border-t border-hairline">
-              <span className="text-body font-semibold text-cream">
-                {p.name}{p.id === myPlayerId ? ' (you)' : ''}
-              </span>
-              <span
-                className={clsx(
-                  'text-micro font-semibold tracking-micro',
-                  p.id === room.hostId && p.connected ? 'text-gold-bright' : p.connected ? 'text-muted-felt' : 'text-danger-bright',
-                )}
-              >
-                {p.id === room.hostId ? `host${p.connected ? '' : ' · offline'}` : p.connected ? 'online' : 'offline'}
-              </span>
+        <section className="pregame-section waiting-room-seats" aria-labelledby="waiting-seats-title">
+          <div className="pregame-section__heading">
+            <div>
+              <p className="pregame-section__kicker text-label font-bold tracking-label uppercase text-cream-dim">At the table</p>
+              <h2 id="waiting-seats-title" className="pregame-section__title font-display text-body font-semibold">Players</h2>
             </div>
-          ))}
-        </div>
-        <p className="text-small text-cream-dim mt-s2 mb-s5">
-          {room.players.length} of {room.maxPlayers} players
-        </p>
+            <span className="seat-count text-small text-cream-dim" aria-label={`${room.players.length} of ${room.maxPlayers} seats filled`}>
+              {room.players.length}/{room.maxPlayers}
+            </span>
+          </div>
+          <ul className="waiting-seat-list" aria-label="Players in room">
+            {room.players.map(p => (
+              <li key={p.id} className="waiting-seat flex items-center justify-between py-s3 border-t border-hairline">
+                <span className="waiting-seat__name text-body font-semibold text-cream">
+                  {p.name}{p.id === myPlayerId ? ' (you)' : ''}
+                </span>
+                <span
+                  className={clsx(
+                    'waiting-seat__status text-micro font-semibold tracking-micro',
+                    p.id === room.hostId && p.connected ? 'text-gold-bright' : p.connected ? 'text-muted-felt' : 'text-danger-bright',
+                  )}
+                >
+                  {p.id === room.hostId ? `host${p.connected ? '' : ' · offline'}` : p.connected ? 'online' : 'offline'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
 
-        <RoundRulesControl
-          rules={room.rules ?? DEFAULT_GAME_RULES}
-          editable={isHost}
-          onChange={onRulesChange}
-        />
+        <section className="pregame-section waiting-room-rules" aria-label="House rules">
+          <RoundRulesControl
+            rules={room.rules ?? DEFAULT_GAME_RULES}
+            editable={isHost}
+            onChange={onRulesChange}
+          />
+        </section>
 
         {isHost ? (
-          <div className="mt-s5">
-            <p className="text-feed text-cream-dim mb-s2">You are the host.</p>
+          <div className="waiting-room-action waiting-room-action--host mt-s5">
+            <p className="waiting-room-action__status text-feed text-cream-dim mb-s2"><span aria-hidden="true">♦</span> You are the host.</p>
             <button
               type="button"
               onClick={start}
@@ -187,10 +206,10 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
             >
               Start game
             </button>
-            {startHint && <p role="alert" className="mt-s2 text-small text-danger-bright">{startHint}</p>}
+            {startHint && <p role="alert" className="waiting-room-action__hint mt-s2 text-small text-danger-bright">{startHint}</p>}
           </div>
         ) : (
-          <p className="text-feed text-cream-dim mt-s5 mb-s2">
+          <p className="waiting-room-action waiting-room-action--guest text-feed text-cream-dim mt-s5 mb-s2" role="status">
             {hostOnline ? 'Waiting for the host to start…' : 'Waiting for the host to reconnect…'}
           </p>
         )}
@@ -198,7 +217,7 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
         <button
           type="button"
           onClick={onLeave}
-          className="mt-s4 w-full min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-cream/80"
+          className="leave-room-action mt-s4 w-full min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-cream/80"
         >
           Leave
         </button>

@@ -115,7 +115,7 @@ describe('quiet menu keyboard navigation', () => {
     fireEvent.click(trigger)
     expect(screen.getByRole('menuitem', { name: 'Rules' })).toBe(document.activeElement)
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' })
-    expect(screen.getByRole('menuitem', { name: 'Sound: on' })).toBe(document.activeElement)
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Sound: on' })).toBe(document.activeElement)
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     expect(trigger).toBe(document.activeElement)

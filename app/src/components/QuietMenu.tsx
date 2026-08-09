@@ -19,6 +19,16 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
   const ref = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
 
+  const openRules = () => {
+    // RulesSheet captures the currently focused element so it can restore it
+    // on close. Move focus to the persistent trigger before the menu item is
+    // unmounted and before the sheet opens.
+    trigger.current?.focus()
+    setOpen(false)
+    setConfirmingLeave(false)
+    onOpenRules()
+  }
+
   useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent) => {
@@ -38,12 +48,12 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
 
   useEffect(() => {
     if (!open) return
-    ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"], [role="menuitemcheckbox"]')?.focus()
   }, [open])
 
   const moveMenuFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
-    const items = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
+    const items = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"], [role="menuitemcheckbox"]') ?? [])
     if (items.length === 0) return
     event.preventDefault()
     const current = items.indexOf(document.activeElement as HTMLButtonElement)
@@ -55,44 +65,52 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div
+      ref={ref}
+      className="quiet-menu relative"
+      data-open={open ? 'true' : 'false'}
+      data-confirming-leave={confirmingLeave ? 'true' : 'false'}
+    >
       <button
         ref={trigger}
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="icon-button"
+        className="quiet-menu__trigger icon-button"
         aria-label="Menu"
       >
-        <span aria-hidden="true" className="text-xl leading-none tracking-[0.08em]">•••</span>
+        <span aria-hidden="true" className="quiet-menu__glyph text-xl leading-none tracking-[0.08em]">•••</span>
       </button>
       {open && (
         <div
           role="menu"
           onKeyDown={moveMenuFocus}
-          className="surface-panel absolute right-0 top-full z-sheet min-w-[190px] bg-felt-deep rounded-button py-s1 overflow-hidden"
+          className="quiet-menu__popover surface-panel absolute right-0 top-full z-sheet min-w-[190px] bg-felt-deep rounded-button py-s1 overflow-hidden"
         >
           <button
             type="button" role="menuitem"
-            onClick={() => { setOpen(false); onOpenRules() }}
-            className="w-full text-left px-s4 min-h-[44px] text-body text-cream"
+            onClick={openRules}
+            className="quiet-menu__item w-full text-left px-s4 min-h-[44px] text-body text-cream"
           >
             Rules
           </button>
           <button
-            type="button" role="menuitem"
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={soundOn}
             onClick={onToggleSound}
-            className="w-full text-left px-s4 min-h-[44px] text-body text-cream"
+            className="quiet-menu__item quiet-menu__item--sound w-full text-left px-s4 min-h-[44px] text-body text-cream"
           >
             Sound: {soundOn ? 'on' : 'off'}
           </button>
-          <div className="h-px bg-hairline mx-s4" aria-hidden="true" />
+          <div className="quiet-menu__divider h-px bg-hairline mx-s4" aria-hidden="true" />
           <button
             type="button"
             role="menuitem"
             onClick={() => (confirmingLeave ? onLeave() : matchRunning ? setConfirmingLeave(true) : onLeave())}
-            className={`w-full text-left px-s4 min-h-[44px] text-body ${confirmingLeave ? 'font-semibold text-danger-bright' : 'text-cream'}`}
+            className={`quiet-menu__item quiet-menu__item--leave w-full text-left px-s4 min-h-[44px] text-body ${confirmingLeave ? 'font-semibold text-danger-bright' : 'text-cream'}`}
+            data-confirming={confirmingLeave ? 'true' : 'false'}
           >
             {confirmingLeave ? 'Leave the game?' : 'Leave'}
           </button>

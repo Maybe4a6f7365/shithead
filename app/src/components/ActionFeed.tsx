@@ -16,7 +16,12 @@ export interface ActionFeedProps {
 export function ActionFeed({ text, feedKey, tone = 'normal' }: ActionFeedProps) {
   const reduceMotion = useReducedMotion()
   return (
-    <div className="h-[24px] flex items-center justify-center overflow-hidden" aria-hidden="true">
+    <div
+      className="action-feed h-[24px] flex items-center justify-center overflow-hidden"
+      data-tone={tone}
+      data-empty={text ? 'false' : 'true'}
+      aria-hidden="true"
+    >
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={feedKey}
@@ -25,7 +30,7 @@ export function ActionFeed({ text, feedKey, tone = 'normal' }: ActionFeedProps) 
           exit={{ opacity: 0 }}
           transition={{ duration: reduceMotion ? 0.15 : 0.2 }}
           className={clsx(
-            'text-feed font-medium truncate max-w-full px-s4',
+            'action-feed__message text-feed font-medium truncate max-w-full px-s4',
             tone === 'turn' && 'text-gold-bright',
             tone === 'error' && 'text-danger-bright',
             tone === 'normal' && 'text-cream-dim',

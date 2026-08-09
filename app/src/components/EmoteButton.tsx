@@ -57,17 +57,17 @@ export function EmoteButton({ onSend }: EmoteButtonProps) {
   }
 
   return (
-    <div className="emote-control" ref={root}>
+    <div className="emote-control" ref={root} data-open={open ? 'true' : 'false'}>
       <button
         ref={trigger}
         type="button"
-        className="icon-button"
+        className="emote-control__trigger icon-button"
         onClick={() => setOpen(value => !value)}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="Send an emote"
       >
-        <span aria-hidden="true">🙂</span>
+        <span className="emote-control__glyph" aria-hidden="true">🙂</span>
       </button>
       <AnimatePresence>
         {open && (
@@ -87,6 +87,7 @@ export function EmoteButton({ onSend }: EmoteButtonProps) {
                 type="button"
                 role="menuitem"
                 className="emote-picker__item"
+                data-emote={id}
                 aria-label={EMOTES[id].label}
                 onClick={() => {
                   onSend(id)
@@ -118,7 +119,7 @@ export function EmoteFeedback({ event, playerName }: { event: EmoteEvent | null;
   return (
     <AnimatePresence>
       {event && visible && (
-        <div className="emote-feedback-layer">
+        <div className="emote-feedback-layer" data-emote={event.emote}>
           <motion.div
             className="emote-feedback"
             role="status"

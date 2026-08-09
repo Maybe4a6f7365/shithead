@@ -30,7 +30,11 @@ export function TableauWell({
     <div
       className="tableau-well mx-s4"
       style={{ scrollbarWidth: 'none' }}
+      role="group"
       aria-label="Your tableau"
+      data-size={size}
+      data-empty={stackCount === 0 ? 'true' : 'false'}
+      data-interactive={onActivateFaceUp || onActivateFaceDown ? 'true' : 'false'}
     >
       <div className="tableau-stacks" data-size={fullSize ? 'full' : 'mini'}>
         {Array.from({ length: stackCount }).map((_, index) => {
@@ -41,6 +45,8 @@ export function TableauWell({
               key={`${hidden?.id ?? 'empty'}:${shown?.id ?? 'empty'}:${index}`}
               className="tableau-stack"
               data-tableau-stack={index + 1}
+              data-face-up={shown ? 'true' : 'false'}
+              data-face-down={hidden ? 'true' : 'false'}
             >
               {hidden && (
                 <div className="tableau-stack__down">
@@ -69,7 +75,7 @@ export function TableauWell({
         })}
       </div>
       {stackCount === 0 && (
-        <span className="text-small text-cream-dim self-center">Tableau clear</span>
+        <span className="tableau-well__empty text-small text-cream-dim self-center">Final row clear</span>
       )}
     </div>
   )

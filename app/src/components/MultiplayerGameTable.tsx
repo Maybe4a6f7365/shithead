@@ -5,7 +5,7 @@
 // TableScreen as single-player (§9 convergence): face-down endgame cards,
 // masked stock (count only), BLIND_REVEAL via the log, seq-guarded states.
 // ============================================================================
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useMultiplayerRoom } from '../net/useMultiplayerRoom'
 import { ConnectionBadge, type BadgeStatus } from './ConnectionBadge'
 import { WaitingRoom } from './WaitingRoom'
@@ -14,6 +14,15 @@ import { TableScreen } from './TableScreen'
 import { GameOverOverlay } from './GameOverOverlay'
 import { RulesSheet } from './RulesSheet'
 import { TributeScreen } from './TributeScreen'
+
+const focusableSelector = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
 
 export interface MultiplayerGameTableProps {
   roomId: string
@@ -110,27 +119,28 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
 
   if (status === 'idle' || status === 'connecting' || status === 'offline' || !room || !playerId) {
     return (
-      <div className="app-viewport bg-felt text-cream flex flex-col p-s4">
-        <div>{badge}</div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center">
+      <div className="app-viewport last-call-screen connection-screen bg-felt text-cream flex flex-col p-s4" data-status={status}>
+        <div className="connection-screen__badge">{badge}</div>
+        <main className="connection-screen__body flex-1 flex flex-col items-center justify-center text-center">
           {status === 'offline' ? (
             <>
-              <h1 className="font-display text-title font-semibold">Connection lost</h1>
-              <p className="text-body text-cream-dim mt-s2">The room went quiet. Your seat is kept for a while.</p>
-              <div className="mt-s5 flex flex-col gap-s2 w-full max-w-[280px]">
+              <p className="connection-screen__kicker text-label font-bold tracking-label uppercase text-cream-dim">Table paused</p>
+              <h1 className="connection-screen__title font-display text-title font-semibold">Connection lost</h1>
+              <p className="connection-screen__copy text-body text-cream-dim mt-s2">The room went quiet. Your seat is kept for a while.</p>
+              <div className="connection-screen__actions mt-s5 flex flex-col gap-s2 w-full max-w-[280px]">
                 <PrimaryBtn onClick={retry}>Retry</PrimaryBtn>
                 <GhostBtn onClick={quit}>Menu · seat kept</GhostBtn>
               </div>
             </>
           ) : (
             <>
-              <p className="text-body text-cream-dim">Joining room…</p>
-              <div className="mt-s5 w-full max-w-[280px]">
+              <p className="connection-screen__copy text-body text-cream-dim" role="status">Joining room…</p>
+              <div className="connection-screen__actions mt-s5 w-full max-w-[280px]">
                 <GhostBtn onClick={quit}>Cancel</GhostBtn>
               </div>
             </>
           )}
-        </div>
+        </main>
       </div>
     )
   }
@@ -150,11 +160,11 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
 
   if (!gameState) {
     return (
-      <div className="app-viewport bg-felt text-cream flex flex-col p-s4">
-        <div>{badge}</div>
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-body text-cream-dim">Dealing…</p>
-        </div>
+      <div className="app-viewport last-call-screen connection-screen bg-felt text-cream flex flex-col p-s4" data-status="dealing">
+        <div className="connection-screen__badge">{badge}</div>
+        <main className="connection-screen__body flex-1 flex items-center justify-center">
+          <p className="connection-screen__copy text-body text-cream-dim" role="status">Dealing…</p>
+        </main>
       </div>
     )
   }
@@ -263,13 +273,59 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
 
 // ---------- shared bits ----------
 
-function StatePanel({ title, copy, actions }: { title: string; copy: string; actions: React.ReactNode }) {
+export function StatePanel({ title, copy, actions }: { title: string; copy: string; actions: React.ReactNode }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  const copyId = useId()
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+
+    ;(focusables()[0] ?? dialog).focus()
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const items = focusables()
+      if (items.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', trapFocus)
+    return () => {
+      document.removeEventListener('keydown', trapFocus)
+      if (previouslyFocused?.isConnected) previouslyFocused.focus()
+    }
+  }, [])
+
   return (
-    <div className="fixed inset-0 z-scrim bg-scrim flex items-center justify-center p-s4" role="alertdialog" aria-label={title}>
-      <div className="w-full max-w-[320px] bg-cream text-ink rounded-button p-s5 text-center">
-        <h1 className="font-display text-title font-semibold">{title}</h1>
-        <p className="text-body text-ink-soft mt-s2">{copy}</p>
-        <div className="mt-s5 flex flex-col gap-s2">{actions}</div>
+    <div
+      ref={dialogRef}
+      className="phase-overlay state-panel-overlay fixed inset-0 z-scrim bg-scrim flex items-center justify-center p-s4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={copyId}
+      tabIndex={-1}
+    >
+      <div className="phase-card state-panel w-full max-w-[320px] bg-cream text-ink rounded-button p-s5 text-center">
+        <p className="phase-card__kicker state-panel__kicker text-label font-bold tracking-label uppercase text-ink-soft">Table notice</p>
+        <h1 id={titleId} className="phase-card__title state-panel__title font-display text-title font-semibold">{title}</h1>
+        <p id={copyId} className="phase-card__copy state-panel__copy text-body text-ink-soft mt-s2">{copy}</p>
+        <div className="phase-card__actions state-panel__actions mt-s5 flex flex-col gap-s2">{actions}</div>
       </div>
     </div>
   )
@@ -280,7 +336,7 @@ function PrimaryBtn({ onClick, children }: { onClick: () => void; children: Reac
     <button
       type="button"
       onClick={onClick}
-      className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+      className="phase-action phase-action--primary primary-action w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
     >
       {children}
     </button>
@@ -292,7 +348,7 @@ function GhostBtn({ onClick, children }: { onClick: () => void; children: React.
     <button
       type="button"
       onClick={onClick}
-      className="w-full min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-burgundy"
+      className="phase-action phase-action--quiet w-full min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-burgundy"
     >
       {children}
     </button>

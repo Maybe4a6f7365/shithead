@@ -37,33 +37,56 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="app-viewport bg-felt text-cream flex flex-col">
-      <main className="screen-content flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5">
-        <button
-          type="button"
-          onClick={onBack}
-          className="min-h-[44px] text-label font-bold tracking-label uppercase text-cream-dim mb-s4"
-        >
-          ← Menu
-        </button>
-        <h1 className="font-display text-title font-semibold mb-s4">Pass &amp; play</h1>
+    <div className="app-viewport pregame-screen pregame-screen--offline bg-felt text-cream flex flex-col">
+      <main className="screen-content pregame-shell hot-seat-lobby flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5">
+        <header className="pregame-header">
+          <button
+            type="button"
+            onClick={onBack}
+            className="pregame-back min-h-[44px] text-label font-bold tracking-label uppercase text-cream-dim"
+          >
+            <span aria-hidden="true">←</span> Menu
+          </button>
+          <p className="pregame-kicker">
+            <span aria-hidden="true">♦</span> Same phone
+          </p>
+          <h1 className="pregame-title font-display text-title font-semibold">Play offline</h1>
+          <p className="pregame-intro text-body text-cream-dim">Set the seats, agree the house rules, then deal.</p>
+        </header>
 
-        <RoundRulesControl
-          rules={rules}
-          editable
-          onChange={patch => setRules(current => ({ ...current, ...patch }))}
-        />
+        <section className="pregame-section pregame-section--rules" aria-labelledby="offline-rules-title">
+          <h2 id="offline-rules-title" className="pregame-section__title font-display text-body font-semibold">
+            House rules
+          </h2>
+          <RoundRulesControl
+            rules={rules}
+            editable
+            label="Round rules"
+            onChange={patch => setRules(current => ({ ...current, ...patch }))}
+          />
+        </section>
 
-        <div className="flex flex-col gap-s4 mt-s5">
-          {players.map((p, i) => (
-            <div key={i} className="surface-panel player-config flex flex-col gap-s2">
-              <div className="flex items-end gap-s2">
-                <div className="flex-1">
+        <section className="pregame-section pregame-section--seats" aria-labelledby="seats-title">
+          <div className="pregame-section__heading">
+            <div>
+              <p className="pregame-section__kicker text-label font-bold tracking-label uppercase text-cream-dim">At the table</p>
+              <h2 id="seats-title" className="pregame-section__title font-display text-body font-semibold">Seats</h2>
+            </div>
+            <span className="seat-count text-small text-cream-dim" aria-label={`${players.length} of 5 seats filled`}>
+              {players.length}/5
+            </span>
+          </div>
+
+          <ol className="seat-list flex flex-col gap-s4">
+            {players.map((p, i) => (
+              <li key={i} className="setup-card seat-card surface-panel player-config flex flex-col gap-s2">
+              <div className="seat-card__identity flex items-end gap-s2">
+                <div className="setup-field flex-1">
                   <label
                     htmlFor={`player-${i}`}
-                    className="block text-label font-bold tracking-label uppercase text-cream-dim mb-s1"
+                    className="form-label block text-label font-bold tracking-label uppercase text-cream-dim mb-s1"
                   >
-                    Player {i + 1}
+                    Seat {i + 1}
                   </label>
                   <input
                     id={`player-${i}`}
@@ -72,23 +95,23 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
                     placeholder={`Player ${i + 1}`}
                     maxLength={12}
                     autoComplete="off"
-                    className="modern-input w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body"
+                    className="modern-input player-name-input w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body"
                   />
                 </div>
                 {players.length > 2 && (
                   <button
                     type="button"
                     onClick={() => setPlayers(ps => ps.filter((_, j) => j !== i))}
-                    aria-label={`Remove player ${i + 1}`}
-                    className="min-w-[44px] min-h-[48px] text-body text-cream-dim"
+                    aria-label={`Remove seat ${i + 1}`}
+                    className="seat-card__remove min-w-[44px] min-h-[48px] text-body text-cream-dim"
                   >
-                    ✕
+                    <span aria-hidden="true">×</span>
                   </button>
                 )}
               </div>
 
               {/* HUMAN / AI segmented — text-based, never color-only */}
-              <div className="flex rounded-button overflow-hidden border border-hairline" role="group" aria-label={`Player ${i + 1} type`}>
+              <div className="seat-card__type segmented-control flex rounded-button overflow-hidden border border-hairline" role="group" aria-label={`Seat ${i + 1} player type`}>
                 {(['HUMAN', 'AI'] as const).map(t => {
                   const active = p.isAI === (t === 'AI')
                   return (
@@ -98,7 +121,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
                       aria-pressed={active}
                       onClick={() => update(i, { isAI: t === 'AI', difficulty: t === 'AI' ? (p.difficulty ?? 'medium') : undefined })}
                       className={clsx(
-                        'flex-1 min-h-[44px] text-label tracking-label uppercase',
+                        'segmented-control__option flex-1 min-h-[44px] text-label tracking-label uppercase',
                         active ? 'bg-burgundy text-cream font-bold' : 'text-cream-dim',
                       )}
                     >
@@ -109,7 +132,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
               </div>
 
               {p.isAI && (
-                <div className="flex rounded-button overflow-hidden border border-hairline" role="group" aria-label={`Player ${i + 1} difficulty`}>
+                <div className="seat-card__difficulty segmented-control flex rounded-button overflow-hidden border border-hairline" role="group" aria-label={`Seat ${i + 1} AI difficulty`}>
                   {DIFFICULTIES.map(d => {
                     const active = p.difficulty === d
                     return (
@@ -119,7 +142,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
                         aria-pressed={active}
                         onClick={() => update(i, { difficulty: d })}
                         className={clsx(
-                          'flex-1 min-h-[44px] text-label tracking-label uppercase',
+                          'segmented-control__option flex-1 min-h-[44px] text-label tracking-label uppercase',
                           active ? 'bg-burgundy text-cream font-bold' : 'text-cream-dim',
                         )}
                       >
@@ -129,28 +152,29 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
                   })}
                 </div>
               )}
-            </div>
-          ))}
-        </div>
+              </li>
+            ))}
+          </ol>
 
-        {players.length < 5 && (
-          <button
-            type="button"
-            onClick={() => setPlayers(ps => [...ps, { name: '', isAI: true, difficulty: 'medium' }])}
-            className="mt-s4 w-full min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-cream/80"
-          >
-            + Add player
-          </button>
-        )}
+          {players.length < 5 && (
+            <button
+              type="button"
+              onClick={() => setPlayers(ps => [...ps, { name: '', isAI: true, difficulty: 'medium' }])}
+              className="add-seat-action w-full min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-cream/80"
+            >
+              <span aria-hidden="true">+</span> Add a seat
+            </button>
+          )}
+        </section>
       </main>
 
-      <footer className="app-bottom-zone px-s4 pt-s2 w-full max-w-[400px] mx-auto">
+      <footer className="app-bottom-zone pregame-action-bar px-s4 pt-s2 w-full max-w-[440px] mx-auto">
         <button
           type="button"
           onClick={deal}
-          className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase"
+          className="primary-action deal-action w-full px-s5 text-button font-bold tracking-button uppercase"
         >
-          Deal
+          Deal cards
         </button>
       </footer>
     </div>

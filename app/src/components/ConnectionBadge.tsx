@@ -1,9 +1,8 @@
 // ============================================================================
-// ConnectionBadge — top-left, 8px dot + micro label, ≥44x32 target (§4.6).
+// ConnectionBadge — top-left, 8px dot + persistent micro label, ≥44px action target.
 // Color is always paired with text. When the client has GIVEN UP, the whole
 // badge becomes the retry button — never a dead "reconnecting…" forever.
 // ============================================================================
-import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 
 export type BadgeStatus =
@@ -17,14 +16,6 @@ export interface ConnectionBadgeProps {
 }
 
 export function ConnectionBadge({ status, attempt = 0, maxAttempts = 5, onRetry }: ConnectionBadgeProps) {
-  // "online" label fades out after 2s, dot stays (§4.6).
-  const [labelGone, setLabelGone] = useState(false)
-  useEffect(() => {
-    if (status !== 'connected') { setLabelGone(false); return }
-    const t = setTimeout(() => setLabelGone(true), 2000)
-    return () => clearTimeout(t)
-  }, [status])
-
   // "back" holds 1.5s then the parent flips us to connected.
   const dot = {
     connecting: 'bg-gold-bright badge-pulse',
@@ -42,11 +33,10 @@ export function ConnectionBadge({ status, attempt = 0, maxAttempts = 5, onRetry 
     offline: 'offline — retry',
   }[status]
 
-  const showLabel = !(status === 'connected' && labelGone)
   const content = (
     <>
-      <span className={clsx('inline-block w-2 h-2 rounded-full shrink-0', dot)} aria-hidden="true" />
-      {showLabel && <span className="text-micro font-semibold tracking-micro text-cream-dim whitespace-nowrap">{label}</span>}
+      <span className={clsx('connection-badge__dot inline-block w-2 h-2 rounded-full shrink-0', dot)} aria-hidden="true" />
+      <span className="connection-badge__label text-micro font-semibold tracking-micro text-cream-dim whitespace-nowrap">{label}</span>
     </>
   )
 
@@ -55,7 +45,8 @@ export function ConnectionBadge({ status, attempt = 0, maxAttempts = 5, onRetry 
       <button
         type="button"
         onClick={onRetry}
-        className="flex items-center gap-s2 min-h-[32px] min-w-[44px] px-s2 -mx-s2"
+        className="connection-badge connection-badge--action flex items-center gap-s2 min-h-[44px] min-w-[44px] px-s2 -mx-s2"
+        data-status={status}
         aria-label="Connection offline. Retry."
       >
         {content}
@@ -63,7 +54,12 @@ export function ConnectionBadge({ status, attempt = 0, maxAttempts = 5, onRetry 
     )
   }
   return (
-    <div className="flex items-center gap-s2 min-h-[32px] min-w-[44px]" role="status" aria-label={`Connection: ${label}`}>
+    <div
+      className="connection-badge flex items-center gap-s2 min-h-[44px] min-w-[44px]"
+      data-status={status}
+      role="status"
+      aria-label={`Connection: ${label}`}
+    >
       {content}
     </div>
   )

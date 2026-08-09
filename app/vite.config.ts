@@ -16,8 +16,8 @@ export default defineConfig({
         name: 'Shithead',
         short_name: 'Shithead',
         description: 'The classic shedding card game',
-        theme_color: '#0b1120',
-        background_color: '#0b1120',
+        theme_color: '#173d2f',
+        background_color: '#0c2b21',
         display: 'standalone',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },

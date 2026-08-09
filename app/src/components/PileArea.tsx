@@ -11,16 +11,22 @@ import { Card } from './Card'
 
 export function StockPile({ count }: { count: number }) {
   return (
-    <div className="pile-column flex flex-col items-center gap-s1">
-      {count > 0 ? (
-        <Card faceDown />
-      ) : (
-        <div className="pile-slot" aria-label="Stock empty">
-          <span className="text-micro font-semibold tracking-micro">STOCK</span>
-        </div>
-      )}
+    <div
+      className="pile-column pile-column--stock stock-pile flex flex-col items-center gap-s1"
+      data-empty={count === 0 ? 'true' : 'false'}
+      data-low={count > 0 && count <= 5 ? 'true' : 'false'}
+    >
+      <div className="pile-card pile-card--stock">
+        {count > 0 ? (
+          <Card faceDown />
+        ) : (
+          <div className="pile-slot pile-slot--stock" aria-label="Stock empty">
+            <span className="pile-slot__label text-micro font-semibold tracking-micro">STOCK</span>
+          </div>
+        )}
+      </div>
       <span
-        className={clsx('text-micro font-semibold tracking-micro', count <= 5 ? 'text-danger-bright' : 'text-muted-felt')}
+        className={clsx('pile-count pile-count--stock text-micro font-semibold tracking-micro', count <= 5 ? 'text-danger-bright' : 'text-muted-felt')}
         aria-label={`${count} cards in stock`}
       >
         {count}
@@ -49,8 +55,13 @@ export function Wastepile({ top, underCount, effectiveRank, burning, teachHint }
     ? `Three copies ${effectiveRank ?? 'an open pile'}${underCount > 0 ? `; ${underCount} card${underCount === 1 ? '' : 's'} underneath` : ''}`
     : underCount > 0 ? `${underCount} card${underCount === 1 ? '' : 's'} underneath` : undefined
   return (
-    <div className="pile-column flex flex-col items-center gap-s1">
-      <div className="relative">
+    <div
+      className="pile-column pile-column--waste waste-pile flex flex-col items-center gap-s1"
+      data-empty={top ? 'false' : 'true'}
+      data-burning={burning ? 'true' : 'false'}
+      data-copies-rank={copiesRank ? 'true' : 'false'}
+    >
+      <div className="pile-card pile-card--waste relative">
         <AnimatePresence mode="popLayout" initial={false}>
           {burning ? (
             <motion.div
@@ -90,7 +101,7 @@ export function Wastepile({ top, underCount, effectiveRank, burning, teachHint }
         )}
       </div>
       <span
-        className="text-micro font-semibold tracking-micro text-cream-dim h-[16px] whitespace-nowrap"
+        className="pile-count pile-count--waste text-micro font-semibold tracking-micro text-cream-dim h-[16px] whitespace-nowrap"
         aria-hidden={!metaLabel}
         aria-label={metaLabel}
       >
@@ -102,11 +113,15 @@ export function Wastepile({ top, underCount, effectiveRank, burning, teachHint }
 
 function EmptySlot({ teachHint }: { teachHint?: boolean }) {
   return (
-    <div className="pile-slot" aria-label={teachHint ? 'Empty pile — any card may lead' : 'Empty pile'}>
+    <div
+      className="pile-slot pile-slot--waste"
+      data-teaching={teachHint ? 'true' : 'false'}
+      aria-label={teachHint ? 'Empty pile — any card may lead' : 'Empty pile'}
+    >
       {teachHint ? (
-        <span className="text-small text-cream-dim px-s1 text-center leading-tight">any card leads</span>
+        <span className="pile-slot__hint text-small text-cream-dim px-s1 text-center leading-tight">any card leads</span>
       ) : (
-        <span className="text-micro font-semibold tracking-micro">PILE</span>
+        <span className="pile-slot__label text-micro font-semibold tracking-micro">PILE</span>
       )}
     </div>
   )
@@ -123,7 +138,12 @@ export interface PileAreaProps {
 
 export function PileArea({ stockCount, top, pileCount, effectiveRank, burning, teachHint }: PileAreaProps) {
   return (
-    <div className="pile-area flex items-start justify-center gap-s4">
+    <section
+      className="pile-area flex items-start justify-center gap-s4"
+      aria-label="Stock and play pile"
+      data-pile-empty={pileCount === 0 ? 'true' : 'false'}
+      data-stock-empty={stockCount === 0 ? 'true' : 'false'}
+    >
       <StockPile count={stockCount} />
       <Wastepile
         top={top}
@@ -132,6 +152,6 @@ export function PileArea({ stockCount, top, pileCount, effectiveRank, burning, t
         burning={burning}
         teachHint={teachHint}
       />
-    </div>
+    </section>
   )
 }

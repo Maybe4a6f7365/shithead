@@ -3,7 +3,7 @@
 // one scrolling body column (§7.5). In-game it covers up to 70dvh and is
 // non-blocking in MP.
 // ============================================================================
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 
 const SECTIONS: Array<{ title: string; lines: string[] }> = [
@@ -56,49 +56,95 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
 
 export function RulesSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const reduceMotion = useReducedMotion()
+  const dialog = useRef<HTMLElement>(null)
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    returnFocus.current = document.activeElement as HTMLElement | null
+    closeButton.current?.focus()
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ) ?? []).filter(element => !element.hasAttribute('hidden'))
+      if (controls.length === 0) return
+
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      returnFocus.current?.focus()
+    }
+  }, [open])
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-scrim" role="dialog" aria-modal="true" aria-label="Rules">
+    <div className="sheet-scrim rules-scrim fixed inset-0 z-scrim" role="presentation">
       <button
         type="button"
         aria-label="Close rules"
         onClick={onClose}
-        className="absolute inset-0 w-full h-full bg-scrim cursor-default"
+        tabIndex={-1}
+        className="sheet-backdrop rules-backdrop absolute inset-0 w-full h-full bg-scrim cursor-default"
       />
-      <motion.div
+      <motion.section
+        ref={dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rules-sheet-title"
         initial={reduceMotion ? { opacity: 0 } : { y: '100%' }}
         animate={reduceMotion ? { opacity: 1 } : { y: 0 }}
         transition={reduceMotion ? { duration: 0.15 } : { duration: 0.26, ease: [0.2, 0.8, 0.2, 1] }}
-        className="absolute bottom-0 left-0 right-0 z-sheet bg-cream text-ink max-h-[70dvh] overflow-y-auto mx-auto max-w-[400px] p-s5 pb-s7"
+        className="sheet-panel rules-sheet absolute bottom-0 left-0 right-0 z-sheet bg-cream text-ink max-h-[70dvh] overflow-y-auto mx-auto max-w-[400px] p-s5 pb-s7"
         style={{ borderRadius: 'var(--radius-sheet)' }}
       >
-        <div className="flex items-center justify-between mb-s3">
-          <h2 className="font-display text-title font-semibold">Rules</h2>
+        <header className="sheet-header rules-sheet__header flex items-center justify-between mb-s3">
+          <div>
+            <p className="sheet-kicker text-label font-bold tracking-label uppercase text-ink-soft">Know the table</p>
+            <h2 id="rules-sheet-title" className="sheet-title font-display text-title font-semibold">Rules</h2>
+          </div>
           <button
+            ref={closeButton}
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="min-w-[44px] min-h-[44px] text-body text-ink-soft"
+            className="sheet-close rules-sheet__close min-w-[44px] min-h-[44px] text-body text-ink-soft"
           >
             ✕
           </button>
+        </header>
+        <div className="sheet-body rules-sheet__body">
+          {SECTIONS.map((s, sectionIndex) => (
+            <section key={s.title} className="rules-section mb-s4" data-section={sectionIndex + 1}>
+              <h3 className="rules-section__title text-label font-bold tracking-label uppercase text-burgundy mb-s1">{s.title}</h3>
+              <div className="rules-section__copy">
+                {s.lines.map((l, i) => (
+                  <p key={i} className="text-body text-ink">{l}</p>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
-        {SECTIONS.map(s => (
-          <section key={s.title} className="mb-s4">
-            <h3 className="text-label font-bold tracking-label uppercase text-burgundy mb-s1">{s.title}</h3>
-            {s.lines.map((l, i) => (
-              <p key={i} className="text-body text-ink">{l}</p>
-            ))}
-          </section>
-        ))}
-      </motion.div>
+      </motion.section>
     </div>
   )
 }
