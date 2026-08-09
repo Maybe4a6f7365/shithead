@@ -10,3 +10,4 @@ dist/
 app/node_modules/
 app/dist/
 app/.cache/
+.wrangler/

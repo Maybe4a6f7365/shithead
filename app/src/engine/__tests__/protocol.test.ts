@@ -2,8 +2,9 @@
 // Protocol tests — wire format + serialization (security-critical)
 // ============================================================================
 import { describe, it, expect } from 'vitest'
-import { initGame } from '../index'
-import { isClientMsg, serializeGameState, toPlayerSummary } from '../protocol'
+import { initGame, seededRng, MAX_LOG_ENTRIES } from '../index'
+import { isClientMsg, serializeGameState, toPlayerSummary, PROTOCOL_VERSION } from '../protocol'
+import { mkState, c } from './helpers'
 
 describe('isClientMsg', () => {
   it('accepts valid message types and resume payloads', () => {
@@ -20,6 +21,7 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'JOIN_ROOM', code: 'bad', playerName: 'X' })).toBe(false)
     expect(isClientMsg({ type: 'RESUME_ROOM', playerId: '' })).toBe(false)
     expect(isClientMsg({ type: 'PLAY', cards: [] })).toBe(false)
+    expect(isClientMsg({ type: 'PLAY', cards: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }] })).toBe(false)
     expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(201) })).toBe(false)
     expect(isClientMsg({ type: 'NOPE' })).toBe(false)
     expect(isClientMsg({})).toBe(false)
@@ -27,48 +29,106 @@ describe('isClientMsg', () => {
     expect(isClientMsg('string')).toBe(false)
     expect(isClientMsg(42)).toBe(false)
   })
+
+  it('rejects duplicate card ids in PLAY (duplication exploit)', () => {
+    expect(isClientMsg({ type: 'PLAY', cards: [{ id: 'x' }, { id: 'x' }] })).toBe(false)
+    expect(isClientMsg({ type: 'PLAY', cards: [{ id: 'x' }, { id: 'y' }] })).toBe(true)
+  })
+
+  it('enforces protocol version when present (backwards-compatible when absent)', () => {
+    expect(isClientMsg({ type: 'PING', version: PROTOCOL_VERSION })).toBe(true)
+    expect(isClientMsg({ type: 'PING', version: PROTOCOL_VERSION + 1 })).toBe(false)
+    expect(isClientMsg({ type: 'PING', version: 1 })).toBe(false)
+    expect(isClientMsg({ type: 'PLAY', cards: [{ id: 'x' }], version: PROTOCOL_VERSION })).toBe(true)
+  })
 })
 
 describe('serializeGameState (security)', () => {
-  it('hides opponent hands while preserving card IDs and counts', () => {
-    const state = initGame({
-      players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
-      rng: () => 0,
-    })
+  const deal = () => initGame({
+    players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
+    rng: seededRng(21),
+  })
+
+  it('hides opponent hands: placeholder ids, no rank/suit, no real id leakage', () => {
+    const state = deal()
     const original = state.players.find(p => p.id === 'opponent')!
     const serialized = serializeGameState(state, 'viewer')
     const opponent = serialized.players.find(p => p.id === 'opponent')!
 
     expect(opponent.hand).toHaveLength(original.hand.length)
-    expect(opponent.hand[0].id).toBe(original.hand[0].id)
-    expect(opponent.hand[0].rank).toBe('3')
-    expect(opponent.hand[0].suit).toBe(null)
+    for (let i = 0; i < opponent.hand.length; i++) {
+      const masked = opponent.hand[i]
+      expect(masked.suit).toBe(null)
+      // id must NOT be the real card id and must not encode anything
+      expect(original.hand.some(cd => cd.id === masked.id)).toBe(false)
+      expect(masked.id).not.toMatch(/[♠♥♦♣]|JOKER|\b(?:A|K|Q|J|10)\b/)
+    }
+    // no real opponent card id appears anywhere in the serialized payload
+    const payload = JSON.stringify(serialized)
+    for (const cd of [...original.hand, ...original.faceDown]) {
+      expect(payload).not.toContain(cd.id)
+    }
+  })
+
+  it('never sends stock identities: same length, placeholder cards only', () => {
+    const state = deal()
+    const serialized = serializeGameState(state, 'viewer')
+    expect(serialized.stock).toHaveLength(state.stock.length)
+    const payload = JSON.stringify(serialized.stock)
+    for (const cd of state.stock) {
+      expect(payload).not.toContain(cd.id)
+    }
+    expect(serialized.stock.every(cd => cd.suit === null)).toBe(true)
+    // draw order is unknowable: every placeholder looks identical except index
+    expect(new Set(serialized.stock.map(cd => cd.rank)).size).toBe(1)
   })
 
   it('hides every face-down card, including the viewers own blind cards', () => {
-    const state = initGame({
-      players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
-      rng: () => 0,
-    })
+    const state = deal()
     const serialized = serializeGameState(state, 'viewer')
-
     for (const player of serialized.players) {
       expect(player.faceDown).toHaveLength(3)
-      expect(player.faceDown.every(card => card.rank === '3' && card.suit === null)).toBe(true)
+      expect(player.faceDown.every(cd => cd.suit === null)).toBe(true)
     }
   })
 
   it('shows the viewers hand and every public face-up card', () => {
-    const state = initGame({
-      players: [{ id: 'viewer', name: 'Viewer' }, { id: 'opponent', name: 'Opponent' }],
-      rng: () => 0,
-    })
+    const state = deal()
     const serialized = serializeGameState(state, 'viewer')
     const viewer = serialized.players.find(p => p.id === 'viewer')!
     const opponent = serialized.players.find(p => p.id === 'opponent')!
-
     expect(viewer.hand).toEqual(state.players.find(p => p.id === 'viewer')!.hand)
     expect(opponent.faceUp).toEqual(state.players.find(p => p.id === 'opponent')!.faceUp)
+  })
+
+  it('reveals everything once the game is over (harmless, helps end screens)', () => {
+    const state = deal()
+    const over = { ...state, phase: 'gameOver' as const }
+    const serialized = serializeGameState(over, 'viewer')
+    expect(serialized.players.find(p => p.id === 'opponent')!.hand)
+      .toEqual(state.players.find(p => p.id === 'opponent')!.hand)
+  })
+
+  it('caps the log and preserves seq for replay detection', () => {
+    const big = Array.from({ length: MAX_LOG_ENTRIES + 10 }, () => ({ type: 'PICK_UP_PILE' as const, playerId: 'a' }))
+    const state = { ...mkState({ players: [{ id: 'a' }, { id: 'b' }], log: big }), seq: 17 }
+    const serialized = serializeGameState(state, 'a')
+    expect(serialized.log.length).toBe(MAX_LOG_ENTRIES)
+    expect(serialized.seq).toBe(17)
+  })
+
+  it('log never leaks hidden cards: crafted hidden card ids stay out of the payload', () => {
+    const secret = c('A', '♠', 'super-secret-stock-card')
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('5')] },
+        { id: 'b', hand: [c('6')], faceDown: [c('Q', '♦', 'b-hidden-down')] },
+      ],
+      stock: [secret],
+    })
+    const payload = JSON.stringify(serializeGameState(state, 'a'))
+    expect(payload).not.toContain('super-secret-stock-card')
+    expect(payload).not.toContain('b-hidden-down')
   })
 })
 
@@ -76,7 +136,7 @@ describe('toPlayerSummary', () => {
   it('produces lobby-safe summary (no card details)', () => {
     const state = initGame({
       players: [{ id: 'a', name: 'Alice' }, { id: 'b', name: 'Bob' }],
-      rng: () => 0,
+      rng: seededRng(4),
     })
     const p = state.players[0]
     const summary = toPlayerSummary(p, true)

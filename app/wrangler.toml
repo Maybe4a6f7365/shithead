@@ -1,3 +1,7 @@
+# Local-development copy for `wrangler dev` / `wrangler deploy` run from app/.
+# The repository-root wrangler.toml is authoritative: Cloudflare Workers Builds
+# deploys from the repo root with that file. Keep this file in sync with it —
+# only `main` and `[assets].directory` differ (paths relative to app/).
 name = "shithead"
 main = "src/worker/index.ts"
 compatibility_date = "2026-08-08"
@@ -5,7 +9,7 @@ compatibility_date = "2026-08-08"
 [assets]
 directory = "./dist"
 binding = "ASSETS"
-run_worker_first = ["/api/*"]
+run_worker_first = true
 
 [[durable_objects.bindings]]
 name = "ROOM"

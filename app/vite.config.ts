@@ -34,5 +34,10 @@ export default defineConfig({
     strictPort: false,
     allowedHosts: true, // allow ngrok tunnels
   },
-  build: { target: 'es2020', sourcemap: true }
+  build: {
+    target: 'es2020',
+    // Never ship source maps to production assets (they are publicly served).
+    // `vite dev` still serves sourcemaps during local development.
+    sourcemap: false
+  }
 })

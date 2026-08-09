@@ -1,8 +1,10 @@
 // ============================================================================
-// WebSocket client — typed wrapper for the multiplayer protocol
+// WebSocket client — typed wrapper for the multiplayer protocol.
+// Reconnect truthfulness (§4.6, Appendix A.10): the client reports every
+// attempt with a real counter, and when it gives up it says so — the UI can
+// then turn the badge into a retry button instead of lying "reconnecting…".
 // ============================================================================
 import type { ClientMsg, ServerMsg } from '../engine/protocol'
-import { isClientMsg } from '../engine/protocol'
 
 export interface RoomClientOptions {
   url: string                  // ws://... or wss://...
@@ -10,6 +12,10 @@ export interface RoomClientOptions {
   onOpen?: () => void
   onClose?: (event: CloseEvent) => void
   onError?: (err: Event) => void
+  /** Fired before each scheduled retry with the real attempt counter. */
+  onReconnecting?: (attempt: number, maxAttempts: number) => void
+  /** Fired once when all attempts are exhausted. Never reconnects after. */
+  onGiveUp?: () => void
   reconnectDelayMs?: number
   maxReconnectAttempts?: number
 }
@@ -19,6 +25,7 @@ export class RoomClient {
   private opts: Required<RoomClientOptions>
   private reconnectAttempts = 0
   private closed = false
+  private gaveUp = false
   private queue: ClientMsg[] = []
 
   constructor(opts: RoomClientOptions) {
@@ -28,13 +35,15 @@ export class RoomClient {
       onOpen: () => {},
       onClose: () => {},
       onError: () => {},
+      onReconnecting: () => {},
+      onGiveUp: () => {},
       ...opts,
     }
     this.connect()
   }
 
   private connect() {
-    if (this.closed) return
+    if (this.closed || this.gaveUp) return
     try {
       this.ws = new WebSocket(this.opts.url)
     } catch (err) {
@@ -57,7 +66,7 @@ export class RoomClient {
         if (typeof data === 'object' && data !== null && 'type' in data) {
           this.opts.onMessage(data as ServerMsg)
         }
-      } catch (e) {
+      } catch {
         // ignore parse errors
       }
     })
@@ -73,11 +82,28 @@ export class RoomClient {
   }
 
   private scheduleReconnect() {
-    if (this.closed) return
-    if (this.reconnectAttempts >= this.opts.maxReconnectAttempts) return
+    if (this.closed || this.gaveUp) return
+    if (this.reconnectAttempts >= this.opts.maxReconnectAttempts) {
+      this.gaveUp = true
+      this.opts.onGiveUp()
+      return
+    }
     this.reconnectAttempts++
+    this.opts.onReconnecting(this.reconnectAttempts, this.opts.maxReconnectAttempts)
     const delay = this.opts.reconnectDelayMs * Math.min(this.reconnectAttempts, 5)
     setTimeout(() => this.connect(), delay)
+  }
+
+  /** Manual retry after give-up (the badge-as-button path, §4.6). */
+  retry() {
+    if (this.closed) return
+    this.gaveUp = false
+    this.reconnectAttempts = 0
+    this.connect()
+  }
+
+  hasGivenUp(): boolean {
+    return this.gaveUp
   }
 
   send(msg: ClientMsg) {

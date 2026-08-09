@@ -26,7 +26,9 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            package-lock.json
       - run: npm ci
       - run: npm test
       - run: npm run typecheck:worker
@@ -47,7 +49,9 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            package-lock.json
       - run: npm ci
       - name: Install WebSocket smoke-test client
         run: npm install --no-save --no-package-lock ws@8

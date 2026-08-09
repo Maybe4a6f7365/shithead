@@ -2,6 +2,124 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   SHITHEAD — Design Tokens v1.0 (port of /design/TOKENS.css — DESIGN.md §10)
+   CSS custom properties are the runtime source of truth; tailwind.config.js
+   mirrors the same values for utility classes.
+   ========================================================================== */
+
+:root {
+  /* COLOR (§2.1) */
+  --color-felt:         #2d4a2b;
+  --color-felt-raised:  #345631;
+  --color-felt-deep:    #1f3a1e;
+  --color-cream:        #faf8f3;
+  --color-cream-dim:    rgba(250, 248, 243, 0.62);
+  --color-ink:          #221c15;
+  --color-ink-soft:     #5a5348;
+  --color-burgundy:     #a23a1e;
+  --color-gold:         #c8a35a;
+  --color-gold-bright:  #dcb878;
+  --color-success:      #3e6b38;
+  --color-danger:       #b3371f;
+  --color-danger-bright:#f0a08e;
+  --color-muted-felt:   #b8cbb2;
+  --color-online:       #8fae7f;
+  --color-hairline:     rgba(250, 248, 243, 0.14);
+  --color-scrim:        rgba(31, 58, 30, 0.78);
+  --color-card-edge:    rgba(34, 28, 21, 0.14);
+  --color-slot-dash:    rgba(250, 248, 243, 0.35);
+  --color-joinable:     rgba(220, 184, 120, 0.55);
+
+  /* TYPE (§2.2) */
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+             "Helvetica Neue", Arial, sans-serif;
+  --tracking-label: 0.09em;
+  --tracking-button: 0.06em;
+  --tracking-code: 0.22em;
+  --tracking-micro: 0.04em;
+
+  /* SPACING (§2.3) */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+  --screen-pad: var(--s4);
+  --zone-gap: var(--s5);
+
+  /* RADII (§10) — buttons are rectangles; pills are forbidden */
+  --radius-card: calc(var(--card-w) * 0.07);
+  --radius-well: 12px;
+  --radius-button: 8px;
+  --radius-sheet: 16px 16px 0 0;
+
+  /* CARD GEOMETRY (§2.5) */
+  --card-ratio: 5 / 7;
+  --card-w: clamp(56px, 21vw, 96px);
+  --card-mini-scale: 0.42;
+  --fan-step-min: 24px;
+  --fan-step-max: 28px;
+  --card-index-w: 0.24;
+  --card-rank-size: max(12px, calc(var(--card-w) * 0.21));
+  --card-suit-size: calc(var(--card-w) * 0.16);
+
+  /* CARD SHADOWS (§2.5) — the only shadows in the product */
+  --shadow-card-rest:     0 1px 2px rgba(20, 14, 8, 0.28);
+  --shadow-card-raised:   0 3px 6px rgba(20, 14, 8, 0.30);
+  --shadow-card-selected: 0 8px 16px rgba(20, 14, 8, 0.34);
+  --shadow-card-in-pile:  0 1px 1px rgba(20, 14, 8, 0.35);
+  --ring-playable: 0 0 0 2px var(--color-gold-bright);
+  --ring-selected: 0 0 0 2px var(--color-gold-bright);
+  --ring-joinable: 0 0 0 2px var(--color-joinable);
+  --ring-invalid:  0 0 0 2px var(--color-danger-bright);
+  --ring-focus:    0 0 0 2px var(--color-gold-bright);
+  --card-lift-playable: translateY(-4px);
+  --card-lift-selected: translateY(-14px);
+
+  /* MOTION (§5) */
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 260ms;
+  --dur-4: 400ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-settle:   cubic-bezier(0.34, 1.3, 0.4, 1);
+  --ease-linear:   linear;
+  --stagger-deal: 60ms;
+  --stagger-multi: 70ms;
+  --stagger-pickup: 50ms;
+
+  /* Z-SCALE (§10) */
+  --z-table: 0;
+  --z-pile: 10;
+  --z-hand: 20;
+  --z-selected: 30;
+  --z-sheet: 60;
+  --z-scrim: 90;
+  --z-overlay: 100;
+
+  /* TOUCH TARGETS (§6.4) */
+  --target-min: 44px;
+  --target-card-strip: 24px;
+  --actionbar-h: 48px;
+}
+
+/* Landscape / desktop: card width keys off viewport height (§3.4–3.5) */
+@media (orientation: landscape), (min-width: 768px) {
+  :root { --card-w: clamp(72px, 15vh, 120px); }
+}
+
+/* REDUCED MOTION (§5): transforms -> 150ms crossfades, loops stop */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 150ms; --dur-2: 150ms; --dur-3: 150ms; --dur-4: 150ms;
+    --stagger-deal: 0ms; --stagger-multi: 0ms; --stagger-pickup: 0ms;
+    --card-lift-playable: none;
+    --card-lift-selected: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   BASE
+   ------------------------------------------------------------------------ */
 @layer base {
   html, body, #root {
     height: 100%;
@@ -10,16 +128,182 @@
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
-    user-select: none;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-family: var(--font-ui);
   }
   body {
-    background: #2d4a2b;
+    background: var(--color-felt);
+    color: var(--color-cream);
     touch-action: manipulation;
   }
+  /* user-select:none is scoped to the table, never to inputs (§6.3) */
+  input, textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--ring-focus);
+    outline-offset: 2px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   VIEWPORT + SAFE AREA (§3.1) — replaces min-h-screen everywhere
+   ------------------------------------------------------------------------ */
+.app-viewport {
+  height: 100vh;              /* fallback */
+  height: 100svh;
+  height: 100dvh;
+  overflow: hidden;
+  padding-top:    env(safe-area-inset-top);
+  padding-left:   env(safe-area-inset-left);
+  padding-right:  env(safe-area-inset-right);
+}
+.app-bottom-zone {
+  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+}
+.table-select-none {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* --------------------------------------------------------------------------
+   CARD (§2.5 state recipe)
+   ------------------------------------------------------------------------ */
+.card {
+  --card-scale: 1;
+  position: relative;
+  width: var(--card-w);
+  aspect-ratio: var(--card-ratio);
+  border-radius: calc(var(--radius-card) * var(--card-scale));
+  box-shadow: var(--shadow-card-rest);
+  padding: 0;
+  border: none;
+  background: var(--color-cream);
+  transition:
+    transform  var(--dur-1) var(--ease-settle),
+    box-shadow var(--dur-1) var(--ease-standard),
+    opacity    var(--dur-1) var(--ease-standard),
+    filter     var(--dur-1) var(--ease-standard);
+}
+.card--mini {
+  --card-scale: var(--card-mini-scale);
+  width: calc(var(--card-w) * var(--card-mini-scale));
+}
+/* 1px inner hairline ring clipped to the radius */
+.card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: calc(var(--radius-card) * var(--card-scale));
+  box-shadow: inset 0 0 0 1px var(--color-card-edge);
+  pointer-events: none;
+}
+.card[data-state="playable"] {
+  transform: var(--card-lift-playable);
+  box-shadow: var(--shadow-card-raised), var(--ring-playable);
+  cursor: pointer;
+}
+.card[data-state="selected"] {
+  transform: var(--card-lift-selected);
+  box-shadow: var(--shadow-card-selected), var(--ring-selected);
+  z-index: var(--z-selected);
+}
+.card[data-state="joinable"] {
+  transform: var(--card-lift-playable);
+  box-shadow: var(--shadow-card-raised), var(--ring-joinable);
+  cursor: pointer;
+}
+.card[data-state="invalid"] {
+  box-shadow: var(--shadow-card-rest), var(--ring-invalid);
+  animation: card-shake 240ms linear;
+}
+.card[data-state="in-pile"] {
+  transform: rotate(var(--pile-tilt, 0deg));
+  box-shadow: var(--shadow-card-in-pile);
+}
+.card[data-state="disabled"] {
+  opacity: 0.55;
+  filter: saturate(0.55);
+}
+.card:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-card-rest), var(--ring-focus);
+  outline-offset: 2px;
+}
+.card[data-state="selected"]:focus-visible {
+  box-shadow: var(--shadow-card-selected), var(--ring-selected), var(--ring-focus);
+}
+
+@keyframes card-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card[data-state="invalid"] { animation: none; }  /* ring flash only */
+}
+
+/* Empty wastepile slot (§2.5) — dashed outline, never a face-down card */
+.pile-slot {
+  width: var(--card-w);
+  aspect-ratio: var(--card-ratio);
+  border-radius: var(--radius-card);
+  border: 1.5px dashed var(--color-slot-dash);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(250, 248, 243, 0.5);
+}
+
+/* --------------------------------------------------------------------------
+   Turn marker bar (§3.2) + connecting pulse (§4.6)
+   ------------------------------------------------------------------------ */
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.badge-pulse {
+  animation: badge-pulse 1.2s var(--ease-linear) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .badge-pulse { animation: none; }
+}
+
+/* Visually hidden (Announcer, §6.6) */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @layer utilities {
   .safe-top { padding-top: env(safe-area-inset-top); }
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* --------------------------------------------------------------------------
+   DESKTOP (≥768px, §3.5): the portrait column stretches to max 720px;
+   12px felt-deep flat rails frame the left/right viewport edges.
+   ------------------------------------------------------------------------ */
+@media (min-width: 768px) {
+  .app-viewport::before,
+  .app-viewport::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    background: var(--color-felt-deep);
+    z-index: var(--z-table);
+  }
+  .app-viewport::before { left: 0; }
+  .app-viewport::after { right: 0; }
 }
