@@ -636,7 +636,7 @@
     max-width: 920px;
     padding: 10px clamp(18px, 4vw, 36px) 6px;
     grid-template-columns: minmax(0, 0.9fr) minmax(270px, 1.1fr);
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto;
     column-gap: clamp(16px, 3vw, 32px);
     row-gap: 4px;
   }
