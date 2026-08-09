@@ -118,6 +118,16 @@ function expectedOpenerId(state) {
   return state.players.find(player => !player.isOut)?.id
 }
 
+// A rematch resets seq to zero, so an old queued GAME_STATE can otherwise
+// satisfy a broad `phase === play/tribute` predicate. Public face-up ids are
+// stable for one deal and give each rematch an unambiguous fingerprint.
+function faceUpSignature(state) {
+  return state.players
+    .map(player => `${player.id}:${player.faceUp.map(card => card.id).sort().join(',')}`)
+    .sort()
+    .join('|')
+}
+
 function effectiveTopRank(state) {
   for (let i = state.pile.length - 1; i >= 0; i--) {
     const entry = state.pile[i]
@@ -365,6 +375,7 @@ async function main() {
 
   // ---- T11b-e: finish real rounds to exercise blind aliases + tribute
   const peersById = new Map([[hostId, host], [guestId, guest]])
+  const seenDealSignatures = new Set([faceUpSignature(applied.state)])
   const firstFinished = await finishRound(peersById, applied.state)
   const round1 = firstFinished.state
   assert(firstFinished.blindPlays > 0, 'auto-play must have exercised opaque face-down ids')
@@ -373,15 +384,21 @@ async function main() {
 
   host.send({ type: 'START_GAME' })
   const [hostRematch, guestRematch] = await Promise.all([
-    host.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
-    guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
+    host.waitType('GAME_STATE', m => m.state.phase === 'rearrange'
+      && m.state.seq === 0
+      && !seenDealSignatures.has(faceUpSignature(m.state))),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange'
+      && m.state.seq === 0
+      && !seenDealSignatures.has(faceUpSignature(m.state))),
   ])
   assert.equal(hostRematch.state.rules.winnerSwapsFaceUp, true)
+  const rematchSignature = faceUpSignature(hostRematch.state)
+  seenDealSignatures.add(rematchSignature)
   host.send({ type: 'READY' })
   guest.send({ type: 'READY' })
   const [hostTribute, guestTribute] = await Promise.all([
-    host.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
-    guest.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
+    host.waitType('GAME_STATE', m => m.state.phase === 'tribute' && faceUpSignature(m.state) === rematchSignature),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'tribute' && faceUpSignature(m.state) === rematchSignature),
   ])
   assert.deepEqual(hostTribute.state.pendingTribute, { winnerId: round1.winnerId, loserId: round1.loserId })
 
@@ -390,9 +407,14 @@ async function main() {
   round1LoserPeer.send({ type: 'TRIBUTE_SKIP' })
   await round1LoserPeer.waitType('ERROR', isError('INVALID_MOVE'))
   round1WinnerPeer.send({ type: 'TRIBUTE_SKIP' })
+  const skippedRoundSignature = faceUpSignature(hostTribute.state)
   const [hostAfterSkip, guestAfterSkip] = await Promise.all([
-    host.waitType('GAME_STATE', m => m.state.phase === 'play' && m.state.seq > hostTribute.state.seq),
-    guest.waitType('GAME_STATE', m => m.state.phase === 'play' && m.state.seq > guestTribute.state.seq),
+    host.waitType('GAME_STATE', m => m.state.phase === 'play'
+      && m.state.seq > hostTribute.state.seq
+      && faceUpSignature(m.state) === skippedRoundSignature),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'play'
+      && m.state.seq > guestTribute.state.seq
+      && faceUpSignature(m.state) === skippedRoundSignature),
   ])
   assert.equal(
     hostAfterSkip.state.players[hostAfterSkip.state.currentPlayerIdx].id,
@@ -405,15 +427,21 @@ async function main() {
   const round2 = secondFinished.state
   assert(round2.winnerId && round2.loserId && round2.winnerId !== round2.loserId)
   host.send({ type: 'START_GAME' })
-  await Promise.all([
-    host.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
-    guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
+  const [hostRematch2] = await Promise.all([
+    host.waitType('GAME_STATE', m => m.state.phase === 'rearrange'
+      && m.state.seq === 0
+      && !seenDealSignatures.has(faceUpSignature(m.state))),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange'
+      && m.state.seq === 0
+      && !seenDealSignatures.has(faceUpSignature(m.state))),
   ])
+  const rematch2Signature = faceUpSignature(hostRematch2.state)
+  seenDealSignatures.add(rematch2Signature)
   host.send({ type: 'READY' })
   guest.send({ type: 'READY' })
   const [hostTribute2] = await Promise.all([
-    host.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
-    guest.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
+    host.waitType('GAME_STATE', m => m.state.phase === 'tribute' && faceUpSignature(m.state) === rematch2Signature),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'tribute' && faceUpSignature(m.state) === rematch2Signature),
   ])
   const pending2 = hostTribute2.state.pendingTribute
   assert.deepEqual(pending2, { winnerId: round2.winnerId, loserId: round2.loserId })
@@ -423,8 +451,12 @@ async function main() {
     type: 'TRIBUTE_SWAP', winnerCardId: winnerFaceUp.id, loserCardId: loserFaceUp.id,
   })
   const [afterSwap] = await Promise.all([
-    host.waitType('GAME_STATE', m => m.state.phase === 'play'),
-    guest.waitType('GAME_STATE', m => m.state.phase === 'play'),
+    host.waitType('GAME_STATE', m => m.state.phase === 'play'
+      && m.state.players.find(p => p.id === pending2.winnerId)?.faceUp.some(c => c.id === loserFaceUp.id)
+      && m.state.players.find(p => p.id === pending2.loserId)?.faceUp.some(c => c.id === winnerFaceUp.id)),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'play'
+      && m.state.players.find(p => p.id === pending2.winnerId)?.faceUp.some(c => c.id === loserFaceUp.id)
+      && m.state.players.find(p => p.id === pending2.loserId)?.faceUp.some(c => c.id === winnerFaceUp.id)),
   ])
   assert(afterSwap.state.players.find(p => p.id === pending2.winnerId).faceUp.some(c => c.id === loserFaceUp.id))
   assert(afterSwap.state.players.find(p => p.id === pending2.loserId).faceUp.some(c => c.id === winnerFaceUp.id))
