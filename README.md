@@ -480,9 +480,9 @@ The scrollport reserves clearance for selected-card lift, uses `overflow-x: auto
 
 This invariant is guarded by `largeHandRegression.test.tsx`, `handAndCard.test.tsx`, and `mobileViewportRegression.test.ts`.
 
-### “Last Call” visual system
+### “Last Call” visual system and quiet game table
 
-The interface uses a physical after-hours card-table direction across the landing screen, setup, waiting room, table, phase screens, sheets, pass gate, connection states, and game over.
+The interface uses a physical after-hours card-table direction across the landing screen, setup, waiting room, phase screens, sheets, pass gate, connection states, and game over. The live table uses a quieter modern layer built from the same palette: the felt is nearly monochrome, playing cards remain the highest-contrast objects, utility controls recede into the canvas, actions use sentence case, and status is communicated spatially instead of through dashboard panels.
 
 | Semantic token | Value |
 |---|---|
@@ -495,9 +495,11 @@ The interface uses a physical after-hours card-table direction across the landin
 | Muted gold | `#d0a64d` |
 | Online | `#a7c8aa` |
 
-Cards and card backs are CSS-rendered. The system uses solid felt, printed-paper surfaces, restrained suit color, hard physical offset shadows, stamped condensed system-font headings, small radii, and no external font dependency.
+Cards and card backs are CSS-rendered. The shared system uses solid felt, printed-paper surfaces, restrained suit color, small radii, and no external font dependency. Landing/setup surfaces retain harder physical shadows and stamped display type; the game table deliberately reduces those effects to quiet borders, dark felt popovers, system UI typography, and one clear visual hierarchy around the stock, pile, action row, and hand.
 
-Gameplay feedback is derived from the latest accepted action group, keyed by `GameState.seq` rather than log length. Burn feedback temporarily renders a snapshot containing the card that caused the clear and the full pre-clear pile count. Reset 2, mirror 3, low 7, stacked 8, 10/Joker, and cumulative four-plus actions receive one short table-stamp effect; reduced-motion mode collapses them to near-instant opacity changes. The turn header keeps a persistent, high-contrast `Your turn` stamp and triggers one polite announcement, optional 12 ms vibration, and the existing sound event hook.
+Gameplay feedback is derived from the latest accepted action group, keyed by `GameState.seq` rather than log length. Reset 2, mirror 3, low 7, and skip 8 use distinct card-local landing choreography; reset/mirror/low additionally leave a persistent rule chip beside the pile, and stacked 8s attach a count badge to the played card. A burn temporarily reconstructs the card that caused the clear plus the full pre-clear pile depth, compresses the physical stack, and sweeps it from the table over 520 ms. A small 1.8-second receipt is secondary confirmation rather than the primary animation.
+
+Turn ownership uses one shared Framer Motion layout marker. It relocates between the active opponent seat and the local hand rail without changing document flow or hand geometry; the header retains only quiet orientation text. On constrained portrait and landscape viewports the marker collapses to a three-pixel inlay. Reduced-motion mode removes spatial travel and converts special-card feedback to short opacity transitions; burn cleanup is shortened to 140 ms. Every turn still triggers one polite announcement, optional 12 ms vibration, and the existing sound event hook.
 
 ### Accessibility
 
@@ -631,12 +633,12 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **310 tests across 28 Vitest files**:
+At this revision, the default suite contains **318 tests across 29 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
 | Engine | 10 | Core rules, AI, decks, cumulative/interrupt burns, exact drawn-card follow-ups, tribute, masking, migrations, forfeit boundaries |
-| Components/UI | 14 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, gameplay feedback, tribute, sound cursor |
+| Components/UI | 15 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, gameplay feedback, tribute, sound cursor |
 | Network | 1 | Session validation, auth ordering, sequence guard, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
 | Root routing | 1 | Invite-link and hard-refresh resume routing |
