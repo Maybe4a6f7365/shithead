@@ -19,6 +19,7 @@ describe('Android visual viewport regression', () => {
 
     const appViewportRule = css.match(/\.app-viewport\s*\{([\s\S]*?)\}/)?.[1] ?? ''
     expect(appViewportRule).toContain('var(--app-viewport-height')
+    expect(appViewportRule).toContain('min(100dvh')
 
     // A pickup must not switch to a second geometry at 13 cards. The same
     // hand-fan row remains in place and only its horizontal width grows.
@@ -29,5 +30,10 @@ describe('Android visual viewport regression', () => {
     const handRule = css.match(/\.hand-fan\s*\{([\s\S]*?)\}/)?.[1] ?? ''
     expect(handRule).toContain('overscroll-behavior-x: contain')
     expect(handRule).toContain('touch-action: pan-x')
+    expect(handRule).toContain('--hand-card-height')
+    expect(handRule).toContain('height: calc(var(--hand-card-height)')
+    expect(handRule).toContain('overflow-x: auto')
+    expect(handRule).toContain('overflow-y: hidden')
+    expect(handFan).not.toContain('overflow-y-visible')
   })
 })

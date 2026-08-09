@@ -151,6 +151,11 @@
   height: 100vh;
   height: 100svh;
   height: var(--app-viewport-height, 100svh);
+  /* Use whichever source reports the smaller *visible* viewport. Some Android
+     builds over-report visualViewport while their bottom browser controls are
+     expanded; modern dynamic viewport units provide the second guard rail. */
+  height: min(100dvh, var(--app-viewport-height, 100dvh));
+  max-height: 100dvh;
   overflow: hidden;
   padding-top: env(safe-area-inset-top);
   padding-left: env(safe-area-inset-left);
@@ -170,7 +175,7 @@
   overflow-y: auto;
 }
 
-.app-bottom-zone { padding-bottom: max(env(safe-area-inset-bottom), 12px); }
+.app-bottom-zone { padding-bottom: max(env(safe-area-inset-bottom), 16px); }
 .table-select-none { user-select: none; -webkit-user-select: none; }
 
 /* Shared modern surfaces and controls. */
@@ -834,7 +839,15 @@
   padding-top: 4px;
 }
 .game-feed { margin-top: 4px; }
-.game-footer { flex: 0 0 auto; min-width: 0; min-height: 0; max-width: 100%; margin-top: 4px; }
+.game-footer {
+  position: relative;
+  z-index: var(--z-hand);
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  margin-top: 4px;
+}
 
 .opponent-strip {
   display: flex;
@@ -1089,15 +1102,33 @@
 /* The hand has one invariant geometry at every card count. Overflow only
    changes its horizontal scroll extent; it never changes card size/position. */
 .hand-fan {
+  --hand-top-space: 24px;
+  --hand-bottom-space: 16px;
+  --hand-card-height: calc(var(--card-w) * 1.4 + 9px);
+  /* A horizontal overflow container cannot have truly visible overflow on the
+     other axis: `overflow-y: visible` computes to `auto`. Reserve the complete
+     lifted-card box inside the scrollport instead, so no card edge or hit area
+     can be clipped. This height is invariant for every hand size. */
+  height: calc(var(--hand-card-height) + var(--hand-top-space) + var(--hand-bottom-space));
   min-width: 0;
   max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
   scroll-padding-inline: 16px;
   scroll-snap-type: x proximity;
   touch-action: pan-x;
 }
 .hand-fan::-webkit-scrollbar { display: none; }
-.hand-fan__row > div { line-height: 0; scroll-snap-align: start; }
+.hand-fan__row {
+  height: 100%;
+  padding-top: var(--hand-top-space) !important;
+}
+.hand-fan__row > div {
+  line-height: 0;
+  padding-bottom: var(--hand-bottom-space) !important;
+  scroll-snap-align: start;
+}
 .hand-fan .card { display: block; }
 
 /* Emotes */
@@ -1196,8 +1227,7 @@
   .opponent-seat > span:first-child { font-size: 11px; line-height: 14px; }
   .game-center { min-height: 82px; }
   .tableau-well { padding-block: 7px; }
-  .hand-fan__row { padding-top: 10px !important; }
-  .hand-fan__row > div:not(.card) { padding-bottom: 6px !important; }
+  .hand-fan { --hand-top-space: 10px; --hand-bottom-space: 6px; }
   .hand-fan .card[data-state="selected"] { transform: translateY(-5px) scale(1.015); }
   .action-bar { min-height: 48px; }
   .action-bar button { min-height: 44px; }
@@ -1235,8 +1265,7 @@
   .game-footer { margin-top: 0; }
   .action-bar { min-height: 44px; }
   .action-bar button { min-height: 44px; }
-  .hand-fan__row { padding-top: 5px !important; }
-  .hand-fan__row > div:not(.card) { padding-bottom: 4px !important; }
+  .hand-fan { --hand-top-space: 5px; --hand-bottom-space: 4px; }
   .hand-fan .card[data-state="selected"] { transform: translateY(-2px) scale(1.01); }
   .tribute-screen main { max-width: 760px; }
   .tribute-screen .tribute-row { padding-top: 8px; }

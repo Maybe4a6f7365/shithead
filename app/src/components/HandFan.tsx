@@ -73,7 +73,7 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
   return (
     <div
       ref={containerRef}
-      className="hand-fan w-full overflow-x-auto overflow-y-visible"
+      className="hand-fan w-full"
       style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
       role="group"
       aria-label={`Your hand, ${n} cards; scroll horizontally`}
@@ -81,7 +81,7 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
       onKeyDown={onKeyDown}
     >
       <div
-        className="hand-fan__row flex items-end justify-start px-s4 pt-s5"
+        className="hand-fan__row flex items-start justify-start px-s4"
         style={{ width: n > 0 && cardW > 0 ? cardW + step * (n - 1) + 32 : 'auto', margin: '0 auto', minWidth: 'fit-content' }}
       >
         {/* Hidden measuring card keeps W honest against the live CSS var. */}
