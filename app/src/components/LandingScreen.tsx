@@ -1,7 +1,3 @@
-// ============================================================================
-// LandingScreen — a compact, mobile-first game launcher. Mode descriptions
-// remain outside the buttons so their visible and accessible names stay terse.
-// ============================================================================
 import { useEffect, useRef, useState } from 'react'
 import { RulesSheet } from './RulesSheet'
 import { LegalSheet, type LegalSheetKind } from './LegalSheet'
@@ -13,8 +9,6 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
   const aboutDialogRef = useRef<HTMLDivElement>(null)
   const aboutCloseRef = useRef<HTMLButtonElement>(null)
   const aboutTriggerRef = useRef<HTMLButtonElement>(null)
-  const commit = document.querySelector('meta[name="build-commit"]')?.getAttribute('content')
-  const stamp = commit && commit !== 'local' ? commit.slice(0, 7) : 'v0.2.0'
 
   useEffect(() => {
     if (!aboutOpen) return
@@ -52,46 +46,26 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
   }, [aboutOpen])
 
   return (
-    <div className="app-viewport landing-screen bg-felt text-cream flex flex-col">
+    <div className="app-viewport landing-screen flex flex-col">
       <main className="landing-content">
-        <header className="landing-masthead">
-          <div className="landing-lockup">
-            <div className="brand-mark" aria-hidden="true">
-              <span className="brand-mark__back" />
-              <span className="brand-mark__front">S</span>
+        <section className="landing-brand" aria-labelledby="landing-title">
+          <div className="landing-brand__stage">
+            <div className="landing-deal" aria-hidden="true">
+              <span className="landing-dealt-card landing-dealt-card--back"><i>S</i></span>
+              <span className="landing-dealt-card landing-dealt-card--seven"><b>7</b><i>♣</i></span>
+              <span className="landing-dealt-card landing-dealt-card--ten"><b>10</b><i>♦</i></span>
             </div>
-            <div>
-              <span className="landing-lockup__name">Shithead</span>
-              <span className="landing-lockup__meta">The shedding game</span>
+            <div className="landing-wordmark-lockup">
+              <span>Last one loses</span>
+              <h1 id="landing-title" className="brand-wordmark">SHITHEAD</h1>
             </div>
           </div>
-          <span className="landing-ready"><span aria-hidden="true" />Ready to deal</span>
-        </header>
-
-        <section className="landing-hero" aria-labelledby="landing-title">
-          <div className="landing-hero__copy">
-            <p className="landing-kicker">Play dirty. Finish clean.</p>
-            <h1 id="landing-title" className="brand-wordmark">
-              <span>SHIT</span><span>HEAD</span>
-            </h1>
-            <p className="landing-copy">Empty your hand. Break the order. Don’t finish last.</p>
-          </div>
-          <div className="landing-card-stage" aria-hidden="true">
-            <span className="landing-show-card landing-show-card--back" />
-            <span className="landing-show-card landing-show-card--seven"><b>7</b><i>♣</i></span>
-            <span className="landing-show-card landing-show-card--ten"><b>10</b><i>♦</i></span>
-          </div>
+          <p className="landing-copy">Dump your hand. Last one holding the pile is the Shithead.</p>
         </section>
 
-        <section className="landing-modes" aria-labelledby="game-mode-title">
-          <div className="landing-modes__heading">
-            <div>
-              <p className="landing-section-label">Pick your table</p>
-              <h2 id="game-mode-title">Choose game mode</h2>
-            </div>
-            <span aria-hidden="true">01 / 02</span>
-          </div>
-          <div className="landing-mode-grid">
+        <section className="landing-menu" aria-labelledby="game-mode-title">
+          <h2 id="game-mode-title">Pick your table</h2>
+          <div className="landing-actions">
             <article className="landing-mode-choice landing-mode-choice--online">
               <button
                 type="button"
@@ -99,8 +73,9 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
                 className="landing-mode-button"
                 aria-describedby="online-mode-description"
               >
-                <span className="landing-mode-icon landing-mode-icon--online" aria-hidden="true" />
-                <span>Online</span>
+                <span className="landing-mode-suit" aria-hidden="true">♠</span>
+                <span>Play Online</span>
+                <span className="landing-mode-arrow" aria-hidden="true">→</span>
               </button>
               <p id="online-mode-description">Private rooms · 2–5 players</p>
             </article>
@@ -111,22 +86,26 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
                 className="landing-mode-button"
                 aria-describedby="offline-mode-description"
               >
-                <span className="landing-mode-icon landing-mode-icon--offline" aria-hidden="true" />
-                <span>Offline</span>
+                <span className="landing-mode-suit" aria-hidden="true">♦</span>
+                <span>Play Offline</span>
+                <span className="landing-mode-arrow" aria-hidden="true">→</span>
               </button>
-              <p id="offline-mode-description">Pass &amp; play · or vs computer</p>
+              <p id="offline-mode-description">Same phone · friends or bots</p>
             </article>
           </div>
+          <button type="button" className="landing-rules-button" onClick={() => setRulesOpen(true)}>
+            <span aria-hidden="true">♣</span>
+            <span>Rules</span>
+            <span aria-hidden="true">Read before you deal →</span>
+          </button>
         </section>
       </main>
       <footer className="app-bottom-zone landing-footer">
         <nav className="landing-links" aria-label="Information">
-          <button type="button" onClick={() => setRulesOpen(true)}>Rules</button>
           <button ref={aboutTriggerRef} type="button" onClick={() => setAboutOpen(true)}>About</button>
           <button type="button" onClick={() => setLegalOpen('privacy')}>Privacy</button>
           <button type="button" onClick={() => setLegalOpen('imprint')}>Impressum</button>
         </nav>
-        <span className="landing-build" aria-label={`Build ${stamp}`}>{stamp}</span>
       </footer>
 
       <RulesSheet open={rulesOpen} onClose={() => setRulesOpen(false)} />
@@ -140,9 +119,9 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
           aria-modal="true"
           aria-labelledby="about-title"
         >
-          <div className="surface-panel w-full max-w-[340px] bg-cream text-ink rounded-button p-s5 text-center">
-            <h2 id="about-title" className="font-display text-title font-semibold mb-s2">Shithead</h2>
-            <p className="text-body text-ink-soft">
+          <div className="landing-about-card">
+            <h2 id="about-title">Shithead</h2>
+            <p>
               The classic shedding card game. Pass &amp; play with friends, take on the
               computer, or play online in a room of up to five.
             </p>
@@ -150,7 +129,7 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
               ref={aboutCloseRef}
               type="button"
               onClick={() => setAboutOpen(false)}
-              className="primary-action mt-s4 w-full px-s5 text-button font-bold tracking-button uppercase"
+              className="landing-about-close"
             >
               Close
             </button>
