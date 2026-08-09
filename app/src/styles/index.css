@@ -1086,20 +1086,19 @@
   background: rgba(7, 12, 23, 0.2);
 }
 
-/* Hands */
-.large-hand { --card-w: clamp(48px, min(17vw, 12dvh), 68px); min-width: 0; max-width: 100%; flex: 0 0 auto; }
-.large-hand__meta { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
-.large-hand__scroller {
-  box-sizing: border-box;
-  height: calc(var(--card-w) * 1.4 + 36px);
+/* The hand has one invariant geometry at every card count. Overflow only
+   changes its horizontal scroll extent; it never changes card size/position. */
+.hand-fan {
+  min-width: 0;
+  max-width: 100%;
   overscroll-behavior-x: contain;
   scroll-padding-inline: 16px;
   scroll-snap-type: x proximity;
   touch-action: pan-x;
 }
-.large-hand__row { min-height: 0; display: flex; align-items: flex-start; margin-inline: auto; padding-top: 14px !important; }
-.large-hand__row > div { line-height: 0; scroll-snap-align: start; }
-.large-hand .card { display: block; }
+.hand-fan::-webkit-scrollbar { display: none; }
+.hand-fan__row > div { line-height: 0; scroll-snap-align: start; }
+.hand-fan .card { display: block; }
 
 /* Emotes */
 .icon-button {
@@ -1200,11 +1199,6 @@
   .hand-fan__row { padding-top: 10px !important; }
   .hand-fan__row > div:not(.card) { padding-bottom: 6px !important; }
   .hand-fan .card[data-state="selected"] { transform: translateY(-5px) scale(1.015); }
-  .large-hand { --card-w: 50px; }
-  .large-hand__scroller { height: calc(var(--card-w) * 1.4 + 26px); }
-  .large-hand__row { padding-top: 11px !important; }
-  .large-hand__row > div { padding-bottom: 5px !important; }
-  .large-hand .card[data-state="selected"] { transform: translateY(-8px) scale(1.02); }
   .action-bar { min-height: 48px; }
   .action-bar button { min-height: 44px; }
   .waiting-room-main,
@@ -1244,11 +1238,6 @@
   .hand-fan__row { padding-top: 5px !important; }
   .hand-fan__row > div:not(.card) { padding-bottom: 4px !important; }
   .hand-fan .card[data-state="selected"] { transform: translateY(-2px) scale(1.01); }
-  .large-hand { --card-w: 48px; }
-  .large-hand__scroller { height: calc(var(--card-w) * 1.4 + 24px); }
-  .large-hand__row { padding-top: 8px !important; }
-  .large-hand__row > div { padding-bottom: 4px !important; }
-  .large-hand .card[data-state="selected"] { transform: translateY(-5px) scale(1.015); }
   .tribute-screen main { max-width: 760px; }
   .tribute-screen .tribute-row { padding-top: 8px; }
 }
@@ -1261,12 +1250,6 @@
   .opponent-strip, .opponent-seat { min-height: 44px; }
   .game-center { min-height: 70px; }
   .tableau-well { padding-block: 3px; }
-  .large-hand { --card-w: 44px; }
-  .large-hand__meta { display: none; }
-  .large-hand__scroller { height: calc(var(--card-w) * 1.4 + 15px); }
-  .large-hand__row { padding-top: 7px !important; }
-  .large-hand__row > div { padding-bottom: 3px !important; }
-  .large-hand .card[data-state="selected"] { transform: translateY(-4px) scale(1.01); }
 }
 
 @media (min-width: 768px) {

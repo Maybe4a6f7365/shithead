@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(new URL('../../styles/index.css', import.meta.url), 'utf8')
 const main = readFileSync(new URL('../../main.tsx', import.meta.url), 'utf8')
+const handFan = readFileSync(new URL('../HandFan.tsx', import.meta.url), 'utf8')
 
 describe('Android visual viewport regression', () => {
   it('sizes the clipped game screen from the live visual viewport', () => {
@@ -19,8 +20,14 @@ describe('Android visual viewport regression', () => {
     const appViewportRule = css.match(/\.app-viewport\s*\{([\s\S]*?)\}/)?.[1] ?? ''
     expect(appViewportRule).toContain('var(--app-viewport-height')
 
-    const largeHandRowRule = css.match(/\.large-hand__row\s*\{([\s\S]*?)\}/)?.[1] ?? ''
-    expect(largeHandRowRule).toContain('align-items: flex-start')
-    expect(largeHandRowRule).not.toMatch(/min-height\s*:\s*100%/)
+    // A pickup must not switch to a second geometry at 13 cards. The same
+    // hand-fan row remains in place and only its horizontal width grows.
+    expect(handFan).not.toContain('const large')
+    expect(handFan).not.toContain('large-hand')
+    expect(css).not.toContain('.large-hand')
+
+    const handRule = css.match(/\.hand-fan\s*\{([\s\S]*?)\}/)?.[1] ?? ''
+    expect(handRule).toContain('overscroll-behavior-x: contain')
+    expect(handRule).toContain('touch-action: pan-x')
   })
 })

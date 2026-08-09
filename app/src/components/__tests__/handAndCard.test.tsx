@@ -34,11 +34,12 @@ describe('hidden-card accessibility', () => {
 })
 
 describe('large pickup hand', () => {
-  it('uses the counted horizontal rail at thirteen cards without dropping actions', () => {
+  it('keeps the normal hand rail at thirteen cards without dropping actions', () => {
     const cards = Array.from({ length: 13 }, (_, index) => card(index))
-    render(<HandFan cards={cards} states={new Map()} onSelect={vi.fn()} />)
-    expect(screen.getByText('13 cards')).toBeTruthy()
-    expect(screen.getByRole('group', { name: /13 cards; scroll horizontally/i })).toBeTruthy()
+    const { container } = render(<HandFan cards={cards} states={new Map()} onSelect={vi.fn()} />)
+    expect(screen.getByRole('group', { name: /your hand, 13 cards; scroll horizontally/i })).toBeTruthy()
+    expect(container.querySelector('.hand-fan__row')).toBeTruthy()
+    expect(container.querySelector('.large-hand')).toBeNull()
     expect(screen.getAllByRole('button')).toHaveLength(13)
     expect(screen.getByRole('button', { name: /, 1 of 13$/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /, 13 of 13$/i })).toBeTruthy()
