@@ -3,6 +3,24 @@ import { applyInterruptBurnRequest, canonicalCards } from '../../worker/gameActi
 import { c, mkState } from './helpers'
 
 describe('worker BURN_IN boundary', () => {
+  it('resolves an opaque blind alias to the authoritative face-down card', () => {
+    const faceDown = [
+      c('4', '♠', 'down-a'),
+      c('7', '♥', 'down-b'),
+      c('K', '♦', 'down-c'),
+    ]
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('6')] },
+        { id: 'b', hand: [], faceUp: [], faceDown },
+      ],
+    })
+
+    expect(canonicalCards(state, 'b', [
+      { id: 'blind:down:1', rank: 'A', suit: '♣' },
+    ])).toEqual([faceDown[1]])
+  })
+
   it('canonicalizes ids, ignores forged rank fields, burns cumulatively, and gives the interrupter the lead', () => {
     const tableFour = c('4', '♠', 'table-4')
     const fours = [
