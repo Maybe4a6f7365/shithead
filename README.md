@@ -1,145 +1,718 @@
-# Shithead — The Classic Shedding Card Game
+# Shithead
 
-A web-first, mobile-optimized Shithead implementation with AI bots, online multiplayer, and a clean public-domain art style.
+A mobile-first implementation of the Shithead shedding card game, built as an installable React PWA with local pass-and-play, Easy/Medium/Hard AI policies, and server-authoritative online rooms on Cloudflare Workers and Durable Objects.
 
-## 🎴 Features
+- **Production:** <https://shithead.not4a6f7365.workers.dev>
+- **Application version:** `0.2.0`
+- **Wire protocol:** `4`
+- **Persistent room schema:** `3`
+- **Runtime:** Node.js `>=22`, modern evergreen browsers, Cloudflare Workers
 
-- **Mobile-first PWA** — installable, touch-optimized, and responsive in portrait or landscape
-- **Single-device hot-seat** — 2-5 players, mix humans + AI (Easy/Medium/Hard)
-- **Online multiplayer** — create a room, share the code, play with friends
-- **Strict rules engine** — 100% test coverage on game logic
-- **Hand-coded cards** — crisp, modern card faces with no image dependency
-- **No tracking, no analytics** — your game data is yours
+This document is the technical source of truth for the shipped game. Rule behavior is defined by the pure engine in [`app/src/engine/index.ts`](app/src/engine/index.ts); multiplayer trust boundaries and wire validation are defined by [`app/src/engine/protocol.ts`](app/src/engine/protocol.ts) and [`app/src/worker/index.ts`](app/src/worker/index.ts).
 
-## 🏗️ Architecture
+## Product capabilities
 
+| Area | Current implementation |
+|---|---|
+| Offline play | 2–5 seats on one device; any mix of humans and Easy/Medium/Hard AI |
+| Online play | Private rooms for 2–5 human players over WebSocket |
+| Round configuration | 1–3 decks, Jokers on/off, optional previous-winner face-up exchange |
+| Rules | 2 reset, 3 mirror, 7 low, stacked 8 skip, 10/Joker burn, cumulative four-plus burn, out-of-turn burn-in |
+| Refresh recovery | Online seats resume with a rotating secret token stored locally |
+| Installation | Standalone PWA with an auto-updating Workbox app shell |
+| Sharing | Six-character room code, native Web Share, full-link clipboard/select fallback |
+| Accessibility | Native card buttons, pressed state, live announcements, focus-managed dialogs, keyboard shortcuts, reduced-motion mode |
+| Responsive table | Portrait and landscape layouts, safe-area support, Visual Viewport correction, count-invariant horizontally scrolling hand |
+| Observability | Structured Worker logs and Cloudflare observability; no product analytics or advertising SDK |
+
+Online rooms do not currently contain AI seats. Offline games live in Zustand memory and restart on refresh; secure refresh recovery applies to online rooms only.
+
+## Technology stack
+
+| Layer | Technology |
+|---|---|
+| UI | React 18, TypeScript (declared `^5.6.3`, lockfile `5.9.3`), Tailwind CSS 3.4, handwritten CSS design tokens |
+| Local controller | Zustand 4.5 |
+| Motion | Framer Motion 11 with reduced-motion branches |
+| Frontend build | Vite 5, `vite-plugin-pwa`, Workbox |
+| Shared rules | Dependency-free pure TypeScript reducers |
+| Transport | Versioned JSON messages over native WebSocket |
+| Edge runtime | Cloudflare Workers, Wrangler 4 |
+| Room authority | One SQLite-backed Durable Object per room code |
+| Tests | Vitest 2, Testing Library, jsdom, a live local-Worker adversarial script, and a production WebSocket smoke test |
+
+## System architecture
+
+The same pure engine executes local actions and authoritative online actions. The browser never becomes authoritative in an online room.
+
+```mermaid
+flowchart TB
+  subgraph Browser[Browser / installed PWA]
+    UI[React screens and shared TableScreen]
+    Local[Zustand offline controller]
+    Net[RoomClient and multiplayer hook]
+  end
+
+  Engine[Pure shared game engine]
+  Worker[Cloudflare Worker HTTP and WebSocket router]
+  Room[Room Durable Object]
+  Store[(Durable Object SQLite storage)]
+  Assets[(Vite and Workbox assets)]
+
+  UI --> Local
+  Local --> Engine
+  UI --> Net
+  Net --> Worker
+  Worker --> Room
+  Room --> Engine
+  Room --> Store
+  Worker --> Assets
 ```
-┌─────────────────────────────────────────────┐
-│ Frontend (Vite + React + TS PWA)            │
-│  - Touch UI, mobile-first                   │
-│  - WebSocket client (src/net/)              │
-├─────────────────────────────────────────────┤
-│ Backend (Cloudflare Workers + Durable Obj)  │
-│  - One DO per game room                     │
-│  - WebSocket relay + state machine          │
-│  - Static asset serving (built PWA)         │
-├─────────────────────────────────────────────┤
-│ Shared Engine (src/engine/)                 │
-│  - Pure functions, zero deps                │
-│  - Used by both client + server             │
-│  - 100% unit tested (TDD)                   │
-└─────────────────────────────────────────────┘
+
+### Authority boundaries
+
+1. The client sends intent: card identifiers, swaps, pickup, ready state, rule patches, or tribute decisions.
+2. The room Durable Object serializes all inbound frames through one promise chain.
+3. The Worker resolves submitted IDs against the authoritative player zones and discards submitted rank/suit data.
+4. The shared reducer validates turn, phase, zone, rank, ownership, and game-specific invariants.
+5. Accepted state is persisted before a viewer-specific state is broadcast.
+6. Each client ignores stale or replayed state sequences.
+
+There is no generic action request ID, ACK, or client-side optimistic state mutation. Replay resistance comes from authoritative ownership/turn validation, serialized room operations, and monotonic state sequencing.
+
+## Game rules
+
+### Configurable rules
+
+```ts
+interface GameRules {
+  includeJokers: boolean
+  winnerSwapsFaceUp: boolean
+  deckCount: 1 | 2 | 3
+}
 ```
 
-## 🎯 Game Rules
+Defaults are one deck, Jokers enabled, and winner exchange disabled.
 
-Standard German Shithead variant:
+Each deck contains 52 standard cards and, when enabled, two Jokers. The supported totals are therefore 52/104/156 cards without Jokers or 54/108/162 cards with Jokers. Card IDs are opaque random values and remain unique across all decks in a deal.
 
-- **Round options:** the host chooses 1–3 decks, whether Jokers are included, and whether the previous winner gets the optional face-up exchange
-- **Deal:** 3 cards face-down, then 6 visible cards. Choose any 3 of those 6 for the face-up final row; the other 3 become your hand
-- **Goal:** Lose all your cards. Last player holding = **Shithead**.
-- **Start:** the player with the lowest-ranked face-up final card begins
-- **Play:** normally play one card or any number of cards of the same rank that match or beat the effective pile rank; special cards modify this below. Can't/won't → pick up pile
-- **Refill:** after playing, draw back up to 3 cards while the stock still has cards
-- **Endgame phase:** when stock runs out, play from face-up, then face-down blind
-- **Next-round exchange (optional):** after everyone chooses their face-up final row, the previous winner may swap exactly one of those 3 cards with exactly one face-up final card belonging to the previous Shithead — or skip the exchange
+The core engine accepts 2–6 seats and separately verifies that the selected decks can supply nine cards per player. The shipped offline setup and online protocol intentionally cap the product at 2–5 seats.
 
-### Special cards
+### Deal and rearrangement
 
-| Card | Effect |
-|------|--------|
-| **2** | Reset — play anytime; removes the active rank constraint, so anything can follow |
-| **3** | Copy — play anytime; counts exactly like the effective card below it |
-| **7** | Low — the next ordinary card must be 7 or lower |
-| **8** | Skip — skips one active player per 8 played; equal-rank 8s stack |
-| **10** | Play anytime — clears the pile, same player leads |
-| **Top run** (4+ same printed rank) | Same as 10 — clears the pile whether completed in one play or across consecutive plays; with multiple decks, more than 4 may burn |
-| **Burn in / cut in** | Out of turn, play all matching cards from your visible active zone only when they complete the physical top run to 4+; the pile burns and the interrupter leads |
-| **Joker** | Wild + clears pile |
+Each player receives nine cards:
 
-## 🚀 Development
+- three fixed face-down cards;
+- three initially face-up cards;
+- three cards in hand.
+
+The six visible cards form the setup pool. During `rearrange`, a player may swap any hand position with any face-up position, allowing all $\binom{6}{3}=20$ possible three-card public rows. Face-down cards cannot be inspected or rearranged.
+
+Online play begins only after every seat sends `READY`. A later rearrangement removes that player's ready state. Offline AI players rearrange automatically and are pre-ready.
+
+The opening player is recalculated from the finalized face-up rows using this priority:
+
+```text
+3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → J → Q → K → A → 2 → Joker
+```
+
+Hands never determine the opener. Equal priorities resolve to the first matching seat in player-array order.
+
+### Phase machine
+
+```mermaid
+stateDiagram-v2
+  [*] --> waiting: online room
+  waiting --> rearrange: host starts deal
+  rearrange --> tribute: all ready and exchange pending
+  rearrange --> play: all ready
+  tribute --> play: swap or skip
+  play --> endgame: stock empty and table cards active
+  play --> gameOver: one active player remains
+  endgame --> gameOver: one active player remains
+  gameOver --> rearrange: new deal / host starts online rematch
+```
+
+`lobby` is used by the local controller before a deal. `roundEnd` remains in the TypeScript phase union for snapshot compatibility but is not produced by current reducers.
+
+### Active card zones
+
+A player must play from exactly one active zone:
+
+1. `hand`, while it contains any card;
+2. `faceUp`, only after the hand is empty;
+3. `faceDown`, only after both hand and face-up cards are empty.
+
+After an accepted visible play, the player draws from stock until the hand contains three cards or the stock is empty. A player who picked up above three does not draw until their hand falls below three. Pickup itself never draws from stock.
+
+### Ordinary play and pickup
+
+- An empty or reset pile may be opened with any rank.
+- A normal action may contain one card or any selected subset of cards with exactly one printed rank.
+- Mixed-rank sets are invalid. A Joker cannot substitute for another rank.
+- Ordinary cards must equal or exceed the effective top rank, except when a 7 reverses that comparison.
+- Pickup is voluntary even when the player has a legal card.
+- Pickup moves the complete live pile into the player's hand, clears the pile, draws nothing, and advances the turn.
+- Pickup is rejected when the pile is empty or the phase is not `play`/`endgame`.
+- The UI asks for a second confirmation within three seconds when a legal play exists, preventing accidental pickup without removing the rule choice.
+
+### Special ranks
+
+| Rank or condition | Exact behavior |
+|---|---|
+| `2` | Playable on anything. It is a reset boundary, so any card may follow. Physical 2s still count as printed 2s toward a four-plus burn. |
+| `3` | Playable on anything. It mirrors the first effective rank below a chain of 3s. Above a 2, or with no non-3 beneath it, play remains unrestricted. It mirrors rank legality only and does not repeat an 8 skip. |
+| `7` | The next ordinary card must be 7 or lower. The always-playable 2, 3, 10, and Joker remain valid. A 3 above a 7 preserves the low restriction. |
+| `8` | Each 8 skips one additional active player. Already-out seats do not count. A four-plus 8 burn takes precedence over skipping. |
+| `10` | Playable on anything and burns the pile immediately. |
+| Joker | Playable on anything and burns immediately. It is not a rank-substitution wildcard and cannot be mixed into another set. |
+| Physical top run `>=4` | An uninterrupted run of four or more equal printed ranks burns, whether produced in one action or accumulated across actions. Multi-deck games may burn more than four. |
+
+A burn removes the entire pile and the newly played cards from the game; there is no burn-discard zone. The actor leads again on an empty pile unless that action made them go out, in which case the next active player leads.
+
+`playDirection` is retained in state for compatibility and is honored by seat traversal, but no current rank reverses direction and new games initialize it to `1`.
+
+### Out-of-turn burn-in
+
+Any non-current, non-out player may interrupt only when all of these conditions hold:
+
+- phase is `play` or `endgame`;
+- the pile has a physical top run of one to three cards of one printed rank;
+- the player is using a visible active zone (`hand`, otherwise `faceUp`; never `faceDown`);
+- every submitted card matches the physical top rank;
+- the player submits **all** matching cards from that active zone;
+- existing run plus submitted cards totals at least four.
+
+The accepted interrupt refills the actor toward three cards, burns the pile, increments the action sequence, and gives the interrupter the empty-pile lead. Concurrent online interrupts are serialized, so only the first still-valid request succeeds. AI can complete a cumulative burn during its normal turn but does not autonomously initiate an out-of-turn interrupt.
+
+### Blind face-down play
+
+A blind action always selects exactly one face-down position.
+
+- If the revealed card is legal, it resolves like a normal play, including burns and going out.
+- If illegal, the revealed card and the entire pile move into the player's hand, the pile clears, no stock card is drawn, and the turn passes.
+
+The failed blind result is a legal action with a penalty, not a reducer error. Online clients receive synthetic `blind:down:<index>` aliases; only the Worker resolves an alias to the authoritative card.
+
+### Winner, loser, stalemate, and rematch exchange
+
+- A player becomes `isOut` only after a play/refill leaves hand, face-up, and face-down zones empty.
+- `winnerId` is the first player to go out and is never replaced by a later finisher.
+- When exactly one active player remains, that player becomes `loserId` (the Shithead) and the game ends immediately.
+- If the round reaches `MAX_GAME_TURNS = 1000` accepted gameplay actions, the player holding the most total cards loses. Ties resolve to the earliest seat in array order.
+- The event log is a ring buffer retaining the latest `MAX_LOG_ENTRIES = 50` events.
+
+When winner exchange is enabled and the prior winner and loser both remain in the next-round roster, the next deal enters `tribute` after everyone finalizes their public row. Only the prior winner may swap exactly one of their three face-up cards with exactly one prior-loser face-up card, or skip. Hands and face-down cards are invalid. The opener is recalculated after the decision.
+
+### AI policy
+
+AI public-row setup scores cards in this order:
+
+```text
+Joker > 10 > 2 > 3 > A > K > … > 4
+```
+
+| Difficulty | Decision policy |
+|---|---|
+| Easy | Random legal visible card; random blind position |
+| Medium | Lowest legal non-special equal-rank group; otherwise one special card |
+| Hard | Immediate win, then cumulative burn, then high-value pile burn, then lowest non-special group; conserves premium specials when possible |
+
+All tiers pick up when no visible card is legal and choose randomly in the blind zone. Setup and decisions accept a seeded Mulberry32 RNG for reproducible tests. An AI prior winner performs the optional exchange only when taking the loser's strongest public card improves its own row.
+
+## Engine state and invariants
+
+The central state shape is:
+
+```ts
+interface GameState {
+  phase: Phase
+  rules: GameRules
+  players: Player[]
+  stock: Card[]
+  pile: PileEntry[]
+  currentPlayerIdx: number
+  playDirection: 1 | -1
+  turnCount: number
+  winnerId: string | null
+  loserId: string | null
+  pendingTribute: { winnerId: string; loserId: string } | null
+  log: GameEvent[]
+  seq?: number
+}
+```
+
+Engine reducers are pure: they return a new state and optional error without performing I/O. Engine-produced states start at `seq = 0` and increment for accepted mutations. `seq` remains optional in the interface only for legacy snapshots and test/lobby placeholders.
+
+`turnCount` counts accepted gameplay actions—normal plays, burn-ins, pickups, and failed blind attempts—not setup rearrangements or readiness. The separate event ring feeds announcements, motion, and sound cursors without allowing the state snapshot to grow indefinitely.
+
+## Multiplayer protocol v4
+
+Every current client frame is centrally stamped with `version: 4`. A present but different version is rejected. Missing versions are still accepted for backward compatibility, so this is a compatibility boundary rather than a strict negotiation handshake.
+
+### Client-to-server messages
+
+| Message | Payload / purpose |
+|---|---|
+| `CREATE_ROOM` | Player name and optional max-player count; consumes a prior room claim |
+| `JOIN_ROOM` | Room code and player name |
+| `RESUME_ROOM` | Room code, player ID, rotating secret token |
+| `LEAVE_ROOM` | Explicitly leave and invalidate the seat token |
+| `START_GAME` | Host-only initial deal/rematch |
+| `READY` | Finalize current rearrangement |
+| `REARRANGE` | Hand index and face-up index to swap |
+| `PLAY` | One to twelve unique card identifiers |
+| `BURN_IN` | One to twelve unique card identifiers |
+| `PICK_UP` | Voluntary pile pickup |
+| `SET_RULES` | Nonempty patch containing only known rule keys |
+| `TRIBUTE_SWAP` | Winner and loser face-up card identifiers |
+| `TRIBUTE_SKIP` | Decline the optional exchange |
+| `CHAT` | Sanitized relay message; supported by the wire/Worker but not exposed by the current React UI |
+| `EMOTE` | `thumbs-up`, `laugh`, `wow`, or `fire` |
+| `PING` | Manual/smoke-test liveness request |
+
+The 12-card action limit is the maximum number of ordinary same-rank copies across three decks. Protocol validation also enforces unique IDs, nonblank names up to 32 characters, room-code shape, rule keys, deck range, chat length, and emote catalog. The shipped name fields deliberately limit visible names to 12 characters.
+
+### Server-to-client messages
+
+| Message | Purpose |
+|---|---|
+| `WELCOME` | Private player ID, room summary, fresh resume token, protocol version |
+| `RESUME_FAILED` | Explicit reason; invalidates local credentials |
+| `ROOM_STATE` | Lobby-safe roster, presence, host, rules, phase, and card counts |
+| `GAME_STATE` | Authoritative state serialized specifically for one viewer |
+| `ERROR` | Stable error code and contextual message |
+| `PLAYER_LEFT` | Explicit leave notification |
+| `CHAT` | Ephemeral sanitized relay |
+| `EMOTE` | Ephemeral reaction with player ID and timestamp |
+| `PONG` | Liveness response |
+
+`PLAYER_JOINED` is reserved in the TypeScript union but is not emitted; joins synchronize via `ROOM_STATE`. The current React hook handles authoritative room/game state, errors, resume, and emotes. Chat and PONG remain transport/smoke capabilities rather than player-facing UI.
+
+### Per-viewer masking
+
+| State area | Owning player | Other players | At `gameOver` |
+|---|---|---|---|
+| Hand | Real cards | Equal-length hidden placeholders | Revealed |
+| Face-up row | Real public cards | Real public cards | Revealed |
+| Face-down row | Synthetic blind aliases | Hidden placeholders | Revealed |
+| Stock | Equal-length hidden placeholders | Equal-length hidden placeholders | Still masked |
+| Pile | Real public cards | Real public cards | Revealed |
+
+Room summaries never contain private cards; they expose identities, connected/out status, and zone counts only. Unauthenticated or rejected sockets receive no roster, chat, emote, or game broadcasts.
+
+### Ordering and reconnect behavior
+
+On each socket connection the client sends `CREATE_ROOM`, `JOIN_ROOM`, or `RESUME_ROOM` first. Gameplay queued while unauthenticated flushes only after `WELCOME` calls `markAuthenticated()`. Authentication frames are never retained across reconnect, preventing replay of a token that may already have rotated. Offline emotes are dropped rather than replayed later.
+
+Clients accept only increasing `GAME_STATE.seq` values. The explicit rematch reset—`seq=0`, `turnCount=0`, `phase=rearrange`—is the one allowed sequence restart. Legacy states without a sequence remain accepted.
+
+The client makes five reconnect attempts with linear delays of 1, 2, 3, 4, and 5 seconds, then exposes a manual Retry control. A successful recovery shows `restored` briefly before returning to `connected`.
+
+## Room service and Durable Object lifecycle
+
+### HTTP surface
+
+| Method and path | Behavior |
+|---|---|
+| `GET /api/health` | Service liveness |
+| `GET /api/version` | Service name, stamped Git commit, protocol version |
+| `POST /api/room/new` | Allocate and atomically claim a new code |
+| `GET /api/room/:CODE/ws` | WebSocket upgrade into the named room Durable Object |
+| Static asset path | Serve from the Workers Assets binding |
+| Other non-API `GET` | Fall back to `index.html` for SPA routing |
+
+Exact `/api`, `/assets`, unknown `/api/*`, and missing `/assets/*` paths do not receive the SPA shell.
+
+### Allocation and room identity
+
+Room codes contain six characters drawn from:
+
+```text
+ABCDEFGHJKLMNPQRSTUVWXYZ23456789
+```
+
+Ambiguous characters are excluded. Allocation uses `env.ROOM.idFromName(code)`, giving one authoritative Durable Object per code. `POST /api/room/new` atomically stores a two-minute claim; `CREATE_ROOM` must consume that claim, closing the direct-WebSocket creation and check-then-act races.
+
+Online rooms default to five maximum seats. Joining is allowed before a round or after `gameOver`, enabling new players to enter the next deal. Starting is host-only, needs at least two roster members, and requires every current seat to be online.
+
+### Persistence and cleanup
+
+The persisted `RoomData.version = 3` snapshot contains roster, host, rules, ready IDs, authoritative game state, hashed resume credentials, and timestamps. It is distinct from wire protocol v4 and Cloudflare Durable Object migration tag `v1`.
+
+On restore, migration code:
+
+- supplies new rule defaults and clamps deck count to 1–3;
+- supplies missing ready/activity/token fields;
+- validates loser and pending tribute references;
+- preserves an explicitly recorded departed winner;
+- derives a legacy first-out winner only when the retained history makes that unambiguous.
+
+Every persisted mutation updates `lastActivity` and schedules an alarm. Storage is deleted after at least 24 hours of inactivity only when no socket remains connected. Cleanup is alarm-driven and eventual, not an exact retention deadline.
+
+The implementation uses `WebSocketPair` plus in-memory event listeners, not Durable Object WebSocket hibernation. Persisted state survives object recreation; socket presence does not, so clients reconnect and resume.
+
+### Presence, leave, and forfeit
+
+- A network disconnect removes only the socket. Roster, cards, and resume credential remain; the seat becomes offline.
+- Any offline seat blocks initial start or rematch until it resumes or explicitly leaves.
+- Explicit leave removes the token, roster entry, and ready state.
+- A non-out leaver during an active round becomes the loser immediately. In a two-player forfeit the sole survivor is an unambiguous winner; in larger games with no prior finisher the winner may remain unknown.
+- A player who already went out may leave without overturning the winner; the remaining round continues.
+- If the host leaves, the first remaining roster player becomes host.
+- Removing the final roster member deletes the room snapshot.
+
+An offline client cannot confirm a leave frame, so it keeps the resume credential and reports that the seat is retained rather than pretending the server processed the leave.
+
+## Security model
+
+### Seat authentication
+
+- Room codes authorize joining an open room; they do not authenticate an existing seat.
+- Existing-seat control requires a 256-bit URL-safe resume token.
+- Only SHA-256 token hashes are persisted.
+- Comparison is constant-time.
+- Every successful resume rotates the token and sends the replacement only in that socket's `WELCOME`.
+- Resuming closes any older socket attached to the same player with close code `4001`.
+- Explicit leave deletes the credential.
+
+The token is stored in browser `localStorage`, so its security inherits the browser origin and XSS boundary. There are no accounts, passwords, external identity provider, or spectator role.
+
+### Validation and abuse controls
+
+| Control | Value |
+|---|---|
+| Inbound WebSocket frame | Maximum 16,384 JavaScript string code units; oversize closes with code `1009` |
+| Message rate | 20 frames/second/socket sliding window |
+| Socket cap | 12 simultaneous sockets per room, including unauthenticated/duplicate tabs |
+| Room allocation rate | 10 new rooms/minute/IP, best effort per Worker isolate |
+| Tracked room codes | 30/IP over the in-memory 24-hour window, best effort per isolate |
+| Room claim | Atomic and valid for two minutes |
+
+Room-allocation rate tracking is in-memory per Worker isolate, not a globally distributed hard limit. A Cloudflare rate-limiting rule would be required for strict global enforcement.
+
+For every play, the Worker canonicalizes IDs against authoritative ownership, ignores client-provided suit/rank, rejects duplicates or stale ownership, and delegates turn/zone validation to the engine. Chat is capped at 200 characters and sanitized to word characters, whitespace, and `!?.,-`. Chat and emotes are relayed but not persisted in room state.
+
+### Origin and HTTP policy
+
+WebSocket upgrades require a non-null allowed `Origin`. Same-origin is always allowed. `ALLOWED_ORIGINS` replaces the default extra-origin set with exact comma-separated values; when it is unset, the extra local-development origins are `http://localhost:5173` and `http://localhost:8787`. API CORS never uses `*`, and API responses are `no-store`.
+
+Public non-upgrade HTTP responses, including static assets, receive the following headers. WebSocket `101` upgrade responses pass through without this wrapper.
+
+- CSP: self-only defaults/scripts, self plus inline styles, self/data images, self plus secure WebSockets for connections, no framing, no base URI, self-only forms;
+- `X-Content-Type-Options: nosniff`;
+- `Referrer-Policy: no-referrer`;
+- camera, microphone, and geolocation disabled by `Permissions-Policy`;
+- `Cross-Origin-Opener-Policy: same-origin`;
+- removal of `X-Powered-By`.
+
+The application does not add an HSTS header. The CSP currently allows the `wss:` scheme rather than restricting secure WebSockets to one named host.
+
+## Frontend architecture and UX invariants
+
+### Screen coordination
+
+`App.tsx` owns a small in-memory mode union:
+
+```text
+landing
+├── Play Online → join/create → multiplayer room
+└── Play Offline → hot-seat setup → local game table
+```
+
+At bootstrap, a complete saved online credential resumes directly into its room. A valid explicit `?room=ABC123` invite for a different room takes precedence over an old seat; a same-room invite resumes securely.
+
+`GameTable` adapts the local Zustand store and `MultiplayerGameTable` adapts authoritative network state into the same `TableScreen`. Selection rules, card zones, mobile geometry, announcements, emotes, and accessibility behavior are therefore shared between modes.
+
+### Card interaction
+
+- Tapping a card selects it; it never commits immediately.
+- Selecting a different rank atomically replaces the previous highlighted rank.
+- Equal-rank cards can be added or removed individually, including more than four in multi-deck games.
+- Play, pickup, and burn-in remain explicit actions.
+- The three face-up final cards overlay their three face-down partners, displaying six cards in three physical stacks.
+- Opponent order is stable relative to the viewer, with the next player leftmost.
+- Opponent hands render as counts/backs; public final cards remain visible.
+- Empty stock and pile use dashed slots, not misleading card backs.
+- A visible 3 reports the effective rank it copies.
+
+### Large-hand invariant
+
+The hand always uses one horizontal row. Increasing the hand from 3 to 13, 17, or more cards changes only scroll width—never card size, vertical position, or layout mode.
+
+The fan step is clamped to 24–28 px and the row width is calculated as:
+
+```text
+cardWidth + step × (cardCount - 1) + 32px
+```
+
+The scrollport reserves clearance for selected-card lift, uses `overflow-x: auto`, `overflow-y: hidden`, `touch-action: pan-x`, momentum scrolling, and safe-area-aware bottom spacing. `main.tsx` synchronizes `--app-viewport-height` to `VisualViewport.height` (falling back to `innerHeight`), while the app shell uses the smaller of that value and `100dvh`. This prevents expanded Android browser controls from placing cards below the visible/tappable viewport.
+
+This invariant is guarded by `largeHandRegression.test.tsx`, `handAndCard.test.tsx`, and `mobileViewportRegression.test.ts`.
+
+### “Last Call” visual system
+
+The interface uses a physical after-hours card-table direction across the landing screen, setup, waiting room, table, phase screens, sheets, pass gate, connection states, and game over.
+
+| Semantic token | Value |
+|---|---|
+| Felt | `#173d2f` |
+| Deep felt | `#0c2b21` |
+| Raised felt | `#234b3a` |
+| Paper / cream | `#f1e5c7` |
+| Ink | `#17241d` |
+| Suit red / burgundy | `#b43c32` |
+| Muted gold | `#d0a64d` |
+| Online | `#a7c8aa` |
+
+Cards and card backs are CSS-rendered. The system uses solid felt, printed-paper surfaces, restrained suit color, hard physical offset shadows, stamped condensed system-font headings, small radii, and no external font dependency.
+
+### Accessibility
+
+- Interactive cards are native buttons with rank/suit labels and `aria-pressed`; static cards expose image semantics.
+- Hidden-card labels do not leak authoritative IDs.
+- Persistent controls target at least 44 px.
+- Connection, host, online/offline, selection, and error state are not conveyed by color alone.
+- Dedicated polite and assertive live regions announce state without duplicating the visual action feed.
+- Dialogs and blocking phase overlays set initial focus, trap Tab, handle Escape where appropriate, and restore focus.
+- Gameplay shortcuts are suppressed inside editors, modifier chords, menus, and modal dialogs.
+- `prefers-reduced-motion` collapses transitions, removes card lift/shake, and stops pulsing.
+
+Keyboard controls:
+
+| Key | Action |
+|---|---|
+| `P` | Play selection |
+| `U` | Pick up |
+| `B` | Burn in |
+| `Escape` | Clear card selection / close supported overlay |
+| Left / Right | Navigate hand cards and emote choices |
+| Arrow keys / Home / End | Navigate menus and deck-count radio options |
+
+These behaviors are regression-tested; the project does not claim formal WCAG certification.
+
+### Sharing, reactions, and sound
+
+Waiting-room invites use `/?room=CODE`. The UI attempts native Web Share, falls back to copying the full link, and finally exposes a selectable read-only URL when clipboard access is blocked. The six-character code can also be copied independently.
+
+Four reactions are available: thumbs-up, laugh, wow, and fire. Sender feedback is immediate; the matching short-lived server echo is deduplicated. Visible feedback hides after 1.9 seconds, the hook drops the retained event after 2.5 seconds, and reactions are neither queued across reconnect nor persisted.
+
+The sound event/debounce architecture and persisted sound toggle exist, but no audio assets or playback backend currently ship; the default sound handler is a no-op.
+
+## Browser storage, privacy, and offline behavior
+
+| Storage | Contents | Lifecycle |
+|---|---|---|
+| `shithead:name` | Last nonempty player name | Reused for later setup |
+| `shithead:sound` | Sound preference | Persists across modes |
+| `shithead:session` | Room code, player ID, resume token, player name | Replaced on `WELCOME`; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
+| Workbox Cache Storage | Versioned static app-shell files | Managed and cleaned by the generated service worker |
+| Offline match | Zustand memory only | Lost on refresh |
+
+After a successful prior load/install, the static shell and pass-and-play game can operate without the room service. Online play still requires the Worker and WebSocket connection.
+
+The app contains no advertising, analytics, or behavioral-tracking SDK. Online play necessarily sends room, player-name, action, and connection data to Cloudflare. Authoritative room state and hashed resume tokens persist temporarily in the Durable Object, and Cloudflare observability/security logs may contain normal network metadata. Players should not use sensitive information as names. The in-app Privacy sheet is the player-facing description of this behavior.
+
+## PWA and build behavior
+
+The manifest configures standalone display, theme `#173d2f`, background `#0c2b21`, and 192 px, 512 px, and maskable 512 px icons. The production build targets ES2020 and emits no source maps.
+
+Workbox precaches generated JavaScript, CSS, HTML, SVG, PNG, and WebP assets; `fonts/**` are excluded. A new service worker uses `skipWaiting`, `clientsClaim`, and old-cache cleanup. `main.tsx` registers it immediately and checks for updates at startup, hourly, and whenever the document becomes visible.
+
+Build metadata is generated from `WORKERS_CI_COMMIT_SHA`, then `GITHUB_SHA`, falling back to `local`. The value is written into `src/worker/build-meta.ts` for `/api/version` and into `<meta name="build-commit">` in `index.html`. It is used by deployment smoke tests rather than displayed as normal player UI.
+
+### Browser baseline
+
+There is no legacy-browser polyfill bundle or explicit Browserslist. The practical target is an evergreen browser with ES2020 modules, Fetch, WebSocket, `ResizeObserver`, and `crypto.randomUUID()`. Installation/offline shell additionally needs Service Worker and Cache Storage.
+
+Optional APIs degrade as follows:
+
+- no Visual Viewport: use `innerHeight`;
+- no Web Share: use Clipboard;
+- blocked Clipboard: expose selectable link / legacy copy fallback;
+- no vibration: omit haptic feedback;
+- no PWA installation support: continue as a normal mobile web application.
+
+## Local development
 
 ### Prerequisites
 
-- Node.js 20+
-- npm 10+
+- Node.js 22 or newer
+- npm compatible with the lockfile; CI currently pins npm 11.19
+- Wrangler authentication only for manual remote deployment/tailing
 
-### Install + run locally
+### Install
 
 ```bash
 cd app
-npm install
-npm run dev          # start Vite dev server on :5173
+npm ci
 ```
 
-Open http://localhost:5173 — play against AI bots.
-
-### Test (TDD)
+### Offline/frontend development
 
 ```bash
-npm test             # run all tests
-npm run test:watch   # watch mode
-npm run test:coverage # coverage report (must stay >80%)
-```
-
-### Multiplayer dev mode
-
-```bash
-# Terminal 1: Worker emulator
-npm run worker:dev   # starts wrangler dev on :8787
-
-# Terminal 2: Frontend
+cd app
 npm run dev
-
-# In browser: open http://localhost:5173 → multiplayer
 ```
 
-### Build + deploy
+Vite normally starts on <http://localhost:5173>. Offline/hot-seat mode does not require the Worker.
+
+### Local multiplayer
+
+Terminal 1:
 
 ```bash
-npm run build        # build PWA to ./dist
-npm run worker:deploy # deploy to Cloudflare Workers
+cd app
+npm run worker:dev -- --port 8787
 ```
 
-Production deploy is automatic on push to `main` via GitHub Actions.
+Terminal 2:
 
-## 📁 Project structure
-
+```bash
+cd app
+npm run dev -- --port 5173
 ```
-shithead-game/
+
+The development transport maps frontend port `5173` to `http://localhost:8787`. Keep 5173 available: Vite is configured with `strictPort: false`, but a fallback frontend port will not match that mapping or the default Worker origin allowlist.
+
+### Supported verification and build commands
+
+| Command | Purpose |
+|---|---|
+| `npm test` | Run the complete Vitest suite once |
+| `npm run test:watch` | Run Vitest in watch mode |
+| `npm run test:coverage` | Generate V8 text/HTML/JSON engine coverage |
+| `npm run typecheck` | Type-check frontend, shared engine, and client code |
+| `npm run typecheck:worker` | Type-check the Worker configuration |
+| `npm run build` | Frontend type-check plus production Vite/PWA build |
+| `npm run preview` | Preview the built frontend |
+| `npm run generate:build-meta` | Stamp commit metadata into Worker source and HTML |
+| `npm run deploy:build` | Generate metadata, Worker type-check, and frontend build |
+| `npm run worker:dev` | Run the local Worker with Wrangler |
+| `npm run worker:deploy` | Build and deploy manually with Wrangler |
+| `npm run worker:tail` | Stream remote Worker logs |
+
+`npm run lint` exists in `package.json`, but no ESLint dependency/configuration is currently committed; it is not a supported release gate. Both frontend and Worker TypeScript configs compile without TypeScript `strict` mode.
+
+## Test strategy
+
+At this revision, the default suite contains **270 tests across 25 Vitest files**:
+
+| Area | Files | Coverage focus |
+|---|---:|---|
+| Engine | 8 | Core rules, AI, decks, cumulative/interrupt burns, tribute, masking, migrations, forfeit boundaries |
+| Components/UI | 13 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, tribute, sound cursor |
+| Network | 1 | Session validation, auth ordering, sequence guard, reconnect and queue semantics |
+| Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
+| Root routing | 1 | Invite-link and hard-refresh resume routing |
+
+Configured V8 thresholds apply to engine source: 80% lines/functions/statements and 75% branches. The project deliberately does not claim 100% coverage.
+
+### Live local-Worker adversarial suite
+
+The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, state masking, token rotation/hijack rejection, rules, burn-in forgery/replay, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
+
+```bash
+cd app
+npm install --no-save --no-package-lock ws@8
+npm run worker:dev -- --port 8787
+```
+
+In a second terminal:
+
+```bash
+cd app
+BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial
+```
+
+The current script reports 30 adversarial checks in a normal run.
+
+### Production smoke test
+
+```bash
+cd app
+npm install --no-save --no-package-lock ws@8
+BASE_URL=https://shithead.not4a6f7365.workers.dev \
+EXPECTED_COMMIT=<full-git-sha> \
+DEPLOYMENT_TIMEOUT_MS=600000 \
+node scripts/smoke-multiplayer.mjs
+```
+
+The smoke test polls `/api/version`, validates the commit-stamped HTML/bundle, service-worker MIME type and manifest icons, then performs a real create/join/disconnect/resume/rule/start/masking/ready/chat/ping/play flow.
+
+## CI/CD and production deployment
+
+`.github/workflows/deploy.yml` runs on pushes to `main`, pull requests, and manual dispatch.
+
+The **verify** job uses Node 22 and npm 11.19, then executes:
+
+1. `npm ci`
+2. `npm test`
+3. `npm run typecheck:worker`
+4. `npm run build`
+5. local Wrangler plus the adversarial Worker script
+
+For non-PR `main` revisions, **production-smoke** waits for verify, then polls the public deployment for the exact `${{ github.sha }}` for up to ten minutes and runs the end-to-end multiplayer smoke flow.
+
+GitHub Actions does **not** execute `wrangler deploy`. Production deployment is performed by Cloudflare Workers Builds configured outside this repository; the workflow observes and verifies that deployment. The repository-root `package.json` and `wrangler.toml` are the Workers Builds entrypoints:
+
+```bash
+npm --prefix app ci
+npm --prefix app run deploy:build
+```
+
+The root Wrangler config serves `app/dist`; `app/wrangler.toml` is the path-adjusted copy for commands executed from `app/`. Keep both bindings/migrations synchronized.
+
+## Operational characteristics and known boundaries
+
+- Online rooms support human seats only; AI is local.
+- Offline matches are not persisted.
+- No accounts or global identity system exist.
+- Room creation rate limits are per isolate and best effort, not globally strict.
+- The Worker does not use Durable Object WebSocket hibernation.
+- There is no automatic heartbeat timer; PING/PONG is available to tests/clients.
+- A stale offline roster seat blocks a new deal until resume/leave or eventual room cleanup.
+- A resume token rotates before the replacement reaches browser storage; a connection failure in that narrow interval can make the saved token stale.
+- The reconnect attempt counter resets on WebSocket `open`, before `WELCOME`; repeated open-then-close failures may repeatedly report the first attempt.
+- The protocol accepts a missing version for legacy compatibility.
+- There is no generic exactly-once command/ACK layer.
+- Sound event plumbing exists, but shipped audio playback is currently silent.
+- Cloudflare observability is enabled; this is not equivalent to application analytics.
+
+## Repository layout
+
+```text
+.
+├── .github/workflows/deploy.yml       # Verification + deployed-production smoke
 ├── app/
+│   ├── public/                        # Manifest icons and static assets
+│   ├── scripts/
+│   │   ├── smoke-multiplayer.mjs      # Production end-to-end smoke
+│   │   ├── test-worker-adversarial.mjs # Live local-Worker security/rules suite
+│   │   └── write-build-meta.mjs       # Commit stamping
 │   ├── src/
-│   │   ├── engine/           # Pure game logic (client+server shared)
-│   │   │   ├── index.ts      # Rules, reducers, AI
-│   │   │   ├── protocol.ts   # Wire format types + serialization
-│   │   │   └── __tests__/    # TDD test suite
-│   │   ├── worker/           # Cloudflare Worker (Durable Object)
-│   │   │   ├── index.ts      # Entry point + Room DO
-│   │   │   └── __tests__/    # Integration tests via miniflare
-│   │   ├── net/              # Client WebSocket layer
-│   │   ├── components/       # React UI
-│   │   ├── App.tsx           # Root component
-│   │   └── main.tsx          # Entry point
-│   ├── public/               # Static assets (favicon, icons)
-│   ├── dist/                 # Built PWA (gitignored)
-│   ├── wrangler.toml         # Worker config
-│   ├── vite.config.ts        # Vite + PWA config
-│   ├── vitest.config.ts      # Test config
-│   └── package.json
-├── assets/                   # Source art (not deployed)
-├── .github/workflows/        # CI/CD
+│   │   ├── components/                # Screens and shared game UI
+│   │   ├── engine/
+│   │   │   ├── index.ts               # Pure rules, reducers, deck and AI policy
+│   │   │   ├── protocol.ts            # Protocol-v4 types, validation and masking
+│   │   │   └── __tests__/             # Engine/protocol/Worker-boundary tests
+│   │   ├── net/
+│   │   │   ├── RoomClient.ts          # WebSocket transport and reconnect queue
+│   │   │   └── useMultiplayerRoom.ts  # React lifecycle/session/sequence controller
+│   │   ├── sp/SPSinglePlayer.ts       # Zustand offline controller
+│   │   ├── styles/index.css           # Last Call tokens and responsive layout
+│   │   ├── worker/                     # Worker, room DO, migration and action boundary
+│   │   ├── App.tsx                     # Mode coordinator and refresh boot routing
+│   │   └── main.tsx                    # React/PWA/Visual Viewport bootstrap
+│   ├── vite.config.ts                  # Vite, manifest and Workbox policy
+│   ├── vitest.config.ts                # Default unit/component suite
+│   └── wrangler.toml                   # Local/manual Worker config
+├── assets/                             # Source/reference art; not deployed by Vite
+├── package.json                        # Cloudflare Workers Builds wrapper
+├── wrangler.toml                       # Authoritative production Worker config
 └── README.md
 ```
 
-## 🎨 Style
+## License
 
-Modern mobile-game palette:
-- Midnight `#0b1120`
-- Coral `#d33656`
-- Teal `#4de0c4`
-- Amber `#f6b94b`
-
-## 📜 License
-
-Apache 2.0 — see LICENSE.
-<!-- build trigger Sat Aug  8 03:25:44 PM UTC 2026 -->
+Apache License 2.0. See [`LICENSE`](LICENSE).
