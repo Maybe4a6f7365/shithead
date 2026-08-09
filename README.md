@@ -2,7 +2,8 @@
 
 A mobile-first implementation of the Shithead shedding card game, built as an installable React PWA with local pass-and-play, Easy/Medium/Hard AI policies, and server-authoritative online rooms on Cloudflare Workers and Durable Objects.
 
-- **Production:** <https://shithead.not4a6f7365.workers.dev>
+- **Production (canonical):** <https://shead.online>
+- **Fallback/diagnostic endpoint:** <https://shithead.not4a6f7365.workers.dev>
 - **Application version:** `0.2.0`
 - **Wire protocol:** `4`
 - **Persistent room schema:** `3`
@@ -397,6 +398,8 @@ For every play, the Worker canonicalizes IDs against authoritative ownership, ig
 
 WebSocket upgrades require a non-null allowed `Origin`. Same-origin is always allowed. `ALLOWED_ORIGINS` replaces the default extra-origin set with exact comma-separated values; when it is unset, the extra local-development origins are `http://localhost:5173` and `http://localhost:8787`. API CORS never uses `*`, and API responses are `no-store`.
 
+Production uses the same `https://shead.online` origin for the app and API. `RoomClient` derives that origin at runtime and converts it to `wss://shead.online/api/room/<code>/ws`; invite links are likewise generated from the current origin. The custom hostname therefore needs no production-only API URL or `ALLOWED_ORIGINS` entry.
+
 Public non-upgrade HTTP responses, including static assets, receive the following headers. WebSocket `101` upgrade responses pass through without this wrapper.
 
 - CSP: self-only defaults/scripts, self plus inline styles, self/data images, self plus secure WebSockets for connections, no framing, no base URI, self-only forms;
@@ -510,6 +513,8 @@ The sound event/debounce architecture and persisted sound toggle exist, but no a
 | Offline match | Zustand memory only | Lost on refresh |
 
 After a successful prior load/install, the static shell and pass-and-play game can operate without the room service. Online play still requires the Worker and WebSocket connection.
+
+Local Storage, Cache Storage, service-worker scope, and installed-PWA identity are isolated by browser origin. Data created at `shithead.not4a6f7365.workers.dev` is not migrated to `shead.online`: the canonical domain starts with fresh preferences and no saved resume credential, and an installed copy must be installed again from the canonical origin. A seat whose only resume token remains on the fallback origin can still be resumed there while that token and room remain valid.
 
 The app contains no advertising, analytics, or behavioral-tracking SDK. Online play necessarily sends room, player-name, action, and connection data to Cloudflare. Authoritative room state and hashed resume tokens persist temporarily in the Durable Object, and Cloudflare observability/security logs may contain normal network metadata. Players should not use sensitive information as names. The in-app Privacy sheet is the player-facing description of this behavior.
 
@@ -632,13 +637,15 @@ The current script reports 30 adversarial checks in a normal run.
 ```bash
 cd app
 npm install --no-save --no-package-lock ws@8
-BASE_URL=https://shithead.not4a6f7365.workers.dev \
+BASE_URL=https://shead.online \
 EXPECTED_COMMIT=<full-git-sha> \
 DEPLOYMENT_TIMEOUT_MS=600000 \
 node scripts/smoke-multiplayer.mjs
 ```
 
 The smoke test polls `/api/version`, validates the commit-stamped HTML/bundle, service-worker MIME type and manifest icons, then performs a real create/join/disconnect/resume/rule/start/masking/ready/chat/ping/play flow.
+
+The command above sets `BASE_URL` explicitly so it exercises the canonical hostname. The checked-in script default and GitHub Actions workflow currently use `https://shithead.not4a6f7365.workers.dev` as a routing-stable control. Rerunning the same command against that endpoint can distinguish a Custom Domain/DNS/certificate failure from a Worker deployment failure; both origins should report the same `EXPECTED_COMMIT` because they serve the same deployment.
 
 ## CI/CD and production deployment
 
@@ -652,7 +659,7 @@ The **verify** job uses Node 22 and npm 11.19, then executes:
 4. `npm run build`
 5. local Wrangler plus the adversarial Worker script
 
-For non-PR `main` revisions, **production-smoke** waits for verify, then polls the public deployment for the exact `${{ github.sha }}` for up to ten minutes and runs the end-to-end multiplayer smoke flow.
+For non-PR `main` revisions, **production-smoke** waits for verify, then polls the Workers.dev fallback for the exact `${{ github.sha }}` for up to ten minutes and runs the end-to-end multiplayer smoke flow. A manual smoke run with `BASE_URL=https://shead.online` additionally validates the dashboard-managed Custom Domain path.
 
 GitHub Actions does **not** execute `wrangler deploy`. Production deployment is performed by Cloudflare Workers Builds configured outside this repository; the workflow observes and verifies that deployment. The repository-root `package.json` and `wrangler.toml` are the Workers Builds entrypoints:
 
@@ -662,6 +669,20 @@ npm --prefix app run deploy:build
 ```
 
 The root Wrangler config serves `app/dist`; `app/wrangler.toml` is the path-adjusted copy for commands executed from `app/`. Keep both bindings/migrations synchronized.
+
+### Production domains and DNS
+
+The canonical player origin is `https://shead.online`. It is attached to the `shithead` Worker as a Cloudflare Custom Domain in the Cloudflare dashboard; the current repository-root and `app/` Wrangler files do **not** declare a `routes` block or `workers_dev` setting. Cloudflare manages the generated routing DNS record and edge certificate for the exact hostname. The zone must be **Active** and the registrar must delegate to the two nameservers assigned by Cloudflare before the route can serve traffic. Resolver caches can continue returning the previous delegation until its TTL expires, so split answers during a nameserver change indicate DNS propagation rather than application routing.
+
+Custom Domain matching is exact: the apex route does not also cover `www.shead.online`. The hostname policy is therefore:
+
+| Host | Role |
+|---|---|
+| `shead.online` | Canonical app, API, WebSocket, invite, and PWA origin |
+| `www.shead.online` | Not configured by this repository; policy is to redirect permanently to `https://shead.online` if the host is enabled in Cloudflare |
+| `shithead.not4a6f7365.workers.dev` | Enabled fallback for routing diagnostics and emergency access |
+
+The fallback reaches the same Worker deployment and Durable Objects; it is not a frozen older release. It can bypass a custom-hostname, DNS, or certificate problem, but rolling application code back still requires deploying an earlier revision. Because browser state is origin-scoped, routine play and shared invites should use only the canonical apex rather than switching between the canonical and fallback origins.
 
 ## Operational characteristics and known boundaries
 
