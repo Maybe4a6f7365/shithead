@@ -38,6 +38,7 @@ jobs:
       - name: Install WebSocket adversarial-test client
         run: npm install --no-save --no-package-lock ws@8
       - name: Exercise the local Worker adversarially
+        timeout-minutes: 20
         shell: bash
         run: |
           npm run worker:dev -- --port 8787 > "$RUNNER_TEMP/wrangler.log" 2>&1 &

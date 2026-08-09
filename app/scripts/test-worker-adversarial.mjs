@@ -604,5 +604,7 @@ async function main() {
 
 main().catch(error => {
   console.error('FAIL', error)
-  process.exitCode = 1
+  // Open WebSockets would otherwise keep Node alive and hide the actual
+  // assertion failure behind a permanently running CI step.
+  process.exit(1)
 })
