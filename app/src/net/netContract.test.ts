@@ -16,7 +16,7 @@ function gs(seq: number, turnCount = seq, phase: GameState['phase'] = 'play'): G
   return {
     phase, rules: { ...DEFAULT_GAME_RULES }, players: [], stock: [], pile: [],
     currentPlayerIdx: 0, playDirection: 1, turnCount,
-    winnerId: null, loserId: null, pendingTribute: null, log: [], seq,
+    winnerId: null, loserId: null, pendingTribute: null, pendingQuickFollowUp: null, log: [], seq,
   }
 }
 
@@ -244,6 +244,28 @@ describe('RoomClient authentication ordering', () => {
     client.close()
   })
 
+  it('never queues a race-bound quick follow-up while offline or unauthenticated', () => {
+    let client!: RoomClient
+    client = new RoomClient({
+      url: 'ws://example.test/api/room/ABC123/ws',
+      onMessage: () => {},
+      onOpen: () => client.send({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'Ada' }),
+    })
+    const socket = FakeWebSocket.instances[0]
+
+    client.send({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-five', expectedSeq: 8 })
+    socket.open()
+    client.send({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-five', expectedSeq: 8 })
+    client.markAuthenticated()
+    expect(socket.sent.map(message => message.type)).toEqual(['JOIN_ROOM'])
+
+    client.send({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-five', expectedSeq: 8 })
+    expect(socket.sent.at(-1)).toEqual({
+      type: 'QUICK_FOLLOW_UP', cardId: 'drawn-five', expectedSeq: 8, version: PROTOCOL_VERSION,
+    })
+    client.close()
+  })
+
   it('does not delete a resumable credential when explicit leave is offline', () => {
     saveSession({ roomCode: 'ABC123', playerId: 'p1', playerName: 'Ada', resumeToken: 'token' })
     const { result, unmount } = renderHook(() => useMultiplayerRoom({
@@ -296,14 +318,33 @@ describe('RoomClient authentication ordering', () => {
       type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
     }))
 
-    act(() => result.current.sendEmote('fire'))
-    expect(socket.sent.at(-1)).toEqual({ type: 'EMOTE', emote: 'fire', version: PROTOCOL_VERSION })
+    act(() => result.current.sendEmote('cry'))
+    expect(socket.sent.at(-1)).toEqual({ type: 'EMOTE', emote: 'cry', version: PROTOCOL_VERSION })
 
-    act(() => socket.receive({ type: 'EMOTE', version: PROTOCOL_VERSION, playerId: 'p2', emote: 'wow', ts: 1234 }))
-    expect(result.current.latestEmote).toEqual({ playerId: 'p2', emote: 'wow', ts: 1234 })
+    act(() => socket.receive({ type: 'EMOTE', version: PROTOCOL_VERSION, playerId: 'p2', emote: 'sad', ts: 1234 }))
+    expect(result.current.latestEmote).toEqual({ playerId: 'p2', emote: 'sad', ts: 1234 })
 
     act(() => vi.advanceTimersByTime(2501))
     expect(result.current.latestEmote).toBeNull()
+    unmount()
+  })
+
+  it('binds quick follow-up intent to the latest accepted authoritative sequence', () => {
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+
+    expect(result.current.quickFollowUp('drawn-five')).toBe(false)
+    act(() => socket.receive({ type: 'GAME_STATE', state: gs(8) }))
+    act(() => expect(result.current.quickFollowUp('drawn-five')).toBe(true))
+    expect(socket.sent.at(-1)).toEqual({
+      type: 'QUICK_FOLLOW_UP', cardId: 'drawn-five', expectedSeq: 8, version: PROTOCOL_VERSION,
+    })
     unmount()
   })
 })

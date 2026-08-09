@@ -288,7 +288,7 @@ describe('B10/D1: canPlay agrees with playCards (2 on empty pile; any opener)', 
   })
 })
 
-describe('B12/D2: 10 is play-anytime', () => {
+describe('B12/D2: 10 is unrestricted except after an effective 7', () => {
   it('10 can be played on an A and burns', () => {
     const ten = c('10')
     expect(canPlay(ten, 'A')).toBe(true)
@@ -299,6 +299,26 @@ describe('B12/D2: 10 is play-anytime', () => {
     const r = playCards(state, 'a', [ten])
     expect(r.error).toBeUndefined()
     expect(r.state.pile.length).toBe(0)
+  })
+
+  it('10 cannot be played directly on a 7', () => {
+    const ten = c('10')
+    expect(canPlay(ten, '7')).toBe(false)
+    const state = mkState({
+      players: [{ id: 'a', hand: [ten] }, { id: 'b', hand: [c('6')] }],
+      pile: [[c('7')]],
+    })
+    expect(playCards(state, 'a', [ten]).error).toMatch(/cannot be played/i)
+  })
+
+  it('10 cannot bypass a 7 mirrored by one or more 3s', () => {
+    const ten = c('10')
+    const state = mkState({
+      players: [{ id: 'a', hand: [ten] }, { id: 'b', hand: [c('6')] }],
+      pile: [[c('7')], [c('3')], [c('3', '♥')]],
+    })
+    expect(getTopRank(state)).toBe('7')
+    expect(playCards(state, 'a', [ten]).error).toMatch(/cannot be played/i)
   })
 })
 

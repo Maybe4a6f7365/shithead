@@ -13,7 +13,7 @@ import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
 import { isClientMsg, PROTOCOL_VERSION, serializeGameState, toPlayerSummary } from '../engine/protocol'
 import { BUILD_COMMIT } from './build-meta'
 import { applyPlayerForfeit } from './forfeit'
-import { applyInterruptBurnRequest, canonicalCards } from './gameActions'
+import { applyInterruptBurnRequest, applyQuickFollowUpRequest, canonicalCards } from './gameActions'
 import { normalizeGameRules, normalizePersistedGameState } from './migrateState'
 
 interface Env {
@@ -300,6 +300,9 @@ export class Room {
         break
       case 'PLAY':
         await this.play(session, message.cards)
+        break
+      case 'QUICK_FOLLOW_UP':
+        await this.quickFollowUp(session, message.cardId, message.expectedSeq)
         break
       case 'BURN_IN':
         await this.burnIn(session, message.cards)
@@ -623,6 +626,27 @@ export class Room {
     }
 
     const result = playCards(data.state, session.playerId, cards)
+    if (result.error) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
+      return
+    }
+
+    data.state = result.state
+    await this.save()
+    this.broadcastGame()
+  }
+
+  /**
+   * Apply one same-rank replacement draw before a competing action closes
+   * the window. Durable Object messages are serialized through `operation`;
+   * expectedSeq therefore gives a deterministic winner and prevents stale
+   * clicks/reconnect replays from mutating a later state.
+   */
+  private async quickFollowUp(session: Session, cardId: string, expectedSeq: number): Promise<void> {
+    const data = this.data
+    if (!data?.state || !session.playerId) return
+
+    const result = applyQuickFollowUpRequest(data.state, session.playerId, cardId, expectedSeq)
     if (result.error) {
       this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
       return

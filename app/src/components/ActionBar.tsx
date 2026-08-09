@@ -13,9 +13,51 @@ export interface ActionBarProps {
   onPickUp: () => void
   burnIn?: { count: number; rank: string }
   onBurnIn?: () => void
+  quickFollowUp?: { count: number; rank: string }
+  onQuickFollowUp?: () => void
+  onDismissQuickFollowUp?: () => void
+  dismissQuickFollowUpLabel?: string
 }
 
-export function ActionBar({ selectionCount, canPickUp, pickupArmed, onPlay, onPickUp, burnIn, onBurnIn }: ActionBarProps) {
+export function ActionBar({
+  selectionCount, canPickUp, pickupArmed, onPlay, onPickUp,
+  burnIn, onBurnIn, quickFollowUp, onQuickFollowUp,
+  onDismissQuickFollowUp, dismissQuickFollowUpLabel = 'Normal turn',
+}: ActionBarProps) {
+  if (selectionCount === 0 && quickFollowUp && onQuickFollowUp) {
+    return (
+      <div
+        className="action-bar action-bar--quick-follow-up quick-follow-up-bar flex items-center justify-center gap-s2 px-s4 min-h-[var(--actionbar-h)]"
+        role="group"
+        aria-label="Quick follow-up"
+        data-mode="quick-follow-up"
+      >
+        <button
+          type="button"
+          onClick={onQuickFollowUp}
+          className="action-button quick-follow-up-action min-h-[48px] px-s4"
+          aria-label={`Play the drawn ${quickFollowUp.rank} before the next card`}
+          data-rank={quickFollowUp.rank}
+          data-count={quickFollowUp.count}
+        >
+          <strong>Play drawn {quickFollowUp.rank}</strong>
+          <span>Quick match · before the next play</span>
+        </button>
+        {onDismissQuickFollowUp && (
+          <button
+            type="button"
+            onClick={onDismissQuickFollowUp}
+            className="action-button quick-follow-up-dismiss min-h-[48px] px-s2"
+            aria-label={dismissQuickFollowUpLabel === 'Normal turn'
+              ? 'Continue the normal turn'
+              : `${dismissQuickFollowUpLabel} quick match`}
+          >
+            {dismissQuickFollowUpLabel}
+          </button>
+        )}
+      </div>
+    )
+  }
   if (burnIn && onBurnIn) {
     return (
       <div

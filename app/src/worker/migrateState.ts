@@ -1,17 +1,20 @@
 import {
   DEFAULT_GAME_RULES,
   MAX_LOG_ENTRIES,
+  getPhysicalTopRun,
   type GameEvent,
   type GameRules,
   type GameState,
+  type PendingQuickFollowUp,
   type PendingTribute,
   type Player,
 } from '../engine'
 
-type LegacyState = Omit<GameState, 'rules' | 'winnerId' | 'pendingTribute'> & {
+type LegacyState = Omit<GameState, 'rules' | 'winnerId' | 'pendingTribute' | 'pendingQuickFollowUp'> & {
   rules?: Partial<GameRules>
   winnerId?: string | null
   pendingTribute?: PendingTribute | null
+  pendingQuickFollowUp?: PendingQuickFollowUp | null
 }
 
 /**
@@ -78,11 +81,31 @@ export function normalizePersistedGameState(
       ? { winnerId: pending.winnerId, loserId: pending.loserId }
       : null
 
+  // Preserve a live replacement-draw entitlement across a harmless worker
+  // restart only when every security-relevant invariant still holds. Old or
+  // malformed snapshots default to null instead of granting by rank alone.
+  const quick = state.pendingQuickFollowUp
+  const quickActor = quick && state.players.find(player => player.id === quick.playerId)
+  const eligibleIds = quick && Array.isArray(quick.eligibleCardIds) ? quick.eligibleCardIds : []
+  const uniqueEligible = new Set(eligibleIds)
+  const handById = new Map(quickActor?.hand.map(card => [card.id, card] as const) ?? [])
+  const topRun = getPhysicalTopRun(state as GameState)
+  const pendingQuickFollowUp = quick &&
+    (state.phase === 'play' || state.phase === 'endgame') &&
+    quickActor && !quickActor.isOut &&
+    Number.isSafeInteger(quick.sourceSeq) && quick.sourceSeq === (state.seq ?? 0) &&
+    eligibleIds.length > 0 && uniqueEligible.size === eligibleIds.length &&
+    eligibleIds.every(id => typeof id === 'string' && handById.get(id)?.rank === quick.rank) &&
+    topRun?.rank === quick.rank
+      ? { ...quick, eligibleCardIds: [...eligibleIds] }
+      : null
+
   return {
     ...state,
     rules,
     winnerId,
     loserId: validPlayerId(state.loserId, state.players) ? state.loserId : null,
     pendingTribute,
+    pendingQuickFollowUp,
   }
 }

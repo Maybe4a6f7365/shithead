@@ -90,7 +90,9 @@ describe('pickAIMove move generation', () => {
       pile: pileRanks.map(rs => rs.map(r => c(r))),
       currentPlayerIdx: 1,
     })
-    const big = mk([['4'],['5'],['6'],['7']]) // pileSize 4
+    // Keep the effective top below 10 but away from the special low-7 rule:
+    // the AI still has a legal 8 and deliberately spends its 10 for pile size.
+    const big = mk([['4'],['5'],['6'],['6']]) // pileSize 4
     const moveBig = pickAIMove(big, big.players[1], 'hard', seededRng(1))
     expect(moveBig.cards![0].rank).toBe('10')
     const small = mk([['4']])

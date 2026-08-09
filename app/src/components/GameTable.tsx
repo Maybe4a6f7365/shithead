@@ -23,9 +23,10 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const nextRules = useSPGame(s => s.rules)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem('shithead:sound') !== 'off')
+  const [declinedQuickSourceSeq, setDeclinedQuickSourceSeq] = useState<number | null>(null)
 
   const {
-    playCards, interruptBurn, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
+    playCards, quickFollowUp, interruptBurn, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
     exchangeTribute, skipTribute, setRules, rematch, reset,
   } = useSPGame.getState()
 
@@ -33,6 +34,10 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const current = players[currentPlayerIdx]
   const loser = players.find(p => p.id === loserId)
   const meIsShithead = loserId !== null && loserId === meId
+
+  useEffect(() => {
+    if (!state.pendingQuickFollowUp) setDeclinedQuickSourceSeq(null)
+  }, [state.pendingQuickFollowUp])
 
   // Auto-tick AI turns.
   useEffect(() => {
@@ -42,11 +47,16 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
       const t = setTimeout(() => tickAI(), AI_TICK_MS)
       return () => clearTimeout(t)
     }
+    const quickPlayer = players.find(player => player.id === state.pendingQuickFollowUp?.playerId)
+    if (quickPlayer?.isAI) {
+      const t = setTimeout(() => tickAI(), AI_TICK_MS)
+      return () => clearTimeout(t)
+    }
     if (!current || current.isOut || loserId || !current.isAI) return
     if (phase !== 'play' && phase !== 'endgame') return
     const t = setTimeout(() => tickAI(), AI_TICK_MS)
     return () => clearTimeout(t)
-  }, [current?.id, current?.isAI, current?.isOut, phase, turnCount, loserId, state.pendingTribute?.winnerId, players, tickAI])
+  }, [current?.id, current?.isAI, current?.isOut, phase, turnCount, loserId, state.pendingTribute?.winnerId, state.pendingQuickFollowUp?.playerId, state.pendingQuickFollowUp?.sourceSeq, players, tickAI])
 
   // AI players never rearrange — auto-ready any stragglers.
   useEffect(() => {
@@ -101,8 +111,12 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
     }
   }
 
-  const viewerId = resolveViewerId(players, currentPlayerIdx, meId, revealedId)
+  const quickPlayer = players.find(player => player.id === state.pendingQuickFollowUp?.playerId)
+  const quickDeclined = state.pendingQuickFollowUp?.sourceSeq === declinedQuickSourceSeq
+  const quickViewerId = quickPlayer && !quickPlayer.isAI && !quickDeclined ? quickPlayer.id : null
+  const viewerId = quickViewerId ?? resolveViewerId(players, currentPlayerIdx, meId, revealedId)
   const gateNeeded = (phase === 'play' || phase === 'endgame') &&
+    !quickViewerId &&
     needsPassGate(players, currentPlayerIdx, meId, revealedId)
   const viewer = players.find(p => p.id === viewerId)
 
@@ -115,6 +129,11 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           viewerActive={current?.id === viewer.id && !current?.isAI && !loserId}
           error={lastError}
           onPlay={cards => playCards(viewer.id, cards)}
+          onQuickFollowUp={card => quickFollowUp(viewer.id, card)}
+          onDeclineQuickFollowUp={quickViewerId ? () => {
+            setDeclinedQuickSourceSeq(state.pendingQuickFollowUp?.sourceSeq ?? null)
+          } : undefined}
+          quickFollowUpDeclineLabel="Pass"
           onBurnIn={!viewer.isAI ? cards => interruptBurn(viewer.id, cards) : undefined}
           onPickUp={() => pickUpPile(viewer.id)}
           onLeave={leave}

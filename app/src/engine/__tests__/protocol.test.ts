@@ -13,6 +13,7 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'player-id', resumeToken: 'secret' })).toBe(true)
     expect(isClientMsg({ type: 'PING' })).toBe(true)
     expect(isClientMsg({ type: 'BURN_IN', cards: [{ id: 'four-a' }, { id: 'four-b' }, { id: 'four-c' }] })).toBe(true)
+    expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 7 })).toBe(true)
     expect(isClientMsg({ type: 'CHAT', text: 'hi' })).toBe(true)
     for (const emote of EMOTE_IDS) expect(isClientMsg({ type: 'EMOTE', emote })).toBe(true)
     expect(isClientMsg({ type: 'SET_RULES', rules: { includeJokers: false } })).toBe(true)
@@ -32,6 +33,12 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'PLAY', cards: Array.from({ length: 13 }, (_, i) => ({ id: `card-${i}` })) })).toBe(false)
     expect(isClientMsg({ type: 'BURN_IN', cards: [] })).toBe(false)
     expect(isClientMsg({ type: 'BURN_IN', cards: Array.from({ length: 13 }, (_, i) => ({ id: `card-${i}` })) })).toBe(false)
+    expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card' })).toBe(false)
+    expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: '', expectedSeq: 1 })).toBe(false)
+    expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: '   ', expectedSeq: 1 })).toBe(false)
+    expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: -1 })).toBe(false)
+    expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 1.5 })).toBe(false)
+    expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 1, cards: [] })).toBe(false)
     expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(201) })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE', emote: '👍' })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE', emote: 'thumbs-up<script>' })).toBe(false)
@@ -64,6 +71,9 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'PING', version: PROTOCOL_VERSION + 1 })).toBe(false)
     expect(isClientMsg({ type: 'PING', version: 1 })).toBe(false)
     expect(isClientMsg({ type: 'PLAY', cards: [{ id: 'x' }], version: PROTOCOL_VERSION })).toBe(true)
+    expect(isClientMsg({
+      type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 2, version: PROTOCOL_VERSION,
+    })).toBe(true)
   })
 })
 
@@ -127,6 +137,27 @@ describe('serializeGameState (security)', () => {
     const opponent = serialized.players.find(p => p.id === 'opponent')!
     expect(viewer.hand).toEqual(state.players.find(p => p.id === 'viewer')!.hand)
     expect(opponent.faceUp).toEqual(state.players.find(p => p.id === 'opponent')!.faceUp)
+  })
+
+  it('keeps a replacement-draw follow-up entitlement owner-only', () => {
+    const eligible = c('6', '♥', 'secret-drawn-six')
+    const state = {
+      ...mkState({
+        players: [
+          { id: 'owner', hand: [eligible] },
+          { id: 'other', hand: [c('9')] },
+        ],
+        pendingQuickFollowUp: {
+          playerId: 'owner', rank: '6', eligibleCardIds: [eligible.id], sourceSeq: 7,
+        },
+      }),
+      seq: 7,
+    }
+
+    expect(serializeGameState(state, 'owner').pendingQuickFollowUp).toEqual(state.pendingQuickFollowUp)
+    const otherView = serializeGameState(state, 'other')
+    expect(otherView.pendingQuickFollowUp).toBeNull()
+    expect(JSON.stringify(otherView)).not.toContain(eligible.id)
   })
 
   it('reveals everything once the game is over (harmless, helps end screens)', () => {

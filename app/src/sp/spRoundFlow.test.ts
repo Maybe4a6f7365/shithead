@@ -23,6 +23,7 @@ function state(players: Player[], partial: Partial<GameState> = {}): GameState {
     winnerId: null,
     loserId: null,
     pendingTribute: null,
+    pendingQuickFollowUp: null,
     log: [],
     seq: 0,
     ...partial,
@@ -119,5 +120,56 @@ describe('single-player burn in', () => {
     expect(next.state.pile).toEqual([])
     expect(next.state.players[next.state.currentPlayerIdx].id).toBe('human')
     expect(next.state.players[1].hand.map(item => item.id)).toEqual(['my-a'])
+  })
+})
+
+describe('single-player quick replacement follow-up', () => {
+  it('lets a human add only the entitled replacement card while preserving the next turn', () => {
+    const drawn = card('fresh-5', '5')
+    const human = player('human', false, [], [drawn, card('old-5', '5')])
+    const next = player('next', false, [], [card('next-6', '6')])
+    const initial = state([human, next], {
+      phase: 'play',
+      currentPlayerIdx: 1,
+      pile: [{ cards: [card('pile-5', '5')], cleared: false }],
+      pendingQuickFollowUp: {
+        playerId: 'human', rank: '5', eligibleCardIds: [drawn.id], sourceSeq: 7,
+      },
+      turnCount: 7,
+      seq: 7,
+    })
+    useSPGame.setState({ state: initial, meId: 'human' })
+
+    useSPGame.getState().quickFollowUp('human', drawn)
+
+    const result = useSPGame.getState()
+    expect(result.lastError).toBeNull()
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('next')
+    expect(result.state.pile.flatMap(entry => entry.cards).map(item => item.id)).toContain(drawn.id)
+    expect(result.state.players[0].hand.map(item => item.id)).toEqual(['old-5'])
+  })
+
+  it('automatically uses an AI replacement match before the human takes the next turn', () => {
+    const drawn = card('ai-fresh-6', '6')
+    const ai = player('ai', true, [], [drawn, card('ai-9', '9')])
+    const human = player('human', false, [], [card('human-7', '7')])
+    const initial = state([ai, human], {
+      phase: 'play',
+      currentPlayerIdx: 1,
+      pile: [{ cards: [card('pile-6', '6')], cleared: false }],
+      pendingQuickFollowUp: {
+        playerId: 'ai', rank: '6', eligibleCardIds: [drawn.id], sourceSeq: 12,
+      },
+      turnCount: 12,
+      seq: 12,
+    })
+    useSPGame.setState({ state: initial, meId: 'human' })
+
+    useSPGame.getState().tickAI()
+
+    const result = useSPGame.getState()
+    expect(result.lastError).toBeNull()
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('human')
+    expect(result.state.pile.flatMap(entry => entry.cards).map(item => item.id)).toContain(drawn.id)
   })
 })

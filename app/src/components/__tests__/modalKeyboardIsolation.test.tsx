@@ -46,6 +46,7 @@ function tableState(): GameState {
     winnerId: null,
     loserId: null,
     pendingTribute: null,
+    pendingQuickFollowUp: null,
     log: [],
     seq: 1,
   }

@@ -12,6 +12,7 @@
 //    READY {}                                mark rearrange done; game starts when all ready
 //    REARRANGE {handIdx, upIdx}              swap one hand card with one face-up card
 //    PLAY {cards: Card[]}                    play matching cards (unique ids, one rank)
+//    QUICK_FOLLOW_UP {cardId, expectedSeq}   immediately add an eligible replacement draw
 //    BURN_IN {cards: Card[]}                 out-of-turn four-of-a-kind completion
 //    PICK_UP {}                              pick up the pile (play/endgame only)
 //    SET_RULES {rules}                       host updates waiting/next-round rules
@@ -50,13 +51,22 @@ import type { Card, GameRules, GameState, Phase } from './index'
 import { MAX_LOG_ENTRIES } from './index'
 
 /** Wire protocol version. Bump on any breaking message change. */
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 /** Three decks contain at most twelve physical cards of one normal rank. */
 const MAX_CARDS_PER_ACTION = 12
 
 /** Stable wire ids keep presentation (emoji/art/animation) out of the protocol. */
-export const EMOTE_IDS = ['thumbs-up', 'laugh', 'wow', 'fire'] as const
+export const EMOTE_IDS = [
+  'thumbs-up',
+  'laugh',
+  'wow',
+  'fire',
+  'sad',
+  'cry',
+  'heart',
+  'clap',
+] as const
 export type EmoteId = typeof EMOTE_IDS[number]
 
 export interface EmoteEvent {
@@ -77,6 +87,7 @@ export type ClientMsg =
   | { type: 'READY'; version?: number }
   | { type: 'REARRANGE'; handIdx: number; upIdx: number; version?: number }
   | { type: 'PLAY'; cards: Card[]; version?: number }
+  | { type: 'QUICK_FOLLOW_UP'; cardId: string; expectedSeq: number; version?: number }
   | { type: 'BURN_IN'; cards: Card[]; version?: number }
   | { type: 'PICK_UP'; version?: number }
   | { type: 'SET_RULES'; rules: Partial<GameRules>; version?: number }
@@ -164,6 +175,11 @@ export const isEmoteId = (value: unknown): value is EmoteId =>
 const versionOk = (data: Record<string, unknown>) =>
   data.version === undefined || data.version === PROTOCOL_VERSION
 
+const hasOnlyKeys = (data: Record<string, unknown>, allowed: readonly string[]) => {
+  const keys = new Set(allowed)
+  return Object.keys(data).every(key => keys.has(key))
+}
+
 export function isClientMsg(data: unknown): data is ClientMsg {
   if (!isRecord(data) || typeof data.type !== 'string') return false
   if (!versionOk(data)) return false
@@ -188,6 +204,10 @@ export function isClientMsg(data: unknown): data is ClientMsg {
       const ids = data.cards.map(card => (card as { id: string }).id)
       return new Set(ids).size === ids.length
     }
+    case 'QUICK_FOLLOW_UP':
+      return hasOnlyKeys(data, ['type', 'cardId', 'expectedSeq', 'version']) &&
+        isNonBlankShortString(data.cardId, 128) &&
+        Number.isSafeInteger(data.expectedSeq) && Number(data.expectedSeq) >= 0
     case 'CHAT':
       return typeof data.text === 'string' && data.text.length > 0 && data.text.length <= 200
     case 'EMOTE':
@@ -227,13 +247,22 @@ const hiddenCard = (id: string): Card => ({ id, suit: null, rank: '3' })
  *  - opponent hands: same-length placeholders (real ids are never sent).
  *  - face-down cards: always placeholders, even for the owner (blind is
  *    blind), except in phase 'gameOver' where everything is revealed.
+ *  - pendingQuickFollowUp: owner-only because its presence and eligible ids
+ *    reveal the replacement draw; every other live viewer receives null.
  *  - log: capped to the most recent MAX_LOG_ENTRIES entries.
  *  - state.seq passes through unchanged for duplicate/replay detection.
  */
 export function serializeGameState(state: GameState, viewerId: string): GameState {
   const revealAll = state.phase === 'gameOver'
+  // Even the existence of an opponent's follow-up entitlement would reveal
+  // that their replacement draw matched the public play. Keep the complete
+  // pending record owner-only; the worker still holds the authoritative ids.
+  const pendingQuickFollowUp = revealAll || state.pendingQuickFollowUp?.playerId === viewerId
+    ? state.pendingQuickFollowUp
+    : null
   return {
     ...state,
+    pendingQuickFollowUp,
     stock: state.stock.map((_, i) => hiddenCard(`hidden:stock:${i}`)),
     players: state.players.map(player => ({
       ...player,

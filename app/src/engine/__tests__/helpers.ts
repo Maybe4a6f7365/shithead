@@ -2,7 +2,17 @@
 // Shared test helpers for engine tests
 // ============================================================================
 import { DEFAULT_GAME_RULES } from '../index'
-import type { Card, GameRules, GameState, PendingTribute, Phase, Player, Rank, Suit } from '../index'
+import type {
+  Card,
+  GameRules,
+  GameState,
+  PendingQuickFollowUp,
+  PendingTribute,
+  Phase,
+  Player,
+  Rank,
+  Suit,
+} from '../index'
 
 let n = 0
 /** Readable, unique test card. Ids are opaque to the engine. */
@@ -31,6 +41,7 @@ export interface MkState {
   winnerId?: string | null
   loserId?: string | null
   pendingTribute?: PendingTribute | null
+  pendingQuickFollowUp?: PendingQuickFollowUp | null
   log?: GameState['log']
 }
 
@@ -58,6 +69,7 @@ export function mkState(over: MkState): GameState {
     winnerId: over.winnerId ?? null,
     loserId: over.loserId ?? null,
     pendingTribute: over.pendingTribute ?? null,
+    pendingQuickFollowUp: over.pendingQuickFollowUp ?? null,
     log: over.log ?? [],
     seq: 0,
   }

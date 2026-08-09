@@ -8,10 +8,11 @@
 //      and defines the face-up-3 rule for choosing the *starting player*.
 //      The old "empty pile must be opened with 3/10/Joker" restriction was an
 //      invention and disagreed with itself (canPlay vs playCards). Removed.
-//  D2. 2, 3, 10 and Joker are playable anytime. A 2 resets the active rank
-//      constraint: the next player may play any card. A 3 copies the first
-//      effective rank beneath any chain of 3s; above a reset 2 it therefore
-//      also leaves play unrestricted.
+//  D2. 2, 3 and Joker are playable anytime. A 10 is normally unrestricted,
+//      but it does NOT override the low-card constraint of an effective 7.
+//      A 2 resets the active rank constraint: the next player may play any
+//      card. A 3 copies the first effective rank beneath any chain of 3s;
+//      above a reset 2 it therefore also leaves play unrestricted.
 //  D3. Burns (10 / quartet / Joker) REMOVE the pile from the game entirely:
 //      burned cards leave play, the pile is empty, and the same player leads
 //      on the empty pile. If that player just went out, the lead passes to
@@ -52,6 +53,11 @@
 //      ordinary cards must be 7 or lower. An 8 skips one active player per
 //      card in the equal-rank set. Already-out players are never counted;
 //      a quartet burn takes precedence over its skip effect.
+//  D13. After a normal visible play refills from stock, only replacement
+//      cards actually drawn by that action which match the played printed
+//      rank may be played immediately as a quick follow-up. The entitlement
+//      is exact-card-id based, may chain through matching replacement draws,
+//      and expires on the next accepted competing gameplay action.
 // ============================================================================
 
 // ---------- Types ----------
@@ -96,6 +102,18 @@ export interface PreviousRoundResult {
 /** The one optional face-up-for-face-up exchange still awaiting a decision. */
 export interface PendingTribute extends PreviousRoundResult {}
 
+/**
+ * Server-authoritative entitlement for the just-played actor to add matching
+ * replacement cards before another gameplay action wins the race.
+ */
+export interface PendingQuickFollowUp {
+  playerId: string
+  rank: Rank
+  eligibleCardIds: string[]
+  /** State sequence produced by the action that opened/refreshed the window. */
+  sourceSeq: number
+}
+
 export type Phase = 'lobby' | 'rearrange' | 'tribute' | 'play' | 'endgame' | 'roundEnd' | 'gameOver'
 
 export interface GameState {
@@ -110,11 +128,12 @@ export interface GameState {
   winnerId: string | null // first player to get rid of every card
   loserId: string | null  // player who is "shithead" (last with cards)
   pendingTribute: PendingTribute | null
+  pendingQuickFollowUp: PendingQuickFollowUp | null
   log: GameEvent[]
   /**
    * Monotonic action sequence number, assigned by the engine: 0 at init,
    * +1 for every state-mutating action (rearrange, startPlay, tribute,
-   * playCards, interruptBurn, pickUpPile). Per-room this lets clients detect duplicate/
+   * playCards, quickFollowUp, interruptBurn, pickUpPile). Per-room this lets clients detect duplicate/
    * replayed or out-of-order GAME_STATE broadcasts (ignore seq <= last seen).
    * Optional so existing consumers constructing lobby placeholders compile;
    * every engine-produced state always carries it.
@@ -124,6 +143,7 @@ export interface GameState {
 
 export type GameEvent =
   | { type: 'PLAY_CARDS'; playerId: string; cards: Card[] }
+  | { type: 'QUICK_FOLLOW_UP'; playerId: string; cards: Card[] }
   | { type: 'PICK_UP_PILE'; playerId: string }
   | { type: 'CLEAR_PILE'; reason: 'ten' | 'quartet' | 'joker' }
   | { type: 'PLAYER_OUT'; playerId: string }
@@ -245,13 +265,14 @@ export function shuffle<T>(arr: T[], rng: () => number = Math.random): T[] {
 /**
  * Can `card` be played on a pile whose effective top rank is `topRank`
  * (null = empty pile or a reset 2)? See D1/D2/D12: any card leads without
- * an active constraint; 2, 3, 10 and Joker are play-anytime; a 7 requires
- * an ordinary response of 7 or lower.
+ * an active constraint; 2, 3 and Joker are play-anytime. A 10 is normally
+ * unrestricted, except that an effective 7 still requires it to be 7/lower.
  */
 export function canPlay(card: Card, topRank: Rank | null): boolean {
   if (topRank === null) return true
-  if (card.rank === '2' || card.rank === '3' || card.rank === '10' || card.rank === 'JOKER') return true
+  if (card.rank === '2' || card.rank === '3' || card.rank === 'JOKER') return true
   if (topRank === '7') return RANK_ORDER[card.rank] <= RANK_ORDER['7']
+  if (card.rank === '10') return true
   return RANK_ORDER[card.rank] >= RANK_ORDER[topRank]
 }
 
@@ -404,6 +425,7 @@ function applyStalemateCap(state: GameState): GameState {
     ...state,
     phase: 'gameOver',
     loserId,
+    pendingQuickFollowUp: null,
     log: appendLog(state.log, { type: 'GAME_OVER', loserId }),
   }
 }
@@ -484,6 +506,7 @@ export function initGame(cfg: InitConfig): GameState {
     winnerId: null,
     loserId: null,
     pendingTribute,
+    pendingQuickFollowUp: null,
     log: [{ type: 'PHASE_CHANGE', phase: 'rearrange' }],
     seq: 0,
   }
@@ -519,6 +542,7 @@ export function startPlay(state: GameState): GameState {
     ...state,
     phase,
     pendingTribute,
+    pendingQuickFollowUp: null,
     currentPlayerIdx: pendingTribute ? tributeWinnerIdx : startingPlayerIdx(state.players),
     log: appendLog(state.log, { type: 'PHASE_CHANGE', phase }),
     seq: (state.seq ?? 0) + 1,
@@ -536,6 +560,7 @@ function finishTribute(state: GameState, players: Player[]): GameState {
     players,
     phase: 'play',
     pendingTribute: null,
+    pendingQuickFollowUp: null,
     currentPlayerIdx: startingPlayerIdx(players),
     log: appendLog(state.log, { type: 'PHASE_CHANGE', phase: 'play' }),
     seq: (state.seq ?? 0) + 1,
@@ -588,6 +613,8 @@ function clearReason(cards: Card[]): 'ten' | 'quartet' | 'joker' {
       : 'quartet'
 }
 
+type AcceptedPlayKind = 'normal' | 'interrupt' | 'quickFollowUp'
+
 /** Apply a fully validated play, including draw, out/game-over, logs and turn. */
 function applyAcceptedPlay(
   state: GameState,
@@ -595,6 +622,7 @@ function applyAcceptedPlay(
   realCards: Card[],
   zone: CardZone,
   cleared: boolean,
+  kind: AcceptedPlayKind,
 ): GameState {
   const playerId = state.players[actorIdx].id
   const playedIds = new Set(realCards.map(card => card.id))
@@ -616,11 +644,14 @@ function applyAcceptedPlay(
   // remains. A pickup intentionally never does this.
   const stock = [...state.stock]
   let drawCount = 0
+  const drawnCards: Card[] = []
   nextPlayers = nextPlayers.map(player => {
     if (player.id !== playerId) return player
     const hand = [...player.hand]
     while (hand.length < 3 && stock.length > 0) {
-      hand.push(stock.shift()!)
+      const drawn = stock.shift()!
+      hand.push(drawn)
+      drawnCards.push(drawn)
       drawCount++
     }
     return { ...player, hand }
@@ -641,13 +672,25 @@ function applyAcceptedPlay(
 
   let phase: Phase = endgamePhase(state.phase, nextPlayers, stock)
 
-  // A burn hands the empty-pile lead to its actor (including an interrupt).
-  // If the actor went out, pass to the next active player. Non-burning 8s
-  // skip one additional active seat per card.
-  let nextIdx = actorIdx
-  if (!cleared || wentOut) {
+  // A burn hands the empty-pile lead to its actor (including an interrupt or
+  // quick follow-up). A normal non-burning play calculates the next seat from
+  // the actor. A quick follow-up must instead preserve the already-calculated
+  // next player; each extra 8 advances it one further active seat so stacked
+  // skip effects remain cumulative rather than being recalculated from actor.
+  let nextIdx: number
+  if (cleared) {
+    nextIdx = wentOut
+      ? nextActiveIdx(nextPlayers, actorIdx, state.playDirection)
+      : actorIdx
+  } else if (kind === 'quickFollowUp') {
+    nextIdx = state.currentPlayerIdx
+    const extraSkipCount = realCards[0].rank === '8' ? realCards.length : 0
+    for (let skipped = 0; skipped < extraSkipCount; skipped++) {
+      nextIdx = nextActiveIdx(nextPlayers, nextIdx, state.playDirection)
+    }
+  } else {
     nextIdx = nextActiveIdx(nextPlayers, actorIdx, state.playDirection)
-    const skipCount = !cleared && realCards[0].rank === '8' ? realCards.length : 0
+    const skipCount = realCards[0].rank === '8' ? realCards.length : 0
     for (let skipped = 0; skipped < skipCount; skipped++) {
       nextIdx = nextActiveIdx(nextPlayers, nextIdx, state.playDirection)
     }
@@ -660,11 +703,38 @@ function applyAcceptedPlay(
     phase = 'gameOver'
   }
 
+  const nextSeq = (state.seq ?? 0) + 1
+  let eligibleCardIds: string[] = []
+  if (!cleared && !wentOut && phase !== 'gameOver') {
+    if (kind === 'normal' && zone !== 'faceDown') {
+      eligibleCardIds = drawnCards
+        .filter(card => card.rank === realCards[0].rank)
+        .map(card => card.id)
+    } else if (kind === 'quickFollowUp') {
+      const previous = state.pendingQuickFollowUp
+      const remaining = previous?.playerId === playerId && previous.rank === realCards[0].rank
+        ? previous.eligibleCardIds.filter(id => !playedIds.has(id))
+        : []
+      const newlyEligible = drawnCards
+        .filter(card => card.rank === realCards[0].rank)
+        .map(card => card.id)
+      const stillInHand = new Set(nextPlayers[actorIdx]?.hand.map(card => card.id) ?? [])
+      eligibleCardIds = [...new Set([...remaining, ...newlyEligible])]
+        .filter(id => stillInHand.has(id))
+    }
+  }
+  const pendingQuickFollowUp: PendingQuickFollowUp | null = eligibleCardIds.length > 0
+    ? { playerId, rank: realCards[0].rank, eligibleCardIds, sourceSeq: nextSeq }
+    : null
+
   const events: GameEvent[] = [
     ...(zone === 'faceDown'
       ? [{ type: 'BLIND_REVEAL' as const, playerId, card: realCards[0], success: true }]
       : []),
     { type: 'PLAY_CARDS', playerId, cards: realCards },
+    ...(kind === 'quickFollowUp'
+      ? [{ type: 'QUICK_FOLLOW_UP' as const, playerId, cards: realCards }]
+      : []),
     ...(cleared ? [{ type: 'CLEAR_PILE' as const, reason: clearReason(realCards) }] : []),
     ...(drawCount > 0 ? [{ type: 'DRAW' as const, playerId, count: drawCount }] : []),
     ...(wentOut ? [{ type: 'PLAYER_OUT' as const, playerId }] : []),
@@ -681,8 +751,9 @@ function applyAcceptedPlay(
     turnCount: state.turnCount + 1,
     winnerId,
     loserId,
+    pendingQuickFollowUp,
     log: appendLog(state.log, ...events),
-    seq: (state.seq ?? 0) + 1,
+    seq: nextSeq,
   })
 }
 
@@ -760,6 +831,7 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
         pile: state.pile.filter(e => e.cleared),
         currentPlayerIdx: nextIdx,
         turnCount: state.turnCount + 1,
+        pendingQuickFollowUp: null,
         log: appendLog(
           state.log,
           { type: 'BLIND_REVEAL', playerId, card: revealed, success: false },
@@ -776,7 +848,69 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
   }
 
   const cleared = playClearsPile(realCards) || completesPhysicalBurn(state, realCards)
-  return { state: applyAcceptedPlay(state, state.currentPlayerIdx, realCards, zone, cleared) }
+  return { state: applyAcceptedPlay(state, state.currentPlayerIdx, realCards, zone, cleared, 'normal') }
+}
+
+/**
+ * Canonical cards the named player may use for the currently open quick
+ * follow-up. This never grants eligibility by rank alone: the exact card id
+ * must have been recorded when that card was drawn from stock.
+ */
+export function getQuickFollowUpCards(state: GameState, playerId: string): Card[] {
+  if (state.phase !== 'play' && state.phase !== 'endgame') return []
+  const pending = state.pendingQuickFollowUp
+  if (!pending || pending.playerId !== playerId || pending.sourceSeq !== (state.seq ?? 0)) return []
+  const actor = state.players.find(player => player.id === playerId)
+  if (!actor || actor.isOut) return []
+  const run = getPhysicalTopRun(state)
+  if (!run || run.rank !== pending.rank) return []
+
+  const eligible = new Set(pending.eligibleCardIds)
+  return actor.hand.filter(card => eligible.has(card.id) && card.rank === pending.rank)
+}
+
+/**
+ * Add one or more entitled replacement cards before a competing action is
+ * accepted. Multiplayer currently submits one card at a time; the engine
+ * supports a batch so offline/future callers preserve equal-rank semantics.
+ */
+export function quickFollowUp(state: GameState, playerId: string, cards: Card[]): PlayResult {
+  if (state.phase !== 'play' && state.phase !== 'endgame') {
+    return { state, error: 'Cannot quick-follow-up in current phase' }
+  }
+  const actorIdx = state.players.findIndex(player => player.id === playerId)
+  if (actorIdx === -1) return { state, error: 'Player not found' }
+  if (state.players[actorIdx].isOut) return { state, error: 'Player already out' }
+  if (cards.length === 0) return { state, error: 'No cards to quick-follow-up with' }
+
+  const pending = state.pendingQuickFollowUp
+  if (!pending || pending.playerId !== playerId) {
+    return { state, error: 'No quick follow-up is available for this player' }
+  }
+  if (pending.sourceSeq !== (state.seq ?? 0)) {
+    return { state, error: 'Quick follow-up window has expired' }
+  }
+
+  const submittedIds = cards.map(card => card.id)
+  if (new Set(submittedIds).size !== submittedIds.length) {
+    return { state, error: 'Duplicate card in quick follow-up' }
+  }
+  const eligible = new Map(
+    getQuickFollowUpCards(state, playerId).map(card => [card.id, card] as const),
+  )
+  const realCards: Card[] = []
+  for (const card of cards) {
+    const real = eligible.get(card.id)
+    if (!real) {
+      return { state, error: `Card ${card.id} was not drawn for this quick follow-up` }
+    }
+    realCards.push(real)
+  }
+
+  const cleared = playClearsPile(realCards) || completesPhysicalBurn(state, realCards)
+  return {
+    state: applyAcceptedPlay(state, actorIdx, realCards, 'hand', cleared, 'quickFollowUp'),
+  }
 }
 
 /**
@@ -858,7 +992,7 @@ export function interruptBurn(state: GameState, playerId: string, cards: Card[])
     return { state, error: 'Interrupt must complete at least four matching cards' }
   }
 
-  return { state: applyAcceptedPlay(state, actorIdx, realCards, zone, true) }
+  return { state: applyAcceptedPlay(state, actorIdx, realCards, zone, true, 'interrupt') }
 }
 
 export function pickUpPile(state: GameState, playerId: string): PlayResult {
@@ -898,6 +1032,7 @@ export function pickUpPile(state: GameState, playerId: string): PlayResult {
       currentPlayerIdx: nextIdx,
       phase,
       turnCount: state.turnCount + 1,
+      pendingQuickFollowUp: null,
       log: appendLog(state.log, { type: 'PICK_UP_PILE', playerId }),
       seq: (state.seq ?? 0) + 1,
     }),

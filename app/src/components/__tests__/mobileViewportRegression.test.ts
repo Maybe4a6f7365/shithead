@@ -36,4 +36,16 @@ describe('Android visual viewport regression', () => {
     expect(handRule).toContain('overflow-y: hidden')
     expect(handFan).not.toContain('overflow-y-visible')
   })
+
+  it('layers feedback above the table without moving the hand rail', () => {
+    expect(css).toContain('.table-playfield { position: relative; }')
+    expect(css).toMatch(/\.special-effect-feedback\s*\{[^}]*position:\s*absolute;/s)
+    expect(css).toMatch(/\.quick-follow-up-action\s*\{[^}]*width:\s*min\(100%, 340px\)/s)
+    expect(css).toContain('.table-turn-label[data-my-turn="true"]')
+    expect(css).toMatch(/@media \(orientation: landscape\) and \(max-height: 560px\)[\s\S]*?\.table-turn-label\s*\{[^}]*display:\s*block;/)
+
+    const handRule = css.match(/\.hand-fan\s*\{([\s\S]*?)\}/)?.[1] ?? ''
+    expect(handRule).toContain('overflow-x: auto')
+    expect(handRule).toContain('overflow-y: hidden')
+  })
 })

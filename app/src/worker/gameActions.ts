@@ -1,5 +1,7 @@
 import {
+  getQuickFollowUpCards,
   interruptBurn,
+  quickFollowUp,
   type Card,
   type GameState,
   type PlayResult,
@@ -41,4 +43,35 @@ export function applyInterruptBurnRequest(
   const cards = canonicalCards(state, playerId, requested)
   if (!cards) return { state, error: 'Card is not owned by this player' }
   return interruptBurn(state, playerId, cards)
+}
+
+/**
+ * Worker boundary for one QUICK_FOLLOW_UP frame.
+ *
+ * The wire carries only an opaque card id plus the exact state sequence the
+ * player saw. We resolve that id exclusively through the engine's pending
+ * draw entitlement — never through the player's whole hand — so an owned,
+ * pre-existing card of the same rank is still rejected. The sequence check
+ * makes serialized WebSocket races deterministic: whichever accepted action
+ * mutates the room first closes or advances this window.
+ */
+export function applyQuickFollowUpRequest(
+  state: GameState,
+  playerId: string,
+  cardId: string,
+  expectedSeq: number,
+): PlayResult {
+  const reject = (): PlayResult => ({ state, error: 'Quick follow-up is not available' })
+  const currentSeq = state.seq ?? 0
+  const pending = state.pendingQuickFollowUp
+  if (expectedSeq !== currentSeq || pending?.sourceSeq !== expectedSeq) {
+    return reject()
+  }
+  if (pending.playerId !== playerId) {
+    return reject()
+  }
+
+  const card = getQuickFollowUpCards(state, playerId).find(candidate => candidate.id === cardId)
+  if (!card) return reject()
+  return quickFollowUp(state, playerId, [card])
 }

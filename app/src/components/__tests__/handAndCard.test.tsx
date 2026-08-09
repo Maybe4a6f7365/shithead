@@ -140,7 +140,7 @@ describe('voluntary pickup', () => {
           players: [mine, other], stock: [],
           pile: [{ cards: [card(9, '3')], cleared: false }],
           currentPlayerIdx: 0, playDirection: 1, turnCount: 1,
-          winnerId: null, loserId: null, pendingTribute: null, log: [], seq: 1,
+          winnerId: null, loserId: null, pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 1,
         }}
         viewerId="me"
         viewerActive
@@ -180,7 +180,7 @@ describe('out-of-turn burn in', () => {
           players: [other, mine], stock: [],
           pile: [{ cards: [card(30, '4')], cleared: false }],
           currentPlayerIdx: 0, playDirection: 1, turnCount: 3,
-          winnerId: null, loserId: null, pendingTribute: null, log: [], seq: 3,
+          winnerId: null, loserId: null, pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 3,
         }}
         viewerId="me"
         viewerActive={false}
@@ -216,7 +216,7 @@ describe('out-of-turn burn in', () => {
           players: [other, mine], stock: [],
           pile: [{ cards: [card(30, '4')], cleared: false }],
           currentPlayerIdx: 0, playDirection: 1, turnCount: 3,
-          winnerId: null, loserId: null, pendingTribute: null, log: [], seq: 3,
+          winnerId: null, loserId: null, pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 3,
         }}
         viewerId="me"
         viewerActive={false}

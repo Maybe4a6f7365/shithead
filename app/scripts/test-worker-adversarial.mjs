@@ -7,6 +7,7 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '')
 const wsBase = baseUrl.replace(/^http/, 'ws')
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+const PROTOCOL_VERSION = 5
 
 let passed = 0
 function ok(name) {
@@ -143,8 +144,9 @@ function effectiveTopRank(state) {
 }
 
 function canPlayRank(rank, top) {
-  if (top === null || ['2', '3', '10', 'JOKER'].includes(rank)) return true
+  if (top === null || ['2', '3', 'JOKER'].includes(rank)) return true
   if (top === '7') return rankOrder.get(rank) <= rankOrder.get('7')
+  if (rank === '10') return true
   return rankOrder.get(rank) >= rankOrder.get(top)
 }
 
@@ -187,25 +189,28 @@ async function finishRound(peersById, initialState) {
 }
 
 async function main() {
+  assert.equal(canPlayRank('10', '7'), false, '10 must respect the 7-or-lower restriction')
+  assert.equal(canPlayRank('10', '6'), true, '10 remains a clear card above ordinary ranks')
+
   // ---- T1: create/join happy path, WELCOME carries version + secret token
   const roomId = await newRoom()
   const wsUrl = `${wsBase}/api/room/${roomId}/ws`
   let host = await new Peer('host', wsUrl).connect()
   const guest = await new Peer('guest', wsUrl).connect()
 
-  host.send({ type: 'CREATE_ROOM', playerName: 'Host', version: 4 })
+  host.send({ type: 'CREATE_ROOM', playerName: 'Host', version: PROTOCOL_VERSION })
   const hostWelcome = await host.waitType('WELCOME')
-  assert.equal(hostWelcome.version, 4, 'WELCOME must echo protocol version')
+  assert.equal(hostWelcome.version, PROTOCOL_VERSION, 'WELCOME must echo protocol version')
   assert.match(hostWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/, 'WELCOME must carry a high-entropy resumeToken')
   const hostId = hostWelcome.playerId
   const hostToken1 = hostWelcome.resumeToken
 
-  guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Guest', version: 4 })
+  guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Guest', version: PROTOCOL_VERSION })
   const guestWelcome = await guest.waitType('WELCOME')
   assert.match(guestWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/)
   assert.notEqual(guestWelcome.resumeToken, hostToken1, 'tokens must be per-player unique')
   const guestId = guestWelcome.playerId
-  ok('T1 create/join: WELCOME carries version=4 and unique per-player resumeToken')
+  ok(`T1 create/join: WELCOME carries version=${PROTOCOL_VERSION} and unique per-player resumeToken`)
 
   // Token must never leak into broadcasts seen by the other player.
   await host.waitType('ROOM_STATE', m => m.room.players.length === 2)
@@ -216,13 +221,16 @@ async function main() {
 
   // ---- T2: RESUME without a token -> RESUME_FAILED, seat untouched
   const noToken = await new Peer('no-token', wsUrl).connect()
-  noToken.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: '', version: 4 })
+  noToken.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: '', version: PROTOCOL_VERSION })
   await noToken.waitType('ERROR', m => /invalid message/i.test(m.message))
   ok('T2 malformed typed RESUME without a token is rejected')
 
   // ---- T3: stolen playerId + wrong token -> RESUME_FAILED, victim not kicked
   const attacker = await new Peer('attacker', wsUrl).connect()
-  attacker.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: 'A'.repeat(43), version: 4 })
+  attacker.send({
+    type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId,
+    resumeToken: 'A'.repeat(43), version: PROTOCOL_VERSION,
+  })
   const fail2 = await attacker.waitType('RESUME_FAILED')
   assert.equal(fail2.reason, 'invalid_token')
   await sleep(300)
@@ -235,20 +243,29 @@ async function main() {
   await host.close()
   await guest.waitType('ROOM_STATE', m => m.room.players.find(p => p.id === hostId)?.connected === false)
   host = await new Peer('host-resumed', wsUrl).connect()
-  host.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 4 })
+  host.send({
+    type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId,
+    resumeToken: hostToken1, version: PROTOCOL_VERSION,
+  })
   const resumed = await host.waitType('WELCOME')
   assert.equal(resumed.playerId, hostId)
-  assert.equal(resumed.version, 4)
+  assert.equal(resumed.version, PROTOCOL_VERSION)
   assert.notEqual(resumed.resumeToken, hostToken1, 'resume must rotate the token')
   const hostToken2 = resumed.resumeToken
   const stale = await new Peer('stale-token', wsUrl).connect()
-  stale.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 4 })
+  stale.send({
+    type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId,
+    resumeToken: hostToken1, version: PROTOCOL_VERSION,
+  })
   await stale.waitType('RESUME_FAILED')
   ok('T4 resume rotates token; old (rotated-out) token is rejected')
 
   // ---- T5: unknown room -> RESUME_FAILED room_not_found
   const stranger = await new Peer('stranger', `${wsBase}/api/room/ZZZZZ9/ws`).connect()
-  stranger.send({ type: 'RESUME_ROOM', roomCode: 'ZZZZZ9', playerId: hostId, resumeToken: hostToken2, version: 4 })
+  stranger.send({
+    type: 'RESUME_ROOM', roomCode: 'ZZZZZ9', playerId: hostId,
+    resumeToken: hostToken2, version: PROTOCOL_VERSION,
+  })
   const fail3 = await stranger.waitType('RESUME_FAILED')
   assert.equal(fail3.reason, 'room_not_found')
   await stranger.close()
@@ -258,9 +275,9 @@ async function main() {
   host.send({ type: 'PING', version: 1 })
   const versionError = await host.waitType('ERROR', m => /protocol version/i.test(m.message))
   assert(versionError, 'expected protocol-version error')
-  host.send({ type: 'PING', version: 4 })
+  host.send({ type: 'PING', version: PROTOCOL_VERSION })
   await host.waitType('PONG')
-  ok('T6 client message with version != 4 rejected with clean error')
+  ok(`T6 client message with version != ${PROTOCOL_VERSION} rejected with clean error`)
 
   // ---- T7: malformed message rejected
   host.send('this is not json{')
@@ -284,7 +301,7 @@ async function main() {
   ])
   for (const message of [hostEmote, guestEmote]) {
     assert.equal(message.playerId, hostId)
-    assert.equal(message.version, 4)
+    assert.equal(message.version, PROTOCOL_VERSION)
     assert.equal(typeof message.ts, 'number')
     assert(!('state' in message), 'ephemeral EMOTE must not include room/game state')
   }
@@ -316,7 +333,7 @@ async function main() {
   host.send({ type: 'START_GAME' })
   await host.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
   const guestRearrange = await guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
-  assert.equal(guestRearrange.version, 4, 'GAME_STATE must echo protocol version')
+  assert.equal(guestRearrange.version, PROTOCOL_VERSION, 'GAME_STATE must echo protocol version')
   assert.equal(typeof guestRearrange.state.seq, 'number', 'GAME_STATE must carry seq')
   const guestViewOfHost = guestRearrange.state.players.find(p => p.id === hostId)
   assert(guestViewOfHost.hand.every(c => c.rank === '3' && c.suit === null && c.id.startsWith('hidden:')), 'opponent hand must be masked')
@@ -370,6 +387,30 @@ async function main() {
   await sleep(150)
   assert.equal(host.latestGameState.seq, seqBeforeUnauthBurn, 'unauthenticated BURN_IN mutated the room')
   ok('T8c BURN_IN rejects current, insufficient, hidden, and unauthenticated attempts without mutation')
+
+  // ---- T8d: QUICK_FOLLOW_UP is exact-sequence, authenticated, and
+  // entitlement-bound. There is no pending replacement draw at round start,
+  // so every otherwise well-shaped attempt must leave state untouched.
+  current.send({ type: 'QUICK_FOLLOW_UP', cardId: currentHandForBurn[0].id })
+  await current.waitType('ERROR', message => /invalid message/i.test(message.message))
+  const seqBeforeQuickForgery = current.latestGameState.seq
+  current.send({
+    type: 'QUICK_FOLLOW_UP', cardId: currentHandForBurn[0].id,
+    expectedSeq: seqBeforeQuickForgery + 1,
+  })
+  await current.waitType('ERROR', isError('INVALID_MOVE'))
+  current.send({
+    type: 'QUICK_FOLLOW_UP', cardId: 'forged-drawn-card-id',
+    expectedSeq: seqBeforeQuickForgery,
+  })
+  await current.waitType('ERROR', isError('INVALID_MOVE'))
+  attacker.send({
+    type: 'QUICK_FOLLOW_UP', cardId: currentHandForBurn[0].id,
+    expectedSeq: seqBeforeQuickForgery,
+  })
+  await sleep(150)
+  assert.equal(current.latestGameState.seq, seqBeforeQuickForgery, 'forged QUICK_FOLLOW_UP mutated the room')
+  ok('T8d QUICK_FOLLOW_UP rejects malformed, stale, forged, and unauthenticated attempts without mutation')
 
   // ---- T9: forged out-of-turn PLAY rejected, no state change
   const idleState = idle.latestGameState

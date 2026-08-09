@@ -12,7 +12,13 @@ export function applyPlayerForfeit(state: GameState, leavingId: string): GameSta
     const players = state.players.filter(player => player.id !== leavingId)
     let currentPlayerIdx = players.findIndex(player => player.id === currentId)
     if (currentPlayerIdx < 0) currentPlayerIdx = Math.max(0, players.findIndex(player => !player.isOut))
-    return { ...state, players, currentPlayerIdx, seq: (state.seq ?? 0) + 1 }
+    return {
+      ...state,
+      players,
+      currentPlayerIdx,
+      pendingQuickFollowUp: null,
+      seq: (state.seq ?? 0) + 1,
+    }
   }
 
   const remaining = state.players.filter(player => player.id !== leavingId && !player.isOut)
@@ -27,6 +33,7 @@ export function applyPlayerForfeit(state: GameState, leavingId: string): GameSta
     winnerId,
     loserId: leavingId,
     pendingTribute: null,
+    pendingQuickFollowUp: null,
     log: log.length > MAX_LOG_ENTRIES ? log.slice(-MAX_LOG_ENTRIES) : log,
     seq: (state.seq ?? 0) + 1,
   }

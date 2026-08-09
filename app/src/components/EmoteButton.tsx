@@ -7,6 +7,10 @@ const EMOTES: Record<EmoteId, { glyph: string; label: string }> = {
   laugh: { glyph: '😂', label: 'Laugh' },
   wow: { glyph: '😮', label: 'Wow' },
   fire: { glyph: '🔥', label: 'Fire' },
+  sad: { glyph: '😞', label: 'Sad' },
+  cry: { glyph: '😭', label: 'Cry' },
+  heart: { glyph: '❤️', label: 'Love it' },
+  clap: { glyph: '👏', label: 'Applause' },
 }
 
 export interface EmoteButtonProps {
@@ -44,7 +48,7 @@ export function EmoteButton({ onSend }: EmoteButtonProps) {
   }, [open])
 
   const moveMenuFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
     const items = Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
     if (items.length === 0) return
     event.preventDefault()
@@ -52,7 +56,9 @@ export function EmoteButton({ onSend }: EmoteButtonProps) {
     const next = event.key === 'Home' ? 0
       : event.key === 'End' ? items.length - 1
         : event.key === 'ArrowRight' ? (current + 1 + items.length) % items.length
-          : (current - 1 + items.length) % items.length
+          : event.key === 'ArrowLeft' ? (current - 1 + items.length) % items.length
+            : event.key === 'ArrowDown' ? (current + 4 + items.length) % items.length
+              : (current - 4 + items.length) % items.length
     items[next]?.focus()
   }
 

@@ -112,9 +112,11 @@ export class RoomClient {
 
   send(msg: ClientMsg) {
     const stamped = { ...msg, version: PROTOCOL_VERSION } as ClientMsg
-    // Reactions are presence, not gameplay intent. Never replay a stale
-    // click after reconnect/authentication the way durable game actions are.
-    if (stamped.type === 'EMOTE' &&
+    // Reactions are presence, and QUICK_FOLLOW_UP is bound to one exact
+    // authoritative sequence. Never replay either after reconnect/auth the
+    // way durable game actions are: the next player's move may have already
+    // closed the follow-up window (and a rematch may restart seq at zero).
+    if ((stamped.type === 'EMOTE' || stamped.type === 'QUICK_FOLLOW_UP') &&
       (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated)) return
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       if (this.isAuthentication(stamped) || stamped.type === 'LEAVE_ROOM' || this.authenticated) {

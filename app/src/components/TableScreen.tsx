@@ -9,7 +9,7 @@
 // ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Card as CardT, GameState } from '../engine'
-import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getTopCard, getTopRank, pileSize } from '../engine'
+import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
 import { OpponentStrip, orderSeats, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
@@ -23,6 +23,7 @@ import { feedLine, latestActionEvents, type FeedContext } from './feedText'
 import { useSoundFromLog, emitSoundDebounced } from './soundManager'
 import { EmoteButton, EmoteFeedback } from './EmoteButton'
 import type { EmoteEvent, EmoteId } from '../engine/protocol'
+import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
 
 export interface TableScreenProps {
   state: GameState
@@ -34,6 +35,11 @@ export interface TableScreenProps {
   /** Server-side error text to surface in the feed (MP). */
   error?: string | null
   onPlay: (cards: CardT[]) => void
+  /** Race-safe one-card continuation after drawing the rank just played. */
+  onQuickFollowUp?: (card: CardT) => void
+  /** Local hot-seat hand-off when the previous player declines the race. */
+  onDeclineQuickFollowUp?: () => void
+  quickFollowUpDeclineLabel?: string
   /** Out-of-turn completion of the physical top run to four or more. */
   onBurnIn?: (cards: CardT[]) => void
   onPickUp: () => void
@@ -83,7 +89,8 @@ function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }):
 }
 
 export function TableScreen({
-  state, viewerId, viewerActive, error, onPlay, onBurnIn, onPickUp, onLeave, onOpenRules,
+  state, viewerId, viewerActive, error, onPlay, onQuickFollowUp,
+  onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
   soundOn, onToggleSound, connectionBadge, seatOffline, latestEmote, onSendEmote,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
@@ -96,7 +103,10 @@ export function TableScreen({
   const [invalidId, setInvalidId] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)     // transient feed copy (errors, guards)
   const [pickupArmed, setPickupArmed] = useState(false)
+  const [dismissedQuickSourceSeq, setDismissedQuickSourceSeq] = useState<number | null>(null)
   const [burning, setBurning] = useState(false)
+  const [burnSnapshot, setBurnSnapshot] = useState<{ top: CardT | null; pileCount: number; effectiveRank: ReturnType<typeof getTopRank> } | null>(null)
+  const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
   const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
   const debounceRef = useRef(0)
@@ -127,8 +137,18 @@ export function TableScreen({
     [state, viewerId, viewerActive, onBurnIn],
   )
   const interruptIds = useMemo(() => new Set(interruptCards.map(card => card.id)), [interruptCards])
+  const quickFollowUpCards = useMemo(
+    () => (onQuickFollowUp ? getQuickFollowUpCards(state, viewerId) : []),
+    [state, viewerId, onQuickFollowUp],
+  )
+  const quickFollowUpIds = useMemo(() => new Set(quickFollowUpCards.map(card => card.id)), [quickFollowUpCards])
   const physicalRun = getPhysicalTopRun(state)
   const canBurnIn = interruptCards.length > 0 && physicalRun !== null
+  const canQuickFollowUp = quickFollowUpCards.length > 0
+  const quickSourceSeq = state.pendingQuickFollowUp?.playerId === viewerId
+    ? state.pendingQuickFollowUp.sourceSeq
+    : null
+  const showQuickFollowUp = canQuickFollowUp && dismissedQuickSourceSeq !== quickSourceSeq
 
   // ---- Feed: transient flash > server error > event/turn line ----
   const feedCtx: FeedContext = { meId: viewerId, players: state.players }
@@ -155,6 +175,7 @@ export function TableScreen({
 
   // ---- Effects: burn detection, announcements, sounds, turn announce ----
   const lastActionSeq = useRef(state.seq ?? state.turnCount)
+  const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank })
   useEffect(() => {
     const cursor = state.seq ?? state.turnCount
     if (lastActionSeq.current === cursor) return
@@ -162,9 +183,22 @@ export function TableScreen({
     const fresh = latestActionEvents(state.log)
     if (fresh.length === 0) return
     if (fresh.some(e => e.type === 'CLEAR_PILE')) {
+      const burnPlay = fresh.find(event => event.type === 'PLAY_CARDS')
+      const playedTop = burnPlay?.type === 'PLAY_CARDS'
+        ? burnPlay.cards[burnPlay.cards.length - 1] ?? previousPile.current.top
+        : previousPile.current.top
+      setBurnSnapshot({
+        top: playedTop,
+        pileCount: previousPile.current.pileCount + (burnPlay?.type === 'PLAY_CARDS' ? burnPlay.cards.length : 0),
+        effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
+      })
       setBurning(true)
-      later(420, () => setBurning(false))
+      later(460, () => {
+        setBurning(false)
+        setBurnSnapshot(null)
+      })
     }
+    setSpecialEffect(specialEffectFromEvents(fresh, cursor, topRank))
     const ctx: FeedContext = { meId: viewerId, players: state.players }
     const line = feedLine(state, ctx)
     if (line) announcer.sayPolite(line.text)
@@ -174,6 +208,10 @@ export function TableScreen({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.seq, state.turnCount, state.log])
+
+  useEffect(() => {
+    previousPile.current = { top, pileCount: ps, effectiveRank: topRank }
+  }, [top, ps, topRank])
 
   const lastTurnKey = useRef('')
   useEffect(() => {
@@ -261,6 +299,24 @@ export function TableScreen({
     onBurnIn(interruptCards)
   }
 
+  const commitQuickFollowUp = () => {
+    const card = quickFollowUpCards[0]
+    if (!card || !onQuickFollowUp) return
+    if (Date.now() - debounceRef.current < 300) return
+    debounceRef.current = Date.now()
+    emitSoundDebounced('play')
+    setSelection([])
+    setPickupArmed(false)
+    onQuickFollowUp(card)
+  }
+
+  const dismissQuickFollowUp = () => {
+    if (quickSourceSeq === null) return
+    setDismissedQuickSourceSeq(quickSourceSeq)
+    setFlash('Quick match skipped — take your turn')
+    later(2200, () => setFlash(value => value === 'Quick match skipped — take your turn' ? null : value))
+  }
+
   const sendEmote = (emote: EmoteId) => {
     const sentAt = Date.now()
     const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt }
@@ -322,6 +378,16 @@ export function TableScreen({
   const hints = new Map<string, string>()
   if (viewer) {
     for (const c of [...viewer.hand, ...viewer.faceUp]) {
+      if (selection.includes(c.id)) {
+        states.set(c.id, 'selected')
+        hints.set(c.id, 'selected')
+        continue
+      }
+      if (quickFollowUpIds.has(c.id)) {
+        states.set(c.id, 'joinable')
+        hints.set(c.id, 'drawn match, quick follow-up available')
+        continue
+      }
       if (!viewerActive) {
         if (interruptIds.has(c.id)) {
           states.set(c.id, 'joinable')
@@ -331,7 +397,6 @@ export function TableScreen({
         }
         continue
       }
-      if (selection.includes(c.id)) { states.set(c.id, 'selected'); hints.set(c.id, 'selected'); continue }
       const inZone = zone !== 'faceDown' && zoneCards.some(z => z.id === c.id)
       if (!inZone) { states.set(c.id, 'rest'); continue }
       if (invalidId === c.id) { states.set(c.id, 'invalid'); hints.set(c.id, 'not playable'); continue }
@@ -373,6 +438,7 @@ export function TableScreen({
       if (editing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
       if (document.querySelector('[aria-modal="true"], [role="menu"]')) return
       if (e.key === 'Escape') setSelection([])
+      if ((e.key === 'q' || e.key === 'Q') && showQuickFollowUp) commitQuickFollowUp()
       if ((e.key === 'b' || e.key === 'B') && canBurnIn) commitBurnIn()
       if (!viewerActive) return
       if (e.key === 'p' || e.key === 'P') commitPlay()
@@ -408,6 +474,7 @@ export function TableScreen({
           <div
             className="game-turn-label table-turn-label"
             data-my-turn={isViewerTurn && viewerActive ? 'true' : 'false'}
+            aria-current={isViewerTurn && viewerActive ? 'step' : undefined}
           >
             <span>{isViewerTurn && viewerActive ? 'Your turn' : `${current?.name ?? 'Table'}'s turn`}</span>
           </div>
@@ -431,11 +498,12 @@ export function TableScreen({
         data-empty-pile={ps === 0 ? 'true' : 'false'}
         onClick={() => { setSelection([]); setPickupArmed(false) }}
       >
+        <SpecialEffectFeedback effect={specialEffect} />
         <PileArea
           stockCount={state.stock.length}
-          top={top}
-          pileCount={ps}
-          effectiveRank={topRank}
+          top={burning && burnSnapshot ? burnSnapshot.top : top}
+          pileCount={burning && burnSnapshot ? burnSnapshot.pileCount : ps}
+          effectiveRank={burning && burnSnapshot ? burnSnapshot.effectiveRank : topRank}
           burning={burning}
           teachHint={ps === 0 && viewerActive}
         />
@@ -464,13 +532,22 @@ export function TableScreen({
         data-active-zone={zone ?? undefined}
       >
         <div className="table-hand-zone__inner" onClick={e => e.stopPropagation()}>
-          {(viewerActive || canBurnIn) && (
+          {(viewerActive || canBurnIn || canQuickFollowUp) && (
             <ActionBar
               selectionCount={selection.length}
               canPickUp={viewerActive && ps > 0}
               pickupArmed={pickupArmed}
               onPlay={commitPlay}
               onPickUp={commitPickup}
+              quickFollowUp={showQuickFollowUp ? {
+                count: quickFollowUpCards.length,
+                rank: quickFollowUpCards[0].rank,
+              } : undefined}
+              onQuickFollowUp={showQuickFollowUp ? commitQuickFollowUp : undefined}
+              onDismissQuickFollowUp={showQuickFollowUp
+                ? viewerActive ? dismissQuickFollowUp : onDeclineQuickFollowUp
+                : undefined}
+              dismissQuickFollowUpLabel={viewerActive ? 'Normal turn' : quickFollowUpDeclineLabel}
               burnIn={canBurnIn && physicalRun ? { count: interruptCards.length, rank: physicalRun.rank } : undefined}
               onBurnIn={canBurnIn ? commitBurnIn : undefined}
             />

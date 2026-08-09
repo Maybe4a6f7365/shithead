@@ -4,6 +4,7 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'https://shithead.not4a6f7365.workers.dev').replace(/\/$/, '')
 const expectedCommit = process.env.EXPECTED_COMMIT || ''
 const deploymentTimeoutMs = Number(process.env.DEPLOYMENT_TIMEOUT_MS || 10 * 60 * 1000)
+const PROTOCOL_VERSION = 5
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const log = message => console.log(`[multiplayer-smoke] ${message}`)
@@ -33,7 +34,7 @@ async function waitForDeployment() {
         const version = JSON.parse(text)
         if (!expectedCommit || version.commit === expectedCommit) {
           assert.equal(version.service, 'shithead-multiplayer')
-          assert.equal(version.protocol, 4)
+          assert.equal(version.protocol, PROTOCOL_VERSION)
           log(`deployed commit ${version.commit}`)
           return version
         }
@@ -238,7 +239,7 @@ async function run() {
 
   host.send({ type: 'CREATE_ROOM', playerName: 'Smoke Host' })
   const hostWelcome = await host.waitType('WELCOME')
-  assert.equal(hostWelcome.version, 4)
+  assert.equal(hostWelcome.version, PROTOCOL_VERSION)
   assert.equal(hostWelcome.room.code, roomId)
   assert.equal(hostWelcome.room.hostId, hostWelcome.playerId)
   const hostId = hostWelcome.playerId

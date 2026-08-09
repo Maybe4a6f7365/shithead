@@ -9,7 +9,7 @@ function state(seq: number, log: GameState['log']): GameState {
     phase: 'play',
     rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
     players: [], stock: [], pile: [], currentPlayerIdx: 0, playDirection: 1,
-    turnCount: seq, winnerId: null, loserId: null, pendingTribute: null, log, seq,
+    turnCount: seq, winnerId: null, loserId: null, pendingTribute: null, pendingQuickFollowUp: null, log, seq,
   }
 }
 

@@ -2,7 +2,7 @@
 // useMultiplayerRoom — room socket lifecycle, session resume, seq guard,
 // truthful connection states (§4.6, Appendix A.10).
 //
-// RESUME CONTRACT (protocol v4):
+// RESUME CONTRACT (protocol v5):
 //  - WELCOME carries `resumeToken` (per-player secret). We persist
 //    { roomCode, playerId, resumeToken, playerName } in localStorage.
 //  - RESUME_ROOM is sent as { type, roomCode, playerId, resumeToken }.
@@ -319,6 +319,19 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     send({ type: 'EMOTE', emote })
   }, [send])
 
+  /**
+   * Play one replacement card that the engine marked as an immediate
+   * same-rank follow-up. The client binds the intent to the latest accepted
+   * authoritative sequence; the worker rejects it if another action won the
+   * race. RoomClient deliberately never queues this time-sensitive action.
+   */
+  const quickFollowUp = useCallback((cardId: string) => {
+    const expectedSeq = authoritativeStateRef.current?.seq
+    if (!cardId || !Number.isSafeInteger(expectedSeq) || Number(expectedSeq) < 0) return false
+    send({ type: 'QUICK_FOLLOW_UP', cardId, expectedSeq: Number(expectedSeq) })
+    return true
+  }, [send])
+
   /** Badge-as-button retry after the client gave up (§4.6). */
   const retry = useCallback(() => {
     reconnectingRef.current = false
@@ -362,7 +375,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     status, attempt, maxAttempts: 5,
     room, gameState, playerId,
     error, notice, clearNotice, latestEmote,
-    send, sendEmote, retry, tryAgain, leave,
+    send, sendEmote, quickFollowUp, retry, tryAgain, leave,
   }
 }
 

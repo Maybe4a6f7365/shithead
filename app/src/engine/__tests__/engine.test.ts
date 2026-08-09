@@ -75,7 +75,7 @@ describe('shuffle', () => {
 })
 
 describe('canPlay', () => {
-  it('2, 3, 10 and Joker can be played on anything', () => {
+  it('2, 3 and Joker are wild; 10 is unrestricted away from a 7', () => {
     for (const top of ['A','K','3','10'] as const) {
       expect(canPlay(c('2'), top)).toBe(true)
       expect(canPlay(c('3'), top)).toBe(true)
@@ -98,8 +98,8 @@ describe('canPlay', () => {
     expect(canPlay(c('4'), 'A')).toBe(false)
   })
   it('a 7 reverses the comparison and forces an ordinary rank of 7 or lower', () => {
-    const legal = ['2', '3', '4', '5', '6', '7', '10', 'JOKER'] as const
-    const illegal = ['8', '9', 'J', 'Q', 'K', 'A'] as const
+    const legal = ['2', '3', '4', '5', '6', '7', 'JOKER'] as const
+    const illegal = ['8', '9', '10', 'J', 'Q', 'K', 'A'] as const
     for (const rank of legal) {
       expect(canPlay(c(rank, rank === 'JOKER' ? null : '♠'), '7')).toBe(true)
     }

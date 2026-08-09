@@ -34,11 +34,13 @@ describe('legacy worker state migration', () => {
     delete legacy.rules
     delete legacy.winnerId
     delete legacy.pendingTribute
+    delete legacy.pendingQuickFollowUp
 
     const migrated = normalizePersistedGameState(legacy as never)
     expect(migrated?.rules).toEqual(DEFAULT_GAME_RULES)
     expect(migrated?.winnerId).toBeNull()
     expect(migrated?.pendingTribute).toBeNull()
+    expect(migrated?.pendingQuickFollowUp).toBeNull()
   })
 
   it('derives an unambiguous sole player out', () => {
@@ -79,6 +81,33 @@ describe('legacy worker state migration', () => {
     })
     expect(normalizeGameRules({ deckCount: 3 })).toMatchObject({ deckCount: 3 })
     expect(normalizeGameRules({ deckCount: 99 } as never)).toMatchObject({ deckCount: 1 })
+  })
+
+  it('preserves only a fully valid pending replacement-draw entitlement', () => {
+    const base = stateWithOutPlayers([])
+    const eligible = base.players[0].hand[0]
+    const live: GameState = {
+      ...base,
+      phase: 'play',
+      seq: 4,
+      pile: [{
+        cards: [{ id: 'public-top', suit: eligible.suit, rank: eligible.rank }],
+        cleared: false,
+      }],
+      pendingQuickFollowUp: {
+        playerId: 'a', rank: eligible.rank, eligibleCardIds: [eligible.id], sourceSeq: 4,
+      },
+    }
+
+    expect(normalizePersistedGameState(live)?.pendingQuickFollowUp).toEqual(live.pendingQuickFollowUp)
+    expect(normalizePersistedGameState({
+      ...live,
+      pendingQuickFollowUp: { ...live.pendingQuickFollowUp!, sourceSeq: 3 },
+    })?.pendingQuickFollowUp).toBeNull()
+    expect(normalizePersistedGameState({
+      ...live,
+      pendingQuickFollowUp: { ...live.pendingQuickFollowUp!, eligibleCardIds: ['forged-id'] },
+    })?.pendingQuickFollowUp).toBeNull()
   })
 })
 

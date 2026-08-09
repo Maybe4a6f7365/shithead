@@ -24,6 +24,7 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
     lines: [
       'Normally, play one card — or any number of cards of the same rank — that matches or beats the effective pile rank.',
       'Draw from the stock to refill your hand to 3.',
+      'Quick draw — if a refill card matches the rank you just played, you may add that freshly drawn card before the next player plays. Only cards drawn by that play qualify; another matching refill can continue the chain.',
       "Can't play — or prefer not to? Pick up the whole pile.",
       'Hand empty: play your face-up cards. Those gone: flip a face-down card blind.',
     ],
@@ -33,12 +34,12 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
     lines: [
       '2 — reset. Playable on anything; it removes the active rank constraint, so anything may follow.',
       '3 — copy. Playable on anything; it counts exactly like the effective card beneath it.',
-      '7 — low. The next ordinary card must be 7 or lower.',
+      '7 — low. The next response must be 7 or lower. Only 2, 3 and Joker bypass this; 10 cannot be played on an effective 7.',
       '8 — skip. Skips one active player per 8 played; equal-rank 8s stack.',
       '10 — burn. Removes the pile from the game; you lead again.',
       'Four or more matching cards at the physical top — burns the pile, even when the run was built across turns.',
       'Burn in — out of turn, play all matching cards from your visible active row if they complete that top run to 4 or more. The pile burns and you lead.',
-      'Joker (when enabled) — wild. Playable on anything and burns the pile.',
+      'Joker (when enabled) — playable on anything and burns the pile. It does not substitute for another rank.',
     ],
   },
   {

@@ -34,7 +34,7 @@ export interface MultiplayerGameTableProps {
 export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
   const {
     status, attempt, maxAttempts, room, gameState, playerId,
-    error, notice, latestEmote, send, sendEmote, retry, tryAgain, leave,
+    error, notice, latestEmote, send, sendEmote, quickFollowUp, retry, tryAgain, leave,
   } = useMultiplayerRoom({ roomId, playerName, intent })
 
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -238,6 +238,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         viewerActive={gameState.players[gameState.currentPlayerIdx]?.id === playerId && gameState.phase !== 'gameOver'}
         error={notice}
         onPlay={cards => send({ type: 'PLAY', cards })}
+        onQuickFollowUp={card => { quickFollowUp(card.id) }}
         onBurnIn={cards => send({ type: 'BURN_IN', cards })}
         onPickUp={() => send({ type: 'PICK_UP' })}
         onLeave={quit}

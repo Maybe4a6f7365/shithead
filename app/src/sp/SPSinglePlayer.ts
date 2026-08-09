@@ -12,11 +12,13 @@ import {
   type Player,
   type PreviousRoundResult,
   exchangeFaceUpCards,
+  getQuickFollowUpCards,
   interruptBurn,
   initGame,
   pickAIMove,
   pickUpPile,
   playCards,
+  quickFollowUp as applyQuickFollowUp,
   rearrange,
   skipTribute,
   startPlay,
@@ -44,6 +46,7 @@ interface SPState {
   endRearrange: (playerId: string) => void
   rearrange: (playerId: string, handIdx: number, upIdx: number) => void
   playCards: (playerId: string, cards: Card[]) => void
+  quickFollowUp: (playerId: string, card: Card) => void
   interruptBurn: (playerId: string, cards: Card[]) => void
   pickUpPile: (playerId: string) => void
   exchangeTribute: (playerId: string, winnerCardId: string, loserCardId: string) => void
@@ -69,6 +72,7 @@ function emptyState(): GameState {
     winnerId: null,
     loserId: null,
     pendingTribute: null,
+    pendingQuickFollowUp: null,
     log: [],
     seq: 0,
   }
@@ -212,7 +216,25 @@ export const useSPGame = create<SPState>((set, get) => ({
       const result = playCards(current.state, playerId, cards)
       if (result.error) return { lastError: result.error }
       const turnMoved = result.state.currentPlayerIdx !== current.state.currentPlayerIdx
-      return { state: result.state, lastError: null, revealedId: turnMoved ? null : current.revealedId }
+      const keepsQuickWindow = result.state.pendingQuickFollowUp?.playerId === playerId
+      return {
+        state: result.state,
+        lastError: null,
+        revealedId: keepsQuickWindow ? (current.revealedId ?? playerId) : turnMoved ? null : current.revealedId,
+      }
+    })
+  },
+
+  quickFollowUp: (playerId, card) => {
+    set(current => {
+      const result = applyQuickFollowUp(current.state, playerId, [card])
+      if (result.error) return { lastError: result.error }
+      const keepsQuickWindow = result.state.pendingQuickFollowUp?.playerId === playerId
+      return {
+        state: result.state,
+        lastError: null,
+        revealedId: keepsQuickWindow ? (current.revealedId ?? playerId) : null,
+      }
     })
   },
 
@@ -253,6 +275,17 @@ export const useSPGame = create<SPState>((set, get) => ({
       if (current.state.phase === 'tribute') {
         const state = resolveAITribute(current.state)
         return state === current.state ? current : { state, lastError: null }
+      }
+      const pending = current.state.pendingQuickFollowUp
+      if (pending) {
+        const quickPlayer = current.state.players.find(player => player.id === pending.playerId)
+        const quickCard = quickPlayer?.isAI
+          ? getQuickFollowUpCards(current.state, quickPlayer.id)[0]
+          : undefined
+        if (quickPlayer?.isAI && quickCard) {
+          const result = applyQuickFollowUp(current.state, quickPlayer.id, [quickCard])
+          return result.error ? { lastError: result.error } : { state: result.state, lastError: null }
+        }
       }
       const player = current.state.players[current.state.currentPlayerIdx]
       if (!player || !player.isAI || player.isOut) return current
