@@ -25,7 +25,7 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem('shithead:sound') !== 'off')
 
   const {
-    playCards, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
+    playCards, interruptBurn, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
     exchangeTribute, skipTribute, setRules, rematch, reset,
   } = useSPGame.getState()
 
@@ -115,6 +115,7 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           viewerActive={current?.id === viewer.id && !current?.isAI && !loserId}
           error={lastError}
           onPlay={cards => playCards(viewer.id, cards)}
+          onBurnIn={!viewer.isAI ? cards => interruptBurn(viewer.id, cards) : undefined}
           onPickUp={() => pickUpPile(viewer.id)}
           onLeave={leave}
           onOpenRules={() => setRulesOpen(true)}

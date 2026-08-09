@@ -11,7 +11,8 @@
 //    START_GAME {}                           host only; deals and enters rearrange
 //    READY {}                                mark rearrange done; game starts when all ready
 //    REARRANGE {handIdx, upIdx}              swap one hand card with one face-up card
-//    PLAY {cards: Card[]}                    play 1-4 cards (unique ids, one rank)
+//    PLAY {cards: Card[]}                    play matching cards (unique ids, one rank)
+//    BURN_IN {cards: Card[]}                 out-of-turn four-of-a-kind completion
 //    PICK_UP {}                              pick up the pile (play/endgame only)
 //    SET_RULES {rules}                       host updates waiting/next-round rules
 //    TRIBUTE_SWAP {winnerCardId, loserCardId} optional public-row exchange
@@ -49,7 +50,10 @@ import type { Card, GameRules, GameState, Phase } from './index'
 import { MAX_LOG_ENTRIES } from './index'
 
 /** Wire protocol version. Bump on any breaking message change. */
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
+
+/** Three decks contain at most twelve physical cards of one normal rank. */
+const MAX_CARDS_PER_ACTION = 12
 
 /** Stable wire ids keep presentation (emoji/art/animation) out of the protocol. */
 export const EMOTE_IDS = ['thumbs-up', 'laugh', 'wow', 'fire'] as const
@@ -73,6 +77,7 @@ export type ClientMsg =
   | { type: 'READY'; version?: number }
   | { type: 'REARRANGE'; handIdx: number; upIdx: number; version?: number }
   | { type: 'PLAY'; cards: Card[]; version?: number }
+  | { type: 'BURN_IN'; cards: Card[]; version?: number }
   | { type: 'PICK_UP'; version?: number }
   | { type: 'SET_RULES'; rules: Partial<GameRules>; version?: number }
   | { type: 'TRIBUTE_SWAP'; winnerCardId: string; loserCardId: string; version?: number }
@@ -142,8 +147,14 @@ const isRulesPatch = (value: unknown): value is Partial<GameRules> => {
   if (!isRecord(value)) return false
   const keys = Object.keys(value)
   if (keys.length === 0) return false
-  const allowed = new Set(['includeJokers', 'winnerSwapsFaceUp'])
-  return keys.every(key => allowed.has(key) && typeof value[key] === 'boolean')
+  const allowed = new Set(['includeJokers', 'winnerSwapsFaceUp', 'deckCount'])
+  return keys.every(key => {
+    if (!allowed.has(key)) return false
+    if (key === 'deckCount') {
+      return Number.isInteger(value[key]) && Number(value[key]) >= 1 && Number(value[key]) <= 3
+    }
+    return typeof value[key] === 'boolean'
+  })
 }
 
 export const isEmoteId = (value: unknown): value is EmoteId =>
@@ -169,8 +180,9 @@ export function isClientMsg(data: unknown): data is ClientMsg {
         isShortString(data.playerId, 128) && isShortString(data.resumeToken, 256)
     case 'REARRANGE':
       return Number.isInteger(data.handIdx) && Number.isInteger(data.upIdx)
-    case 'PLAY': {
-      if (!Array.isArray(data.cards) || data.cards.length === 0 || data.cards.length > 4) return false
+    case 'PLAY':
+    case 'BURN_IN': {
+      if (!Array.isArray(data.cards) || data.cards.length === 0 || data.cards.length > MAX_CARDS_PER_ACTION) return false
       if (!data.cards.every(card => isRecord(card) && isShortString(card.id, 128))) return false
       // Reject duplicate ids at the wire level (card duplication exploit).
       const ids = data.cards.map(card => (card as { id: string }).id)

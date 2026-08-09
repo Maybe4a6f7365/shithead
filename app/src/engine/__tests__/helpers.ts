@@ -27,7 +27,7 @@ export interface MkState {
   stock?: Card[]
   currentPlayerIdx?: number
   phase?: Phase
-  rules?: GameRules
+  rules?: Partial<GameRules>
   winnerId?: string | null
   loserId?: string | null
   pendingTribute?: PendingTribute | null
@@ -48,7 +48,7 @@ export function mkState(over: MkState): GameState {
   }))
   return {
     phase: over.phase ?? 'play',
-    rules: over.rules ?? { ...DEFAULT_GAME_RULES },
+    rules: { ...DEFAULT_GAME_RULES, ...(over.rules ?? {}) },
     players,
     stock: over.stock ?? [],
     pile: (over.pile ?? []).map(cards => ({ cards, cleared: false })),

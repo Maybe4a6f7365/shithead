@@ -13,7 +13,7 @@ function player(id: string, isAI: boolean, up: Card[], hand: Card[] = []): Playe
 function state(players: Player[], partial: Partial<GameState> = {}): GameState {
   return {
     phase: 'rearrange',
-    rules: { includeJokers: true, winnerSwapsFaceUp: true },
+    rules: { includeJokers: true, winnerSwapsFaceUp: true, deckCount: 1 },
     players,
     stock: [],
     pile: [],
@@ -55,7 +55,7 @@ describe('single-player round setup', () => {
     useSPGame.getState().initGame([
       { id: 'winner', name: 'Winner', isAI: false },
       { id: 'last', name: 'Last', isAI: false },
-    ], { includeJokers: false, winnerSwapsFaceUp: true })
+    ], { includeJokers: false, winnerSwapsFaceUp: true, deckCount: 1 })
     const dealt = useSPGame.getState().state
     useSPGame.setState({
       state: { ...dealt, phase: 'gameOver', winnerId: 'winner', loserId: 'last' },
@@ -94,5 +94,30 @@ describe('AI winner exchange', () => {
     const resolved = resolveAITribute(initial)
     expect(resolved.phase).toBe('play')
     expect(resolved.players[0].faceUp.map(c => c.id)).toEqual(['wA', 'w10', 'wJ'])
+  })
+})
+
+describe('single-player burn in', () => {
+  it('lets the pinned human interrupt an AI turn and take the empty-pile lead', () => {
+    const ai = player('ai', true, [], [card('ai-6', '6')])
+    const matching = [card('my-4a', '4'), card('my-4b', '4'), card('my-4c', '4')]
+    const human = player('human', false, [], [...matching, card('my-a', 'A')])
+    const initial = state([ai, human], {
+      phase: 'play',
+      currentPlayerIdx: 0,
+      pile: [{ cards: [card('pile-4', '4')], cleared: false }],
+      rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
+      turnCount: 4,
+      seq: 4,
+    })
+    useSPGame.setState({ state: initial, meId: 'human' })
+
+    useSPGame.getState().interruptBurn('human', matching)
+
+    const next = useSPGame.getState()
+    expect(next.lastError).toBeNull()
+    expect(next.state.pile).toEqual([])
+    expect(next.state.players[next.state.currentPlayerIdx].id).toBe('human')
+    expect(next.state.players[1].hand.map(item => item.id)).toEqual(['my-a'])
   })
 })

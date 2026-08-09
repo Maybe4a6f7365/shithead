@@ -16,7 +16,7 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
     lines: [
       'Each player gets 3 face-down cards and 6 visible cards.',
       'Choose any 3 visible cards for your face-up final row. The other 3 become your hand.',
-      'Before each round, the host chooses whether Jokers and the winner exchange are enabled.',
+      'Before each round, the host chooses 1–3 decks and whether Jokers and the winner exchange are enabled.',
     ],
   },
   {
@@ -36,7 +36,8 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
       '7 — low. The next ordinary card must be 7 or lower.',
       '8 — skip. Skips one active player per 8 played; equal-rank 8s stack.',
       '10 — burn. Removes the pile from the game; you lead again.',
-      'Four of a kind in one play — burns the pile the same way.',
+      'Four or more matching cards at the physical top — burns the pile, even when the run was built across turns.',
+      'Burn in — out of turn, play all matching cards from your visible active row if they complete that top run to 4 or more. The pile burns and you lead.',
       'Joker (when enabled) — wild. Playable on anything and burns the pile.',
     ],
   },

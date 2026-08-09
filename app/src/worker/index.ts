@@ -13,7 +13,8 @@ import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
 import { isClientMsg, PROTOCOL_VERSION, serializeGameState, toPlayerSummary } from '../engine/protocol'
 import { BUILD_COMMIT } from './build-meta'
 import { applyPlayerForfeit } from './forfeit'
-import { normalizePersistedGameState } from './migrateState'
+import { applyInterruptBurnRequest, canonicalCards } from './gameActions'
+import { normalizeGameRules, normalizePersistedGameState } from './migrateState'
 
 interface Env {
   ROOM: DurableObjectNamespace
@@ -29,7 +30,7 @@ interface Session {
 }
 
 interface RoomData {
-  version: 2
+  version: 3
   code: string
   hostId: string
   maxPlayers: number
@@ -44,7 +45,7 @@ interface RoomData {
 }
 
 type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'state'> & {
-  version?: 1 | 2
+  version?: 1 | 2 | 3
   state: GameState | null
   rules?: Partial<GameRules>
   readyPlayerIds?: string[]
@@ -129,15 +130,11 @@ export class Room {
       const stored = await this.state.storage.get<StoredRoomData>('room')
       if (!stored) return
 
-      const rules: GameRules = {
-        ...DEFAULT_GAME_RULES,
-        ...(stored.state?.rules ?? {}),
-        ...(stored.rules ?? {}),
-      }
+      const rules = normalizeGameRules(stored.state?.rules, stored.rules)
 
       this.data = {
         ...stored,
-        version: 2,
+        version: 3,
         rules,
         state: normalizePersistedGameState(stored.state, rules),
         readyPlayerIds: stored.readyPlayerIds ?? [],
@@ -304,6 +301,9 @@ export class Room {
       case 'PLAY':
         await this.play(session, message.cards)
         break
+      case 'BURN_IN':
+        await this.burnIn(session, message.cards)
+        break
       case 'PICK_UP':
         await this.pickUp(session)
         break
@@ -385,7 +385,7 @@ export class Room {
     const resumeToken = generateResumeToken()
     session.playerId = player.id
     this.data = {
-      version: 2,
+      version: 3,
       code: this.code,
       hostId: player.id,
       maxPlayers: Math.max(2, Math.min(5, requestedMaxPlayers)),
@@ -547,7 +547,7 @@ export class Room {
 
     // Merge against the current authoritative value so two rapid toggles do
     // not overwrite one another with stale whole-object snapshots.
-    data.rules = { ...data.rules, ...patch }
+    data.rules = normalizeGameRules(data.rules, patch)
     await this.save()
     this.broadcastRoom()
   }
@@ -603,21 +603,8 @@ export class Room {
   }
 
   private canonicalCards(playerId: string, requested: Card[]): Card[] | null {
-    const player = this.data?.state?.players.find(candidate => candidate.id === playerId)
-    if (!player) return null
-
-    const owned = new Map(
-      [...player.hand, ...player.faceUp, ...player.faceDown].map(card => [card.id, card]),
-    )
-    const ids = requested.map(card => card.id)
-    if (new Set(ids).size !== ids.length) return null
-
-    const cards = ids.map(id => {
-      const blind = /^blind:down:(\d+)$/.exec(id)
-      if (blind) return player.faceDown[Number(blind[1])]
-      return owned.get(id)
-    })
-    return cards.every((card): card is Card => !!card) ? cards : null
+    const state = this.data?.state
+    return state ? canonicalCards(state, playerId, requested) : null
   }
 
   private async play(session: Session, requestedCards: Card[]): Promise<void> {
@@ -636,6 +623,27 @@ export class Room {
     }
 
     const result = playCards(data.state, session.playerId, cards)
+    if (result.error) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
+      return
+    }
+
+    data.state = result.state
+    await this.save()
+    this.broadcastGame()
+  }
+
+  /**
+   * Apply an out-of-turn four-of-a-kind completion. Ownership and card
+   * identities are derived from authoritative server state; the engine then
+   * enforces the visible active zone, matching rank, complete matching set,
+   * non-current actor, and cumulative top-run threshold.
+   */
+  private async burnIn(session: Session, requestedCards: Card[]): Promise<void> {
+    const data = this.data
+    if (!data?.state || !session.playerId) return
+
+    const result = applyInterruptBurnRequest(data.state, session.playerId, requestedCards)
     if (result.error) {
       this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
       return

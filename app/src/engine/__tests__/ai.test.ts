@@ -98,6 +98,27 @@ describe('pickAIMove move generation', () => {
     expect(moveSmall.cards!.every(cd => cd.rank === '8')).toBe(true)
   })
 
+  it('hard recognizes a cumulative physical run and a four-plus multi-deck set', () => {
+    const completing = [c('3'), c('3', '♥'), c('3', '♦')]
+    const cumulative = mkState({
+      players: [{ id: 'a' }, { id: 'b', hand: [...completing, c('9')] }],
+      pile: [[c('K')], [c('3', '♣')]],
+      currentPlayerIdx: 1,
+    })
+    const completion = pickAIMove(cumulative, cumulative.players[1], 'hard', seededRng(1))
+    expect(completion.cards).toEqual(completing)
+    expect(playCards(cumulative, 'b', completion.cards!).state.pile).toEqual([])
+
+    const many = Array.from({ length: 6 }, (_, index) => c('6', '♠', `ai-six-${index}`))
+    const multiDeck = mkState({
+      players: [{ id: 'a' }, { id: 'b', hand: [...many, c('9')] }],
+      pile: [[c('3')], [c('4')], [c('5')], [c('6')]],
+      currentPlayerIdx: 1,
+    })
+    const largeSet = pickAIMove(multiDeck, multiDeck.players[1], 'hard', seededRng(1))
+    expect(largeSet.cards).toEqual(many)
+  })
+
   it('hard prefers spending a 2 over a burn card when only specials are playable', () => {
     const state = mkState({
       players: [{ id: 'a' }, { id: 'b', hand: [c('2'), c('10')], faceUp: [c('Q')], faceDown: [c('K')] }],

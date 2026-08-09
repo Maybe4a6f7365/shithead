@@ -8,6 +8,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered explicitly in main.tsx so an activated update reloads an
+      // already-open game client instead of leaving it on a stale bundle.
+      injectRegister: null,
       includeAssets: ['favicon.svg', 'robots.txt'],
       manifest: {
         name: 'Shithead',
@@ -24,7 +27,13 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,webp}'],
-        globIgnores: ['fonts/**']
+        globIgnores: ['fonts/**'],
+        // A newly deployed shell takes control immediately and old hashed
+        // asset caches are removed. The registration layer performs at most
+        // one reload when that new worker activates.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
       }
     })
   ],

@@ -28,7 +28,7 @@ describe('orderSeats', () => {
 
 function gs(log: GameState['log']): GameState {
   return {
-    phase: 'play', rules: { includeJokers: true, winnerSwapsFaceUp: false },
+    phase: 'play', rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
     players: [player('me'), player('greta')], stock: [], pile: [],
     currentPlayerIdx: 0, playDirection: 1, turnCount: 1,
     winnerId: null, loserId: null, pendingTribute: null, log, seq: 1,
@@ -108,6 +108,13 @@ describe('rank selection', () => {
 
   it('atomically replaces the highlighted rank in one tap', () => {
     expect(nextRankSelection(['five-a', 'five-b'], seven, cards)).toEqual(['seven'])
+  })
+
+  it('allows every equal-rank card from multi-deck hands, beyond four', () => {
+    const fives = Array.from({ length: 7 }, (_, index) => ({ id: `five-${index}`, rank: '5', suit: '♣' } as const))
+    let selection: string[] = []
+    for (const next of fives) selection = nextRankSelection(selection, next, fives)
+    expect(selection).toEqual(fives.map(card => card.id))
   })
 })
 

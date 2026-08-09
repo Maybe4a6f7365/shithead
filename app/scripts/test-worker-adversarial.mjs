@@ -193,19 +193,19 @@ async function main() {
   let host = await new Peer('host', wsUrl).connect()
   const guest = await new Peer('guest', wsUrl).connect()
 
-  host.send({ type: 'CREATE_ROOM', playerName: 'Host', version: 3 })
+  host.send({ type: 'CREATE_ROOM', playerName: 'Host', version: 4 })
   const hostWelcome = await host.waitType('WELCOME')
-  assert.equal(hostWelcome.version, 3, 'WELCOME must echo protocol version')
+  assert.equal(hostWelcome.version, 4, 'WELCOME must echo protocol version')
   assert.match(hostWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/, 'WELCOME must carry a high-entropy resumeToken')
   const hostId = hostWelcome.playerId
   const hostToken1 = hostWelcome.resumeToken
 
-  guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Guest', version: 3 })
+  guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Guest', version: 4 })
   const guestWelcome = await guest.waitType('WELCOME')
   assert.match(guestWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/)
   assert.notEqual(guestWelcome.resumeToken, hostToken1, 'tokens must be per-player unique')
   const guestId = guestWelcome.playerId
-  ok('T1 create/join: WELCOME carries version=3 and unique per-player resumeToken')
+  ok('T1 create/join: WELCOME carries version=4 and unique per-player resumeToken')
 
   // Token must never leak into broadcasts seen by the other player.
   await host.waitType('ROOM_STATE', m => m.room.players.length === 2)
@@ -216,13 +216,13 @@ async function main() {
 
   // ---- T2: RESUME without a token -> RESUME_FAILED, seat untouched
   const noToken = await new Peer('no-token', wsUrl).connect()
-  noToken.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: '', version: 3 })
+  noToken.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: '', version: 4 })
   await noToken.waitType('ERROR', m => /invalid message/i.test(m.message))
   ok('T2 malformed typed RESUME without a token is rejected')
 
   // ---- T3: stolen playerId + wrong token -> RESUME_FAILED, victim not kicked
   const attacker = await new Peer('attacker', wsUrl).connect()
-  attacker.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: 'A'.repeat(43), version: 3 })
+  attacker.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: 'A'.repeat(43), version: 4 })
   const fail2 = await attacker.waitType('RESUME_FAILED')
   assert.equal(fail2.reason, 'invalid_token')
   await sleep(300)
@@ -235,20 +235,20 @@ async function main() {
   await host.close()
   await guest.waitType('ROOM_STATE', m => m.room.players.find(p => p.id === hostId)?.connected === false)
   host = await new Peer('host-resumed', wsUrl).connect()
-  host.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 3 })
+  host.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 4 })
   const resumed = await host.waitType('WELCOME')
   assert.equal(resumed.playerId, hostId)
-  assert.equal(resumed.version, 3)
+  assert.equal(resumed.version, 4)
   assert.notEqual(resumed.resumeToken, hostToken1, 'resume must rotate the token')
   const hostToken2 = resumed.resumeToken
   const stale = await new Peer('stale-token', wsUrl).connect()
-  stale.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 3 })
+  stale.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 4 })
   await stale.waitType('RESUME_FAILED')
   ok('T4 resume rotates token; old (rotated-out) token is rejected')
 
   // ---- T5: unknown room -> RESUME_FAILED room_not_found
   const stranger = await new Peer('stranger', `${wsBase}/api/room/ZZZZZ9/ws`).connect()
-  stranger.send({ type: 'RESUME_ROOM', roomCode: 'ZZZZZ9', playerId: hostId, resumeToken: hostToken2, version: 3 })
+  stranger.send({ type: 'RESUME_ROOM', roomCode: 'ZZZZZ9', playerId: hostId, resumeToken: hostToken2, version: 4 })
   const fail3 = await stranger.waitType('RESUME_FAILED')
   assert.equal(fail3.reason, 'room_not_found')
   await stranger.close()
@@ -258,9 +258,9 @@ async function main() {
   host.send({ type: 'PING', version: 1 })
   const versionError = await host.waitType('ERROR', m => /protocol version/i.test(m.message))
   assert(versionError, 'expected protocol-version error')
-  host.send({ type: 'PING', version: 3 })
+  host.send({ type: 'PING', version: 4 })
   await host.waitType('PONG')
-  ok('T6 client message with version != 3 rejected with clean error')
+  ok('T6 client message with version != 4 rejected with clean error')
 
   // ---- T7: malformed message rejected
   host.send('this is not json{')
@@ -284,7 +284,7 @@ async function main() {
   ])
   for (const message of [hostEmote, guestEmote]) {
     assert.equal(message.playerId, hostId)
-    assert.equal(message.version, 3)
+    assert.equal(message.version, 4)
     assert.equal(typeof message.ts, 'number')
     assert(!('state' in message), 'ephemeral EMOTE must not include room/game state')
   }
@@ -293,22 +293,30 @@ async function main() {
   // ---- T7b: strict partial rules, host authority, rapid merge
   guest.send({ type: 'SET_RULES', rules: { includeJokers: false } })
   await guest.waitType('ERROR', isError('NOT_HOST'))
+  guest.send({ type: 'SET_RULES', rules: { deckCount: 2 } })
+  await guest.waitType('ERROR', isError('NOT_HOST'))
   host.send({ type: 'SET_RULES', rules: {} })
+  await host.waitType('ERROR', m => /invalid message/i.test(m.message))
+  host.send({ type: 'SET_RULES', rules: { deckCount: 4 } })
   await host.waitType('ERROR', m => /invalid message/i.test(m.message))
   host.send({ type: 'SET_RULES', rules: { includeJokers: false } })
   host.send({ type: 'SET_RULES', rules: { winnerSwapsFaceUp: true } })
+  host.send({ type: 'SET_RULES', rules: { deckCount: 3 } })
   const mergedRules = await host.waitType(
     'ROOM_STATE',
-    m => m.room.rules.includeJokers === false && m.room.rules.winnerSwapsFaceUp === true,
+    m => m.room.rules.includeJokers === false && m.room.rules.winnerSwapsFaceUp === true && m.room.rules.deckCount === 3,
   )
-  assert.deepEqual(mergedRules.room.rules, { includeJokers: false, winnerSwapsFaceUp: true })
-  ok('T7b SET_RULES is strict, host-only, and rapid partial toggles merge authoritatively')
+  assert.deepEqual(mergedRules.room.rules, { includeJokers: false, winnerSwapsFaceUp: true, deckCount: 3 })
+  host.send({ type: 'SET_RULES', rules: { deckCount: 1, includeJokers: true } })
+  await host.waitType('ROOM_STATE', m => m.room.rules.deckCount === 1
+    && m.room.rules.includeJokers === true && m.room.rules.winnerSwapsFaceUp === true)
+  ok('T7b SET_RULES is strict, host-only, validates 1–3 decks, and rapid partial updates merge authoritatively')
 
   // ---- T8: start game; per-viewer masking in GAME_STATE
   host.send({ type: 'START_GAME' })
   await host.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
   const guestRearrange = await guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
-  assert.equal(guestRearrange.version, 3, 'GAME_STATE must echo protocol version')
+  assert.equal(guestRearrange.version, 4, 'GAME_STATE must echo protocol version')
   assert.equal(typeof guestRearrange.state.seq, 'number', 'GAME_STATE must carry seq')
   const guestViewOfHost = guestRearrange.state.players.find(p => p.id === hostId)
   assert(guestViewOfHost.hand.every(c => c.rank === '3' && c.suit === null && c.id.startsWith('hidden:')), 'opponent hand must be masked')
@@ -342,6 +350,22 @@ async function main() {
   const currentId = playState.players[playState.currentPlayerIdx].id
   const [current, idle] = currentId === hostId ? [host, guest] : [guest, host]
   const currentPeerId = currentId === hostId ? hostId : guestId
+
+  // ---- T8c: BURN_IN is authenticated, out-of-turn, visible-zone only
+  const currentHandForBurn = current.latestGameState.players.find(p => p.id === currentPeerId).hand
+  current.send({ type: 'BURN_IN', cards: [currentHandForBurn[0]] })
+  await current.waitType('ERROR', isError('INVALID_MOVE'))
+  const idleIdForBurn = idle === host ? hostId : guestId
+  const idleHandForBurn = idle.latestGameState.players.find(p => p.id === idleIdForBurn).hand
+  idle.send({ type: 'BURN_IN', cards: [idleHandForBurn[0]] })
+  await idle.waitType('ERROR', isError('INVALID_MOVE'))
+  idle.send({ type: 'BURN_IN', cards: [{ id: 'blind:down:0', rank: '3', suit: null }] })
+  await idle.waitType('ERROR', isError('INVALID_MOVE'))
+  const seqBeforeUnauthBurn = host.latestGameState.seq
+  attacker.send({ type: 'BURN_IN', cards: [{ id: idleHandForBurn[0].id }] })
+  await sleep(150)
+  assert.equal(host.latestGameState.seq, seqBeforeUnauthBurn, 'unauthenticated BURN_IN mutated the room')
+  ok('T8c BURN_IN rejects current, insufficient, hidden, and unauthenticated attempts without mutation')
 
   // ---- T9: forged out-of-turn PLAY rejected, no state change
   const idleState = idle.latestGameState

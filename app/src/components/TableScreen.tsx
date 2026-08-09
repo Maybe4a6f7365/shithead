@@ -9,7 +9,7 @@
 // ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Card as CardT, GameState } from '../engine'
-import { canPlay, getTopCard, getTopRank, pileSize } from '../engine'
+import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
 import { OpponentStrip, orderSeats, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
@@ -34,6 +34,8 @@ export interface TableScreenProps {
   /** Server-side error text to surface in the feed (MP). */
   error?: string | null
   onPlay: (cards: CardT[]) => void
+  /** Out-of-turn completion of the physical top run to four or more. */
+  onBurnIn?: (cards: CardT[]) => void
   onPickUp: () => void
   onLeave: () => void
   onOpenRules: () => void
@@ -57,7 +59,6 @@ export function nextRankSelection(selection: string[], tapped: CardT, cards: Car
   if (selection.includes(tapped.id)) return selection.filter(id => id !== tapped.id)
   const selected = cards.find(card => selection.includes(card.id))
   if (selected && selected.rank !== tapped.rank) return [tapped.id]
-  if (selection.length >= 4) return selection
   return [...selection, tapped.id]
 }
 
@@ -82,7 +83,7 @@ function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }):
 }
 
 export function TableScreen({
-  state, viewerId, viewerActive, error, onPlay, onPickUp, onLeave, onOpenRules,
+  state, viewerId, viewerActive, error, onPlay, onBurnIn, onPickUp, onLeave, onOpenRules,
   soundOn, onToggleSound, connectionBadge, seatOffline, latestEmote, onSendEmote,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
@@ -121,6 +122,13 @@ export function TableScreen({
     [zoneCards, selection],
   )
   const selectedRank = selectedCards[0]?.rank ?? null
+  const interruptCards = useMemo(
+    () => (!viewerActive && onBurnIn ? getInterruptBurnCards(state, viewerId) : []),
+    [state, viewerId, viewerActive, onBurnIn],
+  )
+  const interruptIds = useMemo(() => new Set(interruptCards.map(card => card.id)), [interruptCards])
+  const physicalRun = getPhysicalTopRun(state)
+  const canBurnIn = interruptCards.length > 0 && physicalRun !== null
 
   // ---- Feed: transient flash > server error > event/turn line ----
   const feedCtx: FeedContext = { meId: viewerId, players: state.players }
@@ -243,6 +251,16 @@ export function TableScreen({
     onPickUp()
   }
 
+  const commitBurnIn = () => {
+    if (!canBurnIn || !onBurnIn) return
+    if (Date.now() - debounceRef.current < 300) return
+    debounceRef.current = Date.now()
+    emitSoundDebounced('burn')
+    setSelection([])
+    setPickupArmed(false)
+    onBurnIn(interruptCards)
+  }
+
   const sendEmote = (emote: EmoteId) => {
     const sentAt = Date.now()
     const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt }
@@ -304,7 +322,15 @@ export function TableScreen({
   const hints = new Map<string, string>()
   if (viewer) {
     for (const c of [...viewer.hand, ...viewer.faceUp]) {
-      if (!viewerActive) { states.set(c.id, 'rest'); continue }
+      if (!viewerActive) {
+        if (interruptIds.has(c.id)) {
+          states.set(c.id, 'joinable')
+          hints.set(c.id, 'can burn in now')
+        } else {
+          states.set(c.id, 'rest')
+        }
+        continue
+      }
       if (selection.includes(c.id)) { states.set(c.id, 'selected'); hints.set(c.id, 'selected'); continue }
       const inZone = zone !== 'faceDown' && zoneCards.some(z => z.id === c.id)
       if (!inZone) { states.set(c.id, 'rest'); continue }
@@ -342,6 +368,7 @@ export function TableScreen({
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return
       if (e.key === 'Escape') setSelection([])
+      if ((e.key === 'b' || e.key === 'B') && canBurnIn) commitBurnIn()
       if (!viewerActive) return
       if (e.key === 'p' || e.key === 'P') commitPlay()
       if (e.key === 'u' || e.key === 'U') commitPickup()
@@ -352,7 +379,7 @@ export function TableScreen({
 
   if (!viewer) return null
 
-  const endgameZoneLive = viewerActive && (zone === 'faceUp' || zone === 'faceDown')
+  const endgameZoneLive = (viewerActive || canBurnIn) && (zone === 'faceUp' || zone === 'faceDown')
   const emotePlayer = displayedEmote
     ? state.players.find(player => player.id === displayedEmote.playerId)?.name
     : undefined
@@ -417,13 +444,15 @@ export function TableScreen({
       {/* Z4 — ActionBar + hand fan, flush to safe-area bottom */}
       <footer className="app-bottom-zone game-footer">
         <div onClick={e => e.stopPropagation()}>
-          {viewerActive && (
+          {(viewerActive || canBurnIn) && (
             <ActionBar
               selectionCount={selection.length}
-              canPickUp={ps > 0}
+              canPickUp={viewerActive && ps > 0}
               pickupArmed={pickupArmed}
               onPlay={commitPlay}
               onPickUp={commitPickup}
+              burnIn={canBurnIn && physicalRun ? { count: interruptCards.length, rank: physicalRun.rank } : undefined}
+              onBurnIn={canBurnIn ? commitBurnIn : undefined}
             />
           )}
           <HandFan

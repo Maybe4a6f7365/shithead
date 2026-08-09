@@ -135,7 +135,7 @@ describe('voluntary pickup', () => {
     render(
       <TableScreen
         state={{
-          phase: 'play', rules: { includeJokers: true, winnerSwapsFaceUp: false },
+          phase: 'play', rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
           players: [mine, other], stock: [],
           pile: [{ cards: [card(9, '3')], cleared: false }],
           currentPlayerIdx: 0, playDirection: 1, turnCount: 1,
@@ -157,5 +157,77 @@ describe('voluntary pickup', () => {
     expect(screen.queryByRole('button', { name: /^play/i })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /tap again to confirm/i }))
     expect(pickUp).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('out-of-turn burn in', () => {
+  it('highlights every matching visible card and submits the complete set', () => {
+    const fours = [card(1, '4'), card(2, '4'), card(3, '4')]
+    const mine: Player = {
+      id: 'me', name: 'Me', hand: [...fours, card(7, 'A')],
+      faceUp: [card(10, 'K')], faceDown: [card(11, '4')], isOut: false,
+    }
+    const other: Player = {
+      id: 'other', name: 'Other', hand: [card(20, '6')],
+      faceUp: [card(21, '7')], faceDown: [card(22, '8')], isOut: false,
+    }
+    const burnIn = vi.fn()
+    render(
+      <TableScreen
+        state={{
+          phase: 'play', rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
+          players: [other, mine], stock: [],
+          pile: [{ cards: [card(30, '4')], cleared: false }],
+          currentPlayerIdx: 0, playDirection: 1, turnCount: 3,
+          winnerId: null, loserId: null, pendingTribute: null, log: [], seq: 3,
+        }}
+        viewerId="me"
+        viewerActive={false}
+        onPlay={vi.fn()}
+        onBurnIn={burnIn}
+        onPickUp={vi.fn()}
+        onLeave={vi.fn()}
+        onOpenRules={vi.fn()}
+        soundOn={false}
+        onToggleSound={vi.fn()}
+      />,
+    )
+
+    expect(screen.getAllByRole('img', { name: /4 of clubs, can burn in now/i })).toHaveLength(3)
+    fireEvent.click(screen.getByRole('button', { name: /burn in with 3 cards of rank 4/i }))
+    expect(burnIn).toHaveBeenCalledTimes(1)
+    expect(burnIn.mock.calls[0][0].map((played: CardT) => played.id)).toEqual(fours.map(played => played.id))
+  })
+
+  it('never offers a blind face-down burn in', () => {
+    const mine: Player = {
+      id: 'me', name: 'Me', hand: [], faceUp: [],
+      faceDown: [card(1, '4'), card(2, '4'), card(3, '4')], isOut: false,
+    }
+    const other: Player = {
+      id: 'other', name: 'Other', hand: [card(20, '6')],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    render(
+      <TableScreen
+        state={{
+          phase: 'endgame', rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
+          players: [other, mine], stock: [],
+          pile: [{ cards: [card(30, '4')], cleared: false }],
+          currentPlayerIdx: 0, playDirection: 1, turnCount: 3,
+          winnerId: null, loserId: null, pendingTribute: null, log: [], seq: 3,
+        }}
+        viewerId="me"
+        viewerActive={false}
+        onPlay={vi.fn()}
+        onBurnIn={vi.fn()}
+        onPickUp={vi.fn()}
+        onLeave={vi.fn()}
+        onOpenRules={vi.fn()}
+        soundOn={false}
+        onToggleSound={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /burn in/i })).toBeNull()
   })
 })

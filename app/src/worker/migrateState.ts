@@ -14,6 +14,26 @@ type LegacyState = Omit<GameState, 'rules' | 'winnerId' | 'pendingTribute'> & {
   pendingTribute?: PendingTribute | null
 }
 
+/**
+ * Normalize rules at the persistence boundary. This both supplies new-rule
+ * defaults for old rooms and prevents a corrupted snapshot from smuggling an
+ * unsupported deck count into a future deal.
+ */
+export function normalizeGameRules(
+  ...sources: Array<Partial<GameRules> | null | undefined>
+): GameRules {
+  const normalized: GameRules = { ...DEFAULT_GAME_RULES }
+  for (const source of sources) {
+    if (!source) continue
+    if (typeof source.includeJokers === 'boolean') normalized.includeJokers = source.includeJokers
+    if (typeof source.winnerSwapsFaceUp === 'boolean') normalized.winnerSwapsFaceUp = source.winnerSwapsFaceUp
+    if (source.deckCount === 1 || source.deckCount === 2 || source.deckCount === 3) {
+      normalized.deckCount = source.deckCount
+    }
+  }
+  return normalized
+}
+
 function validPlayerId(value: unknown, players: Player[]): value is string {
   return typeof value === 'string' && players.some(player => player.id === value)
 }
@@ -42,11 +62,7 @@ export function normalizePersistedGameState(
 ): GameState | null {
   if (!state) return null
 
-  const rules: GameRules = {
-    ...DEFAULT_GAME_RULES,
-    ...(state.rules ?? {}),
-    ...(roomRules ?? {}),
-  }
+  const rules = normalizeGameRules(state.rules, roomRules)
   // A v2 snapshot may legitimately reference a winner who explicitly left
   // after going out and was therefore removed from `players`. Preserve that
   // authoritative historical result. Only legacy snapshots with no recorded

@@ -53,7 +53,7 @@ describe('configurable round rules and initial deal', () => {
 
   it('keeps legacy includeJokers callers compatible while rules stay authoritative', () => {
     const legacy = initGame({ players, includeJokers: false, rng: seededRng(103) })
-    expect(legacy.rules).toEqual({ includeJokers: false, winnerSwapsFaceUp: false })
+    expect(legacy.rules).toEqual({ includeJokers: false, winnerSwapsFaceUp: false, deckCount: 1 })
     expect(legacy.stock).toHaveLength(52 - 2 * 9)
 
     const modern = initGame({
@@ -62,7 +62,7 @@ describe('configurable round rules and initial deal', () => {
       rules: { includeJokers: false, winnerSwapsFaceUp: true },
       rng: seededRng(103),
     })
-    expect(modern.rules).toEqual({ includeJokers: false, winnerSwapsFaceUp: true })
+    expect(modern.rules).toEqual({ includeJokers: false, winnerSwapsFaceUp: true, deckCount: 1 })
     expect(modern.stock).toHaveLength(52 - 2 * 9)
   })
 

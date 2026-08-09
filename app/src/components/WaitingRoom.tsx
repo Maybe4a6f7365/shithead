@@ -4,7 +4,7 @@
 // Text on felt (§7 shared frame); no dashed empty slots — the count line
 // says it.
 // ============================================================================
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { RoomSummary } from '../engine/protocol'
 import { DEFAULT_GAME_RULES, type GameRules } from '../engine'
@@ -24,29 +24,71 @@ export interface WaitingRoomProps {
   heading?: string
 }
 
+export function inviteUrl(roomCode: string, origin = window.location.origin): string {
+  const url = new URL('/', origin)
+  url.searchParams.set('room', roomCode)
+  return url.toString()
+}
+
+async function copyText(value: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+      return true
+    }
+  } catch { /* use the selection fallback below */ }
+
+  const field = document.createElement('textarea')
+  field.value = value
+  field.readOnly = true
+  field.style.position = 'fixed'
+  field.style.opacity = '0'
+  document.body.appendChild(field)
+  field.select()
+  field.setSelectionRange(0, value.length)
+  let copied = false
+  try { copied = document.execCommand?.('copy') ?? false } catch { /* denied */ }
+  field.remove()
+  return copied
+}
+
 export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange, heading }: WaitingRoomProps) {
-  const [copied, setCopied] = useState(false)
+  const [shareStatus, setShareStatus] = useState<{ message: string; failed?: boolean } | null>(null)
   const [startHint, setStartHint] = useState<string | null>(null)
+  const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isHost = waitingRoomRole(room, myPlayerId) === 'host'
   const enough = room.players.length >= 2
   const everyoneOnline = room.players.every(player => player.connected)
   const hostOnline = room.players.find(player => player.id === room.hostId)?.connected !== false
+  const url = useMemo(() => inviteUrl(room.code), [room.code])
+
+  useEffect(() => () => {
+    if (statusTimer.current) clearTimeout(statusTimer.current)
+  }, [])
+
+  const showShareStatus = (message: string, failed = false) => {
+    if (statusTimer.current) clearTimeout(statusTimer.current)
+    setShareStatus({ message, failed })
+    if (!failed) statusTimer.current = setTimeout(() => setShareStatus(null), 2500)
+  }
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(room.code)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch { /* clipboard denied */ }
+    const copied = await copyText(room.code)
+    showShareStatus(copied ? 'Room code copied.' : 'Copy was blocked. Select the invite link below.', !copied)
   }
 
   const invite = async () => {
-    const url = `${window.location.origin}/?room=${room.code}`
     if (navigator.share) {
-      try { await navigator.share({ title: 'Shithead', text: `Join my Shithead room: ${room.code}`, url }) } catch { /* cancelled */ }
-    } else {
-      copy()
+      try {
+        await navigator.share({ title: 'Shithead', text: `Join my Shithead room: ${room.code}`, url })
+        showShareStatus('Invite shared.')
+        return
+      } catch (error) {
+        if ((error as { name?: string })?.name === 'AbortError') return
+      }
     }
+    const copied = await copyText(url)
+    showShareStatus(copied ? 'Invite link copied.' : 'Sharing was blocked. Select the invite link below.', !copied)
   }
 
   const start = () => {
@@ -78,7 +120,7 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
               onClick={copy}
               className="min-h-[44px] min-w-[88px] px-s4 text-label font-bold tracking-label uppercase text-cream/80"
             >
-              {copied ? 'Copied ✓' : 'Copy'}
+              Copy code
             </button>
             <button
               type="button"
@@ -88,6 +130,24 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
               Invite
             </button>
           </div>
+          <p
+            className={`min-h-[20px] mt-s1 text-small ${shareStatus?.failed ? 'text-danger-bright' : 'text-gold-bright'}`}
+            role={shareStatus?.failed ? 'alert' : 'status'}
+            aria-live={shareStatus?.failed ? 'assertive' : 'polite'}
+          >
+            {shareStatus?.message ?? ''}
+          </p>
+          {shareStatus?.failed && (
+            <label className="block mt-s2 text-left text-label font-bold tracking-label uppercase text-cream-dim">
+              Invite link
+              <input
+                readOnly
+                value={url}
+                onFocus={event => event.currentTarget.select()}
+                className="modern-input mt-s1 w-full min-h-[44px] px-s3 rounded-button bg-felt-deep text-cream border border-hairline text-small normal-case tracking-normal"
+              />
+            </label>
+          )}
         </div>
 
         <div role="list" aria-label="Players in room">

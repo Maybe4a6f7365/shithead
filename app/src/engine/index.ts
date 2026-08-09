@@ -16,9 +16,12 @@
 //      burned cards leave play, the pile is empty, and the same player leads
 //      on the empty pile. If that player just went out, the lead passes to
 //      the next active player instead.
-//  D4. Quartet = exactly 4 cards of one non-wild rank played in ONE action
-//      (stricter reading of README "Quartet (4x same rank)"). Pile-top
-//      accumulation across turns does not burn. Wilds never form quartets.
+//  D4. Four-or-more burn = whenever the uninterrupted PHYSICAL top run of
+//      one rank reaches at least four cards, the pile burns. The run may be
+//      completed across actions (including an out-of-turn interrupt), and
+//      may exceed four when multiple decks are in use. Physical 2s and 3s
+//      count as their printed ranks even though their play effects reset or
+//      mirror the effective rank. 10 and Joker still burn immediately.
 //  D5. Multi-card plays must be a single rank (README: "equal-rank set").
 //      Wilds are not exempt: a set is exactly one rank (two 2s ok, 2+5 not).
 //  D6. Card zones per player: play from hand while it has cards; face-up only
@@ -81,6 +84,7 @@ export interface PileEntry {
 export interface GameRules {
   includeJokers: boolean
   winnerSwapsFaceUp: boolean
+  deckCount: 1 | 2 | 3
 }
 
 /** Result carried into the following round for the optional winner tribute. */
@@ -110,7 +114,7 @@ export interface GameState {
   /**
    * Monotonic action sequence number, assigned by the engine: 0 at init,
    * +1 for every state-mutating action (rearrange, startPlay, tribute,
-   * playCards, pickUpPile). Per-room this lets clients detect duplicate/
+   * playCards, interruptBurn, pickUpPile). Per-room this lets clients detect duplicate/
    * replayed or out-of-order GAME_STATE broadcasts (ignore seq <= last seen).
    * Optional so existing consumers constructing lobby placeholders compile;
    * every engine-produced state always carries it.
@@ -137,12 +141,13 @@ export const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10',
 export const DEFAULT_GAME_RULES: Readonly<GameRules> = Object.freeze({
   includeJokers: true,
   winnerSwapsFaceUp: false,
+  deckCount: 1,
 })
 
 /** Maximum number of log entries retained in state (ring buffer). */
 export const MAX_LOG_ENTRIES = 50
 
-/** Maximum players the deck can support (54 cards / 9 per player). */
+/** Maximum supported seats (a single 54-card deck supplies 9 cards each). */
 export const MAX_PLAYERS = 6
 
 /** Hard cap on total actions per game; stalemate tiebreak (D11). */
@@ -191,8 +196,7 @@ function makeCardId(rng: () => number, used: Set<string>): string {
  * so broadcasting a hidden card's ID cannot leak its identity.
  * Pass a seeded rng for deterministic decks.
  */
-export function makeDeck(includeJokers = true, rng: () => number = Math.random): Card[] {
-  const used = new Set<string>()
+function makeStandardDeck(includeJokers: boolean, rng: () => number, used: Set<string>): Card[] {
   const cards: Card[] = []
   for (const suit of SUITS) {
     for (const rank of RANKS) {
@@ -202,6 +206,27 @@ export function makeDeck(includeJokers = true, rng: () => number = Math.random):
   if (includeJokers) {
     cards.push({ id: makeCardId(rng, used), suit: null, rank: 'JOKER' })
     cards.push({ id: makeCardId(rng, used), suit: null, rank: 'JOKER' })
+  }
+  return cards
+}
+
+export function makeDeck(includeJokers = true, rng: () => number = Math.random): Card[] {
+  return makeStandardDeck(includeJokers, rng, new Set<string>())
+}
+
+/** Build 1-3 complete decks while keeping opaque card IDs unique globally. */
+export function makeDecks(
+  includeJokers = true,
+  deckCount: 1 | 2 | 3 = 1,
+  rng: () => number = Math.random,
+): Card[] {
+  if (deckCount !== 1 && deckCount !== 2 && deckCount !== 3) {
+    throw new Error('deckCount must be 1, 2, or 3')
+  }
+  const used = new Set<string>()
+  const cards: Card[] = []
+  for (let deck = 0; deck < deckCount; deck++) {
+    cards.push(...makeStandardDeck(includeJokers, rng, used))
   }
   return cards
 }
@@ -234,10 +259,9 @@ export function isClearCard(card: Card): boolean {
   return card.rank === '10' || card.rank === 'JOKER'
 }
 
-/** Quartet: exactly 4 cards of one non-wild rank in a single action (D4). */
+/** Four-or-more equal physical ranks in one action (part of D4). */
 export function isQuartet(cards: Card[]): boolean {
-  if (cards.length !== 4) return false
-  if (cards.some(c => c.rank === 'JOKER' || c.rank === '2')) return false
+  if (cards.length < 4) return false
   const first = cards[0].rank
   return cards.every(c => c.rank === first)
 }
@@ -264,6 +288,38 @@ export function getTopRank(state: GameState): Rank | null {
     return rank
   }
   return null
+}
+
+export interface PhysicalTopRun {
+  rank: Rank
+  count: number
+}
+
+/**
+ * The uninterrupted run of the printed rank at the physical top of the pile.
+ * Unlike getTopRank, this deliberately does not apply the 2 reset or 3 mirror
+ * effects. Legacy cleared/empty entries are ignored consistently with the
+ * other pile readers.
+ */
+export function getPhysicalTopRun(state: GameState): PhysicalTopRun | null {
+  let rank: Rank | null = null
+  let count = 0
+  for (let i = state.pile.length - 1; i >= 0; i--) {
+    const entry = state.pile[i]
+    if (entry.cleared || entry.cards.length === 0) continue
+    const entryRank = entry.cards[0].rank
+    if (rank === null) rank = entryRank
+    if (entryRank !== rank || entry.cards.some(card => card.rank !== rank)) break
+    count += entry.cards.length
+  }
+  return rank === null || count === 0 ? null : { rank, count }
+}
+
+function completesPhysicalBurn(state: GameState, cards: Card[]): boolean {
+  if (cards.length === 0) return false
+  if (isQuartet(cards)) return true
+  const run = getPhysicalTopRun(state)
+  return run !== null && run.rank === cards[0].rank && run.count + cards.length >= 4
 }
 
 // ---------- Internal helpers ----------
@@ -356,7 +412,7 @@ function applyStalemateCap(state: GameState): GameState {
 
 export interface InitConfig {
   players: Array<{ id: string; name: string; isAI?: boolean; aiDifficulty?: 'easy'|'medium'|'hard' }>
-  rules?: GameRules
+  rules?: Partial<GameRules>
   previousRound?: PreviousRoundResult | null
   /** @deprecated Pass rules.includeJokers. Kept for legacy callers. */
   includeJokers?: boolean
@@ -376,7 +432,10 @@ export function initGame(cfg: InitConfig): GameState {
   if (cfg.rules === undefined && cfg.includeJokers !== undefined) {
     rules.includeJokers = cfg.includeJokers
   }
-  const deck = shuffle(makeDeck(rules.includeJokers, rng), rng)
+  if (rules.deckCount !== 1 && rules.deckCount !== 2 && rules.deckCount !== 3) {
+    throw new Error('deckCount must be 1, 2, or 3')
+  }
+  const deck = shuffle(makeDecks(rules.includeJokers, rules.deckCount, rng), rng)
   if (deck.length < cfg.players.length * 9) {
     throw new Error('Deck too small for player count')
   }
@@ -523,6 +582,110 @@ export function skipTribute(state: GameState, actorId: string): PlayResult {
   return { state: finishTribute(state, state.players) }
 }
 
+function clearReason(cards: Card[]): 'ten' | 'quartet' | 'joker' {
+  return cards.some(card => card.rank === 'JOKER') ? 'joker'
+    : cards.some(card => card.rank === '10') ? 'ten'
+      : 'quartet'
+}
+
+/** Apply a fully validated play, including draw, out/game-over, logs and turn. */
+function applyAcceptedPlay(
+  state: GameState,
+  actorIdx: number,
+  realCards: Card[],
+  zone: CardZone,
+  cleared: boolean,
+): GameState {
+  const playerId = state.players[actorIdx].id
+  const playedIds = new Set(realCards.map(card => card.id))
+  let nextPlayers = state.players.map(player => {
+    if (player.id !== playerId) return player
+    return {
+      ...player,
+      hand: player.hand.filter(card => !playedIds.has(card.id)),
+      faceUp: player.faceUp.filter(card => !playedIds.has(card.id)),
+      faceDown: player.faceDown.filter(card => !playedIds.has(card.id)),
+    }
+  })
+
+  // Burned cards leave the game entirely; otherwise append one physical run
+  // entry for this action.
+  const pile = cleared ? [] : [...state.pile, { cards: realCards, cleared: false }]
+
+  // Playing (including an interrupt) refills the hand to three while stock
+  // remains. A pickup intentionally never does this.
+  const stock = [...state.stock]
+  let drawCount = 0
+  nextPlayers = nextPlayers.map(player => {
+    if (player.id !== playerId) return player
+    const hand = [...player.hand]
+    while (hand.length < 3 && stock.length > 0) {
+      hand.push(stock.shift()!)
+      drawCount++
+    }
+    return { ...player, hand }
+  })
+
+  // Preserve a historical unknown first winner in migrated snapshots.
+  const hadPriorOut = state.players.some(player => player.isOut)
+  nextPlayers = nextPlayers.map(player => {
+    if (player.id !== playerId) return player
+    return player.hand.length + player.faceUp.length + player.faceDown.length === 0
+      ? { ...player, isOut: true }
+      : player
+  })
+
+  const wentOut = nextPlayers[actorIdx]?.isOut === true
+  let winnerId = state.winnerId ?? null
+  if (wentOut && winnerId === null && !hadPriorOut) winnerId = playerId
+
+  let phase: Phase = endgamePhase(state.phase, nextPlayers, stock)
+
+  // A burn hands the empty-pile lead to its actor (including an interrupt).
+  // If the actor went out, pass to the next active player. Non-burning 8s
+  // skip one additional active seat per card.
+  let nextIdx = actorIdx
+  if (!cleared || wentOut) {
+    nextIdx = nextActiveIdx(nextPlayers, actorIdx, state.playDirection)
+    const skipCount = !cleared && realCards[0].rank === '8' ? realCards.length : 0
+    for (let skipped = 0; skipped < skipCount; skipped++) {
+      nextIdx = nextActiveIdx(nextPlayers, nextIdx, state.playDirection)
+    }
+  }
+
+  let loserId = state.loserId
+  const activePlayers = nextPlayers.filter(player => !player.isOut)
+  if (activePlayers.length === 1) {
+    loserId = activePlayers[0].id
+    phase = 'gameOver'
+  }
+
+  const events: GameEvent[] = [
+    ...(zone === 'faceDown'
+      ? [{ type: 'BLIND_REVEAL' as const, playerId, card: realCards[0], success: true }]
+      : []),
+    { type: 'PLAY_CARDS', playerId, cards: realCards },
+    ...(cleared ? [{ type: 'CLEAR_PILE' as const, reason: clearReason(realCards) }] : []),
+    ...(drawCount > 0 ? [{ type: 'DRAW' as const, playerId, count: drawCount }] : []),
+    ...(wentOut ? [{ type: 'PLAYER_OUT' as const, playerId }] : []),
+    ...(loserId && loserId !== state.loserId ? [{ type: 'GAME_OVER' as const, loserId }] : []),
+  ]
+
+  return applyStalemateCap({
+    ...state,
+    players: nextPlayers,
+    stock,
+    pile,
+    currentPlayerIdx: nextIdx,
+    phase,
+    turnCount: state.turnCount + 1,
+    winnerId,
+    loserId,
+    log: appendLog(state.log, ...events),
+    seq: (state.seq ?? 0) + 1,
+  })
+}
+
 export function playCards(state: GameState, playerId: string, cards: Card[]): PlayResult {
   if (state.phase !== 'play' && state.phase !== 'endgame') {
     return { state, error: 'Cannot play in current phase' }
@@ -537,10 +700,6 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
   if (cards.length === 0) {
     return { state, error: 'No cards to play' }
   }
-  if (cards.length > 4) {
-    return { state, error: 'Cannot play more than 4 cards at once' }
-  }
-
   // Duplicate-submission guard (card duplication exploit).
   const submittedIds = cards.map(c => c.id)
   if (new Set(submittedIds).size !== submittedIds.length) {
@@ -616,108 +775,90 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
     return { state, error: `Card ${realCards[0].rank} cannot be played on ${topRank}` }
   }
 
-  // Apply: remove played cards from the player's zones.
-  const playedIds = new Set(realCards.map(c => c.id))
-  let nextPlayers = state.players.map(p => {
-    if (p.id !== playerId) return p
-    return {
-      ...p,
-      hand: p.hand.filter(c => !playedIds.has(c.id)),
-      faceUp: p.faceUp.filter(c => !playedIds.has(c.id)),
-      faceDown: p.faceDown.filter(c => !playedIds.has(c.id)),
-    }
-  })
+  const cleared = playClearsPile(realCards) || completesPhysicalBurn(state, realCards)
+  return { state: applyAcceptedPlay(state, state.currentPlayerIdx, realCards, zone, cleared) }
+}
 
-  // Burn (D3): burned cards leave the game; the pile becomes empty.
-  const cleared = playClearsPile(realCards)
-  const reason: 'ten' | 'quartet' | 'joker' =
-    realCards.some(c => c.rank === 'JOKER') ? 'joker'
-      : realCards.some(c => c.rank === '10') ? 'ten'
-        : 'quartet'
-  const pile = cleared ? [] : [...state.pile, { cards: realCards, cleared: false }]
+/**
+ * Return the complete set an out-of-turn player may use to finish a physical
+ * four-or-more run right now. An empty result means no legal interrupt. This
+ * is intentionally pure so clients can render eligibility from shared rules.
+ */
+export function getInterruptBurnCards(state: GameState, playerId: string): Card[] {
+  if (state.phase !== 'play' && state.phase !== 'endgame') return []
+  const actorIdx = state.players.findIndex(player => player.id === playerId)
+  if (actorIdx === -1 || actorIdx === state.currentPlayerIdx) return []
+  const player = state.players[actorIdx]
+  if (player.isOut) return []
 
-  // Draw from stock to refill hand to 3 (README refill rule; never on pickup).
-  const stock = [...state.stock]
-  let drawCount = 0
-  nextPlayers = nextPlayers.map(p => {
-    if (p.id !== playerId) return p
-    const hand = [...p.hand]
-    while (hand.length < 3 && stock.length > 0) {
-      hand.push(stock.shift()!)
-      drawCount++
-    }
-    return { ...p, hand }
-  })
+  const run = getPhysicalTopRun(state)
+  if (!run || run.count >= 4) return []
+  const zone = activeZone(player)
+  if (zone === 'faceDown') return []
+  const matching = player[zone].filter(card => card.rank === run.rank)
+  return matching.length > 0 && run.count + matching.length >= 4 ? matching : []
+}
 
-  // Check player out. Preserve whether somebody was already out before this
-  // action: legacy snapshots may have no winnerId even though their first
-  // PLAYER_OUT event has fallen out of the capped log. A later player must
-  // never steal that historically unknown winner slot.
-  const hadPriorOut = state.players.some(p => p.isOut)
-  nextPlayers = nextPlayers.map(p => {
-    if (p.id !== playerId) return p
-    if (p.hand.length + p.faceUp.length + p.faceDown.length === 0) {
-      return { ...p, isOut: true }
-    }
-    return p
-  })
+/**
+ * Burn-in / cut-in: an out-of-turn player may interrupt only by playing ALL
+ * matching cards from their currently active visible zone when that play
+ * completes the physical top run to at least four. The interrupter then owns
+ * the empty-pile lead exactly as after a 10, unless the play makes them go out.
+ */
+export function interruptBurn(state: GameState, playerId: string, cards: Card[]): PlayResult {
+  if (state.phase !== 'play' && state.phase !== 'endgame') {
+    return { state, error: 'Cannot interrupt in current phase' }
+  }
+  const actorIdx = state.players.findIndex(player => player.id === playerId)
+  if (actorIdx === -1) return { state, error: 'Player not found' }
+  if (actorIdx === state.currentPlayerIdx) {
+    return { state, error: 'Use the normal play action on your turn' }
+  }
+  const player = state.players[actorIdx]
+  if (player.isOut) return { state, error: 'Player already out' }
+  if (cards.length === 0) return { state, error: 'No cards to interrupt with' }
 
-  const wentOut = nextPlayers.find(p => p.id === playerId)?.isOut === true
-  let winnerId = state.winnerId ?? null
-  if (wentOut && winnerId === null && !hadPriorOut) winnerId = playerId
+  const run = getPhysicalTopRun(state)
+  if (!run) return { state, error: 'Pile is empty — nothing to interrupt' }
+  if (run.count >= 4) return { state, error: 'Top run should already be burned' }
 
-  // Phase transition
-  let phase: Phase = endgamePhase(state.phase, nextPlayers, stock)
-
-  // Turn: burn ⇒ same player leads on the empty pile — unless they just went
-  // out, in which case the lead passes to the next active player (D3).
-  // Otherwise each played 8 skips one additional active player (D12). Calling
-  // nextActiveIdx repeatedly naturally ignores out players and handles small
-  // tables: in a 2-player game one 8 returns the turn to its player, while a
-  // pair skips both active seats and lands on the opponent.
-  let nextIdx = state.currentPlayerIdx
-  if (!cleared || wentOut) {
-    nextIdx = nextActiveIdx(nextPlayers, state.currentPlayerIdx, state.playDirection)
-    const skipCount = !cleared && realCards[0].rank === '8' ? realCards.length : 0
-    for (let skipped = 0; skipped < skipCount; skipped++) {
-      nextIdx = nextActiveIdx(nextPlayers, nextIdx, state.playDirection)
-    }
+  const zone = activeZone(player)
+  if (zone === 'faceDown') {
+    return { state, error: 'Face-down cards cannot be used to interrupt' }
   }
 
-  // Game over — only one player left = loser
-  let loserId = state.loserId
-  const activePlayers = nextPlayers.filter(p => !p.isOut)
-  if (activePlayers.length === 1) {
-    loserId = activePlayers[0].id
-    phase = 'gameOver'
+  const submittedIds = cards.map(card => card.id)
+  if (new Set(submittedIds).size !== submittedIds.length) {
+    return { state, error: 'Duplicate card in interrupt' }
   }
 
-  const events: GameEvent[] = [
-    ...(zone === 'faceDown'
-      ? [{ type: 'BLIND_REVEAL' as const, playerId, card: realCards[0], success: true }]
-      : []),
-    { type: 'PLAY_CARDS', playerId, cards: realCards },
-    ...(cleared ? [{ type: 'CLEAR_PILE' as const, reason }] : []),
-    ...(drawCount > 0 ? [{ type: 'DRAW' as const, playerId, count: drawCount }] : []),
-    ...(wentOut ? [{ type: 'PLAYER_OUT' as const, playerId }] : []),
-    ...(loserId && loserId !== state.loserId ? [{ type: 'GAME_OVER' as const, loserId }] : []),
-  ]
-
-  return {
-    state: applyStalemateCap({
-      ...state,
-      players: nextPlayers,
-      stock,
-      pile,
-      currentPlayerIdx: nextIdx,
-      phase,
-      turnCount: state.turnCount + 1,
-      winnerId,
-      loserId,
-      log: appendLog(state.log, ...events),
-      seq: (state.seq ?? 0) + 1,
-    }),
+  const owned = new Map(
+    [...player.hand, ...player.faceUp, ...player.faceDown].map(card => [card.id, card] as const),
+  )
+  const realCards: Card[] = []
+  for (const card of cards) {
+    const real = owned.get(card.id)
+    if (!real) return { state, error: `Card ${card.id} not in player's possession` }
+    if (!player[zone].some(zoneCard => zoneCard.id === real.id)) {
+      return { state, error: `Card ${card.id} cannot be played from ${zone} right now` }
+    }
+    realCards.push(real)
   }
+
+  if (realCards.some(card => card.rank !== run.rank)) {
+    return { state, error: `Interrupt cards must all match the physical top rank ${run.rank}` }
+  }
+
+  const allMatching = player[zone].filter(card => card.rank === run.rank)
+  const playedIds = new Set(realCards.map(card => card.id))
+  if (allMatching.length !== realCards.length || allMatching.some(card => !playedIds.has(card.id))) {
+    return { state, error: 'Interrupt must play all matching cards from the active zone' }
+  }
+  if (run.count + realCards.length < 4) {
+    return { state, error: 'Interrupt must complete at least four matching cards' }
+  }
+
+  return { state: applyAcceptedPlay(state, actorIdx, realCards, zone, true) }
 }
 
 export function pickUpPile(state: GameState, playerId: string): PlayResult {
@@ -783,13 +924,11 @@ const SPECIALS: ReadonlySet<Rank> = new Set(['2', '3', '10', 'JOKER'])
  *            (sheds fast, hoards special cards); plays a single special only
  *            when nothing else is playable.
  *  - hard:   medium's shedding, plus: wins immediately when one action can
- *            empty all remaining cards; burns (10/Joker/quartet) only when
- *            the pile is meaningfully large (>= 4 cards — burning a big pile
- *            permanently removes those cards from the game and denies
- *            opponents a cheap pickup, while a small pile is not worth a
- *            premium card) or when it wins the game; prefers spending a 2
- *            before a burn card when only specials are playable (2s reset
- *            the constraint without removing cards from the game).
+ *            empty all remaining cards; recognizes cumulative physical runs
+ *            and completes a forced four-or-more burn when possible. It uses
+ *            a standalone 10/Joker/four-plus set to burn a meaningfully large
+ *            pile (>= 4 cards) or when it wins the game; otherwise it prefers
+ *            spending a 2 before a premium burn card.
  *
  * Pass a seeded rng for deterministic behavior.
  */
@@ -842,9 +981,17 @@ export function pickAIMove(
   const winner = groups.find(g => g.length === totalRemaining)
   if (winner) return { type: 'play', cards: winner }
 
+  // Finish an existing physical top run. This is based on the printed rank,
+  // so cumulative 2s/3s are recognized despite their effective-rank effects.
+  const topRun = getPhysicalTopRun(state)
+  const runCompleter = topRun && topRun.count < 4
+    ? groups.find(group => group[0].rank === topRun.rank && topRun.count + group.length >= 4)
+    : undefined
+  if (runCompleter) return { type: 'play', cards: runCompleter }
+
   // Burn a meaningfully large pile (see rationale above).
   if (pileCards >= 4) {
-    const quartet = nonSpecial.find(g => g.length === 4)
+    const quartet = groups.find(g => isQuartet(g))
     if (quartet) return { type: 'play', cards: quartet }
     const burn = groups.find(g => g[0].rank === '10' || g[0].rank === 'JOKER')
     if (burn) return { type: 'play', cards: [burn[0]] }

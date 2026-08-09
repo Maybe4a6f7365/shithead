@@ -9,7 +9,7 @@ import {
   type GameEvent,
   type GameState,
 } from '../index'
-import { deriveLegacyWinnerId, normalizePersistedGameState } from '../../worker/migrateState'
+import { deriveLegacyWinnerId, normalizeGameRules, normalizePersistedGameState } from '../../worker/migrateState'
 import { applyPlayerForfeit } from '../../worker/forfeit'
 
 function stateWithOutPlayers(outIds: string[], log: GameEvent[] = []): GameState {
@@ -68,7 +68,17 @@ describe('legacy worker state migration', () => {
     const state = { ...stateWithOutPlayers(['a', 'b']), winnerId: 'b' }
     const migrated = normalizePersistedGameState(state, { includeJokers: false, winnerSwapsFaceUp: true })
     expect(migrated?.winnerId).toBe('b')
-    expect(migrated?.rules).toEqual({ includeJokers: false, winnerSwapsFaceUp: true })
+    expect(migrated?.rules).toEqual({ includeJokers: false, winnerSwapsFaceUp: true, deckCount: 1 })
+  })
+
+  it('migrates missing deck counts to one and rejects corrupt persisted counts', () => {
+    expect(normalizeGameRules({ includeJokers: false })).toEqual({
+      includeJokers: false,
+      winnerSwapsFaceUp: false,
+      deckCount: 1,
+    })
+    expect(normalizeGameRules({ deckCount: 3 })).toMatchObject({ deckCount: 3 })
+    expect(normalizeGameRules({ deckCount: 99 } as never)).toMatchObject({ deckCount: 1 })
   })
 })
 

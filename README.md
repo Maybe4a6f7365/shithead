@@ -35,7 +35,7 @@ A web-first, mobile-optimized Shithead implementation with AI bots, online multi
 
 Standard German Shithead variant:
 
-- **Round options:** the host chooses whether Jokers are included and whether the previous winner gets the optional face-up exchange
+- **Round options:** the host chooses 1–3 decks, whether Jokers are included, and whether the previous winner gets the optional face-up exchange
 - **Deal:** 3 cards face-down, then 6 visible cards. Choose any 3 of those 6 for the face-up final row; the other 3 become your hand
 - **Goal:** Lose all your cards. Last player holding = **Shithead**.
 - **Start:** the player with the lowest-ranked face-up final card begins
@@ -53,7 +53,8 @@ Standard German Shithead variant:
 | **7** | Low — the next ordinary card must be 7 or lower |
 | **8** | Skip — skips one active player per 8 played; equal-rank 8s stack |
 | **10** | Play anytime — clears the pile, same player leads |
-| **Quartet** (4× same rank) | Same as 10 — clears pile, same player leads |
+| **Top run** (4+ same printed rank) | Same as 10 — clears the pile whether completed in one play or across consecutive plays; with multiple decks, more than 4 may burn |
+| **Burn in / cut in** | Out of turn, play all matching cards from your visible active zone only when they complete the physical top run to 4+; the pile burns and the interrupter leads |
 | **Joker** | Wild + clears pile |
 
 ## 🚀 Development

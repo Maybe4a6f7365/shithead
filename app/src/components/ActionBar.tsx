@@ -11,9 +11,25 @@ export interface ActionBarProps {
   pickupArmed: boolean
   onPlay: () => void
   onPickUp: () => void
+  burnIn?: { count: number; rank: string }
+  onBurnIn?: () => void
 }
 
-export function ActionBar({ selectionCount, canPickUp, pickupArmed, onPlay, onPickUp }: ActionBarProps) {
+export function ActionBar({ selectionCount, canPickUp, pickupArmed, onPlay, onPickUp, burnIn, onBurnIn }: ActionBarProps) {
+  if (burnIn && onBurnIn) {
+    return (
+      <div className="action-bar burn-in-bar flex items-center justify-center gap-s3 px-s4 min-h-[var(--actionbar-h)]">
+        <button
+          type="button"
+          onClick={onBurnIn}
+          className="burn-in-action min-h-[48px] px-s5 text-button font-bold tracking-button uppercase"
+          aria-label={`Burn in with ${burnIn.count} cards of rank ${burnIn.rank}`}
+        >
+          Burn in <span aria-hidden="true">· {burnIn.count}× {burnIn.rank}</span>
+        </button>
+      </div>
+    )
+  }
   if (selectionCount === 0 && !canPickUp) return null
   return (
     <div className="action-bar flex items-center justify-between gap-s3 px-s4 min-h-[var(--actionbar-h)]">

@@ -9,7 +9,7 @@ import { DEFAULT_GAME_RULES, type Card, type GameState } from '../engine'
 import { PROTOCOL_VERSION, type RoomSummary } from '../engine/protocol'
 import { RoomClient } from './RoomClient'
 import {
-  shouldAcceptGameState, loadSession, saveSession, clearSession, useMultiplayerRoom,
+  shouldAcceptGameState, loadSession, loadRestoredRoomIntent, saveSession, clearSession, useMultiplayerRoom,
 } from './useMultiplayerRoom'
 
 function gs(seq: number, turnCount = seq, phase: GameState['phase'] = 'play'): GameState {
@@ -74,6 +74,22 @@ describe('resume session storage', () => {
     localStorage.setItem('shithead:session', '{"playerId":"x"}')
     expect(loadSession()).toBeNull()
   })
+
+  it('only restores a room when a complete secure resume credential exists', () => {
+    saveSession({ roomCode: 'ABC123', playerId: 'p1', playerName: 'Greta' })
+    expect(loadRestoredRoomIntent()).toBeNull()
+
+    saveSession({ roomCode: 'ABC123', playerId: 'p1', playerName: 'Greta', resumeToken: 'secret' })
+    expect(loadRestoredRoomIntent()).toEqual({ roomId: 'ABC123', playerName: 'Greta', intent: 'join' })
+  })
+
+  it('rejects malformed persisted room credentials instead of routing into them', () => {
+    localStorage.setItem('shithead:session', JSON.stringify({
+      roomCode: '../BAD', playerId: 'p1', playerName: 'Greta', resumeToken: 'secret',
+    }))
+    expect(loadSession()).toBeNull()
+    expect(loadRestoredRoomIntent()).toBeNull()
+  })
 })
 
 type SocketHandler = (event: any) => void
@@ -131,6 +147,7 @@ const roomSummary = (phase: RoomSummary['phase'] = 'waiting'): RoomSummary => ({
 describe('RoomClient authentication ordering', () => {
   beforeEach(() => {
     FakeWebSocket.instances = []
+    clearSession()
     vi.stubGlobal('WebSocket', FakeWebSocket)
   })
 
@@ -139,7 +156,7 @@ describe('RoomClient authentication ordering', () => {
     vi.useRealTimers()
   })
 
-  it('sends reconnect authentication before flushing a queued PLAY and stamps both v3', () => {
+  it('sends reconnect authentication before flushing a queued PLAY and stamps the current protocol', () => {
     let client!: RoomClient
     client = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
@@ -161,6 +178,37 @@ describe('RoomClient authentication ordering', () => {
     expect(socket.sent.map(message => message.type)).toEqual(['RESUME_ROOM', 'PLAY'])
     expect(socket.sent[1].version).toBe(PROTOCOL_VERSION)
     client.close()
+  })
+
+  it('hard-refresh lifecycle resumes with the rotated token and never JOINs or CREATEs a duplicate seat', () => {
+    saveSession({ roomCode: 'ABC123', playerId: 'p1', playerName: 'Greta', resumeToken: 'token-before-refresh' })
+
+    const first = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Greta', intent: 'join',
+    }))
+    const firstSocket = FakeWebSocket.instances[0]
+    act(() => firstSocket.open())
+    expect(firstSocket.sent).toEqual([{
+      type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'p1',
+      resumeToken: 'token-before-refresh', version: PROTOCOL_VERSION,
+    }])
+    act(() => firstSocket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1',
+      resumeToken: 'token-after-refresh', room: roomSummary('play'),
+    }))
+    expect(loadSession()?.resumeToken).toBe('token-after-refresh')
+    first.unmount()
+
+    const second = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Greta', intent: 'create',
+    }))
+    const secondSocket = FakeWebSocket.instances[1]
+    act(() => secondSocket.open())
+    expect(secondSocket.sent.map(message => message.type)).toEqual(['RESUME_ROOM'])
+    expect(secondSocket.sent[0]).toMatchObject({
+      roomCode: 'ABC123', playerId: 'p1', resumeToken: 'token-after-refresh',
+    })
+    second.unmount()
   })
 
   it('keeps connecting cancel ordered JOIN then LEAVE', () => {

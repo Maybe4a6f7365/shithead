@@ -6,8 +6,8 @@
 // ============================================================================
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
-import { WaitingRoom, waitingRoomRole } from '../WaitingRoom'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { inviteUrl, WaitingRoom, waitingRoomRole } from '../WaitingRoom'
 import type { RoomSummary } from '../../engine/protocol'
 import { DEFAULT_GAME_RULES } from '../../engine'
 
@@ -29,7 +29,10 @@ function room(partial: Partial<RoomSummary> = {}): RoomSummary {
 
 const noop = () => {}
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe('waitingRoomRole', () => {
   it('returns host iff room.hostId === myPlayerId', () => {
@@ -69,11 +72,57 @@ describe('WaitingRoom', () => {
     }))
     fireEvent.click(screen.getByRole('switch', { name: /jokers/i }))
     expect(change).toHaveBeenCalledWith({ includeJokers: false })
+    fireEvent.click(screen.getByRole('radio', { name: /3 decks/i }))
+    expect(change).toHaveBeenCalledWith({ deckCount: 3 })
 
     rerender(createElement(WaitingRoom, {
       room: room(), myPlayerId: 'guest-2', onStart: noop, onLeave: noop, onRulesChange: change,
     }))
     expect((screen.getByRole('switch', { name: /jokers/i }) as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('radio', { name: /3 decks/i }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('moves deck choices with radiogroup arrow keys', () => {
+    const change = vi.fn()
+    render(createElement(WaitingRoom, {
+      room: room(), myPlayerId: 'host-1', onStart: noop, onLeave: noop, onRulesChange: change,
+    }))
+    const one = screen.getByRole('radio', { name: /1 deck$/i })
+    one.focus()
+    fireEvent.keyDown(screen.getByRole('radiogroup', { name: /number of decks/i }), { key: 'ArrowRight' })
+    expect(screen.getByRole('radio', { name: /2 decks/i })).toBe(document.activeElement)
+    expect(change).toHaveBeenCalledWith({ deckCount: 2 })
+  })
+
+  it('shares a room link with the native share sheet', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, share, clipboard: { writeText: vi.fn() } })
+    render(createElement(WaitingRoom, { room: room(), myPlayerId: 'host-1', onStart: noop, onLeave: noop }))
+    fireEvent.click(screen.getByRole('button', { name: /invite/i }))
+    await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({
+      url: inviteUrl('LPHGPC'),
+      text: expect.stringContaining('LPHGPC'),
+    })))
+    expect(await screen.findByText(/invite shared/i)).toBeTruthy()
+  })
+
+  it('copies the full invite link when native sharing is unavailable', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    render(createElement(WaitingRoom, { room: room(), myPlayerId: 'host-1', onStart: noop, onLeave: noop }))
+    fireEvent.click(screen.getByRole('button', { name: /invite/i }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(inviteUrl('LPHGPC')))
+    expect(screen.getByText(/invite link copied/i)).toBeTruthy()
+  })
+
+  it('shows a selectable invite URL when browser sharing and copying are blocked', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'))
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    render(createElement(WaitingRoom, { room: room(), myPlayerId: 'host-1', onStart: noop, onLeave: noop }))
+    fireEvent.click(screen.getByRole('button', { name: /invite/i }))
+    const field = await screen.findByRole('textbox', { name: /invite link/i }) as HTMLInputElement
+    expect(field.value).toBe(inviteUrl('LPHGPC'))
+    expect(screen.getByRole('alert').textContent).toMatch(/select the invite link/i)
   })
 
   it('keeps an offline host visible and waits for reconnection', () => {

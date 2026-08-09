@@ -12,6 +12,7 @@ import {
   type Player,
   type PreviousRoundResult,
   exchangeFaceUpCards,
+  interruptBurn,
   initGame,
   pickAIMove,
   pickUpPile,
@@ -43,6 +44,7 @@ interface SPState {
   endRearrange: (playerId: string) => void
   rearrange: (playerId: string, handIdx: number, upIdx: number) => void
   playCards: (playerId: string, cards: Card[]) => void
+  interruptBurn: (playerId: string, cards: Card[]) => void
   pickUpPile: (playerId: string) => void
   exchangeTribute: (playerId: string, winnerCardId: string, loserCardId: string) => void
   skipTribute: (playerId: string) => void
@@ -208,6 +210,15 @@ export const useSPGame = create<SPState>((set, get) => ({
   playCards: (playerId, cards) => {
     set(current => {
       const result = playCards(current.state, playerId, cards)
+      if (result.error) return { lastError: result.error }
+      const turnMoved = result.state.currentPlayerIdx !== current.state.currentPlayerIdx
+      return { state: result.state, lastError: null, revealedId: turnMoved ? null : current.revealedId }
+    })
+  },
+
+  interruptBurn: (playerId, cards) => {
+    set(current => {
+      const result = interruptBurn(current.state, playerId, cards)
       if (result.error) return { lastError: result.error }
       const turnMoved = result.state.currentPlayerIdx !== current.state.currentPlayerIdx
       return { state: result.state, lastError: null, revealedId: turnMoved ? null : current.revealedId }

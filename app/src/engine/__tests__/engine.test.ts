@@ -3,7 +3,7 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest'
 import {
-  makeDeck, shuffle, seededRng, canPlay, isQuartet, playClearsPile,
+  makeDeck, makeDecks, shuffle, seededRng, canPlay, isQuartet, playClearsPile,
   initGame, rearrange, startPlay, playCards, pickUpPile,
   RANK_ORDER, getCurrentPlayer, getTopCard, getTopRank, pileSize, MAX_LOG_ENTRIES,
 } from '../index'
@@ -37,6 +37,15 @@ describe('makeDeck', () => {
   })
   it('is deterministic with a seeded rng', () => {
     expect(makeDeck(true, seededRng(42))).toEqual(makeDeck(true, seededRng(42)))
+  })
+  it('builds 1-3 complete decks with globally unique opaque ids', () => {
+    const two = makeDecks(false, 2, seededRng(42))
+    const three = makeDecks(true, 3, seededRng(43))
+    expect(two).toHaveLength(104)
+    expect(three).toHaveLength(162)
+    expect(new Set(two.map(card => card.id)).size).toBe(two.length)
+    expect(new Set(three.map(card => card.id)).size).toBe(three.length)
+    expect(three.filter(card => card.rank === 'JOKER')).toHaveLength(6)
   })
 })
 
@@ -111,9 +120,12 @@ describe('isQuartet + playClearsPile', () => {
   it('3-of-a-kind does not clear', () => {
     expect(isQuartet([c('7','♠'), c('7','♥'), c('7','♦')])).toBe(false)
   })
-  it('quartet containing a wild does not count', () => {
+  it('requires one physical rank, including reset 2s', () => {
     expect(isQuartet([c('7','♠'), c('7','♥'), c('7','♦'), c('JOKER', null)])).toBe(false)
-    expect(isQuartet([c('2','♠'), c('2','♥'), c('2','♦'), c('2','♣')])).toBe(false)
+    expect(isQuartet([c('2','♠'), c('2','♥'), c('2','♦'), c('2','♣')])).toBe(true)
+  })
+  it('accepts more than four equal cards with multiple decks', () => {
+    expect(isQuartet(Array.from({ length: 7 }, () => c('6')))).toBe(true)
   })
   it('10 and Joker clear; 2 does not', () => {
     expect(playClearsPile([c('10')])).toBe(true)
@@ -154,6 +166,25 @@ describe('initGame', () => {
     expect(state.stock.length).toBe(54 - 18)
     expect(state.phase).toBe('rearrange')
     expect(state.seq).toBe(0)
+  })
+  it('uses the configured number of full decks', () => {
+    const two = initGame({
+      players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
+      rules: { deckCount: 2 },
+      rng: seededRng(31),
+    })
+    const threeNoJokers = initGame({
+      players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
+      rules: { deckCount: 3, includeJokers: false },
+      rng: seededRng(32),
+    })
+    expect(two.rules.deckCount).toBe(2)
+    expect(two.stock).toHaveLength(108 - 18)
+    expect(threeNoJokers.stock).toHaveLength(156 - 18)
+    const all = [...two.stock, ...two.players.flatMap(player => [
+      ...player.hand, ...player.faceUp, ...player.faceDown,
+    ])]
+    expect(new Set(all.map(card => card.id)).size).toBe(108)
   })
   it('is fully deterministic with a seeded rng', () => {
     const cfg = { players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }

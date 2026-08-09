@@ -2,7 +2,7 @@
 // useMultiplayerRoom — room socket lifecycle, session resume, seq guard,
 // truthful connection states (§4.6, Appendix A.10).
 //
-// RESUME CONTRACT (protocol v3):
+// RESUME CONTRACT (protocol v4):
 //  - WELCOME carries `resumeToken` (per-player secret). We persist
 //    { roomCode, playerId, resumeToken, playerName } in localStorage.
 //  - RESUME_ROOM is sent as { type, roomCode, playerId, resumeToken }.
@@ -40,7 +40,15 @@ export function loadSession(): StoredSession | null {
     const raw = localStorage.getItem(SESSION_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
-    if (typeof parsed?.roomCode === 'string' && typeof parsed?.playerId === 'string') {
+    const validToken = parsed?.resumeToken === undefined || (
+      typeof parsed.resumeToken === 'string' && parsed.resumeToken.length > 0 && parsed.resumeToken.length <= 256
+    )
+    if (
+      typeof parsed?.roomCode === 'string' && /^[A-Z0-9]{6}$/.test(parsed.roomCode) &&
+      typeof parsed?.playerId === 'string' && parsed.playerId.length > 0 && parsed.playerId.length <= 128 &&
+      typeof parsed?.playerName === 'string' && parsed.playerName.trim().length > 0 && parsed.playerName.length <= 32 &&
+      validToken
+    ) {
       return parsed as StoredSession
     }
   } catch { /* corrupted storage */ }
@@ -53,6 +61,22 @@ export function saveSession(s: StoredSession): void {
 
 export function clearSession(): void {
   try { localStorage.removeItem(SESSION_KEY) } catch { /* ignore */ }
+}
+
+/**
+ * Convert a resumable credential into the initial App route after a hard
+ * refresh. `intent` is deliberately `join`: the hook will authenticate with
+ * RESUME_ROOM first, while the fallback can never accidentally re-create an
+ * already allocated room code.
+ */
+export function loadRestoredRoomIntent(): UseMultiplayerRoomArgs | null {
+  const session = loadSession()
+  if (!session?.resumeToken) return null
+  return {
+    roomId: session.roomCode,
+    playerName: session.playerName,
+    intent: 'join',
+  }
 }
 
 // ---------- seq guard (pure, exported for tests) ----------

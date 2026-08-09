@@ -228,6 +228,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         viewerActive={gameState.players[gameState.currentPlayerIdx]?.id === playerId && gameState.phase !== 'gameOver'}
         error={notice}
         onPlay={cards => send({ type: 'PLAY', cards })}
+        onBurnIn={cards => send({ type: 'BURN_IN', cards })}
         onPickUp={() => send({ type: 'PICK_UP' })}
         onLeave={quit}
         onOpenRules={() => setRulesOpen(true)}

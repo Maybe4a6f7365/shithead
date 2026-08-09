@@ -33,7 +33,7 @@ async function waitForDeployment() {
         const version = JSON.parse(text)
         if (!expectedCommit || version.commit === expectedCommit) {
           assert.equal(version.service, 'shithead-multiplayer')
-          assert.equal(version.protocol, 3)
+          assert.equal(version.protocol, 4)
           log(`deployed commit ${version.commit}`)
           return version
         }
@@ -238,7 +238,7 @@ async function run() {
 
   host.send({ type: 'CREATE_ROOM', playerName: 'Smoke Host' })
   const hostWelcome = await host.waitType('WELCOME')
-  assert.equal(hostWelcome.version, 3)
+  assert.equal(hostWelcome.version, 4)
   assert.equal(hostWelcome.room.code, roomId)
   assert.equal(hostWelcome.room.hostId, hostWelcome.playerId)
   const hostId = hostWelcome.playerId
@@ -267,11 +267,22 @@ async function run() {
   assert.equal(hostOnline.room.hostId, hostId)
   log('host session resumed without duplicating the player')
 
+  host.send({ type: 'SET_RULES', rules: { deckCount: 2 } })
+  const [hostTwoDecks, guestTwoDecks] = await Promise.all([
+    host.waitType('ROOM_STATE', message => message.room.rules.deckCount === 2),
+    guest.waitType('ROOM_STATE', message => message.room.rules.deckCount === 2),
+  ])
+  assert.equal(hostTwoDecks.room.rules.deckCount, 2)
+  assert.equal(guestTwoDecks.room.rules.deckCount, 2)
+  log('host selected a two-deck round and the rule synchronized')
+
   host.send({ type: 'START_GAME' })
   const hostRearrange = await host.waitType('GAME_STATE', message => message.state.phase === 'rearrange')
   const guestRearrange = await guest.waitType('GAME_STATE', message => message.state.phase === 'rearrange')
   assert.equal(hostRearrange.state.players.length, 2)
   assert.equal(guestRearrange.state.players.length, 2)
+  assert.equal(hostRearrange.state.rules.deckCount, 2)
+  assert.equal(hostRearrange.state.stock.length, 90, 'two joker decks minus the 18-card deal should leave 90 cards')
 
   const guestViewOfHost = guestRearrange.state.players.find(player => player.id === hostId)
   assert(guestViewOfHost)
