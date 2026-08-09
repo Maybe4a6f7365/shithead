@@ -1,0 +1,26 @@
+// @ts-ignore Vitest executes this contract test in Node; the browser-only app
+// tsconfig intentionally does not include the full Node type surface.
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+const css = readFileSync(new URL('../../styles/index.css', import.meta.url), 'utf8')
+const main = readFileSync(new URL('../../main.tsx', import.meta.url), 'utf8')
+
+describe('Android visual viewport regression', () => {
+  it('sizes the clipped game screen from the live visual viewport', () => {
+    // Some Android browsers report vh/svh/dvh against the area behind their
+    // address/navigation chrome. Because .app-viewport clips overflow, that
+    // placed a large pickup hand below the actually visible, tappable area.
+    // Keep the runtime measurement and its CSS consumer coupled so neither
+    // half of the fix can be removed unnoticed.
+    expect(main).toContain('window.visualViewport')
+    expect(main).toContain('--app-viewport-height')
+
+    const appViewportRule = css.match(/\.app-viewport\s*\{([\s\S]*?)\}/)?.[1] ?? ''
+    expect(appViewportRule).toContain('var(--app-viewport-height')
+
+    const largeHandRowRule = css.match(/\.large-hand__row\s*\{([\s\S]*?)\}/)?.[1] ?? ''
+    expect(largeHandRowRule).toContain('align-items: flex-start')
+    expect(largeHandRowRule).not.toMatch(/min-height\s*:\s*100%/)
+  })
+})
