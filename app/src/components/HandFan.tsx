@@ -1,8 +1,9 @@
 // ============================================================================
 // HandFan (Z4) — the hand fan in the thumb zone (§2.5, §3.1).
 // Normal hands fan at a 24px target floor. Pickups can make a hand very
-// large, so 13+ cards switch to a fixed-height, horizontally scrolling rail
-// with two rows (one row in short landscape) instead of shrinking cards.
+// large, so 13+ cards switch to a fixed-height, horizontally scrolling
+// overlapping rail. Keeping one row makes every card reachable without the
+// second row falling behind mobile browser chrome or the safe-area edge.
 // Roving tabindex + ←/→ keyboard navigation (§6.5).
 // ============================================================================
 import { useLayoutEffect, useRef, useState } from 'react'
@@ -59,7 +60,9 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
   const renderCard = (c: CardT, i: number, compactRail = false) => (
     <div
       key={c.id}
-      style={compactRail ? undefined : { marginLeft: i === 0 ? 0 : -overlap, paddingBottom: 16 }}
+      style={compactRail
+        ? { marginLeft: i === 0 ? 0 : -overlap }
+        : { marginLeft: i === 0 ? 0 : -overlap, paddingBottom: 16 }}
       className={compactRail ? 'shrink-0 pb-s2' : 'shrink-0'}
     >
       <Card
@@ -72,8 +75,6 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
   )
 
   if (large) {
-    const columns: CardT[][] = []
-    for (let i = 0; i < cards.length; i += 2) columns.push(cards.slice(i, i + 2))
     return (
       <section className="large-hand" aria-label={`Your hand, ${n} cards`} aria-labelledby={labelledBy}>
         <div className="large-hand__meta px-s4 text-micro font-semibold tracking-micro uppercase text-cream-dim">
@@ -89,12 +90,14 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
           onKeyDown={onKeyDown}
         >
           <div ref={measureRef} className="card invisible absolute pointer-events-none" aria-hidden="true" />
-          <div className="large-hand__grid px-s4 pt-s2">
-            {columns.map((column, columnIndex) => (
-              <div className="large-hand__column" key={column[0].id}>
-                {column.map((card, rowIndex) => renderCard(card, columnIndex * 2 + rowIndex, true))}
-              </div>
-            ))}
+          <div
+            className="large-hand__row px-s4 pt-s2"
+            style={{
+              width: n > 0 && cardW > 0 ? cardW + step * (n - 1) + 32 : 'auto',
+              minWidth: 'fit-content',
+            }}
+          >
+            {cards.map((card, index) => renderCard(card, index, true))}
           </div>
         </div>
       </section>
