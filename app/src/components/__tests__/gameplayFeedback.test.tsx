@@ -173,7 +173,7 @@ describe('special-card table stamps', () => {
     expect(effect([{ type: 'PLAY_CARDS', playerId: 'p', cards: [
       { id: '8a', rank: '8', suit: '♣' },
       { id: '8b', rank: '8', suit: '♠' },
-    ] }])).toMatchObject({ kind: 'skip', label: 'Skip ×2', detail: '2 seats passed' })
+    ] }])).toMatchObject({ kind: 'skip', count: 2, label: 'Skip ×2', detail: '2 seats passed' })
   })
 
   it('prioritizes the burn result over the printed special rank', () => {

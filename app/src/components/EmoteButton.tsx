@@ -73,7 +73,21 @@ export function EmoteButton({ onSend }: EmoteButtonProps) {
         aria-haspopup="menu"
         aria-label="Send an emote"
       >
-        <span className="emote-control__glyph" aria-hidden="true">🙂</span>
+        <svg
+          className="emote-control__glyph"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="M20 11.5a8 8 0 1 1-3.1-6.34A7.96 7.96 0 0 1 20 11.5Z" />
+          <path d="M8.5 10h.01M15.5 10h.01M8.75 14a4.7 4.7 0 0 0 6.5 0" />
+          <path d="m17.5 17.5 2.5 1-.75-2.75" />
+        </svg>
       </button>
       <AnimatePresence>
         {open && (
@@ -87,23 +101,28 @@ export function EmoteButton({ onSend }: EmoteButtonProps) {
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4, scale: 0.98 }}
             transition={{ duration: reduceMotion ? 0.01 : 0.16 }}
           >
-            {EMOTE_IDS.map(id => (
-              <button
-                key={id}
-                type="button"
-                role="menuitem"
-                className="emote-picker__item"
-                data-emote={id}
-                aria-label={EMOTES[id].label}
-                onClick={() => {
-                  onSend(id)
-                  setOpen(false)
-                  trigger.current?.focus()
-                }}
-              >
-                <span aria-hidden="true">{EMOTES[id].glyph}</span>
-              </button>
-            ))}
+            <div className="emote-picker__header" role="presentation">
+              <strong className="emote-picker__title">Reactions</strong>
+            </div>
+            <div className="emote-picker__grid" role="presentation">
+              {EMOTE_IDS.map(id => (
+                <button
+                  key={id}
+                  type="button"
+                  role="menuitem"
+                  className="emote-picker__item"
+                  data-emote={id}
+                  aria-label={EMOTES[id].label}
+                  onClick={() => {
+                    onSend(id)
+                    setOpen(false)
+                    trigger.current?.focus()
+                  }}
+                >
+                  <span aria-hidden="true">{EMOTES[id].glyph}</span>
+                </button>
+              ))}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

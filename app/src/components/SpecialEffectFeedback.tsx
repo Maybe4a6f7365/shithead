@@ -9,6 +9,8 @@ export interface SpecialEffect {
   kind: SpecialEffectKind
   label: string
   detail: string
+  /** Number of seats/cards involved when the effect meaningfully stacks. */
+  count?: number
 }
 
 function displayRank(rank: Rank): string {
@@ -58,6 +60,7 @@ export function specialEffectFromEvents(
     return {
       key,
       kind: 'skip',
+      count,
       label: count > 1 ? `Skip ×${count}` : 'Skip',
       detail: count > 1 ? `${count} seats passed` : 'Next seat passed',
     }
@@ -75,7 +78,9 @@ export function SpecialEffectFeedback({ effect }: { effect: SpecialEffect | null
   useEffect(() => {
     if (!effect) return
     setVisible(true)
-    const timeout = window.setTimeout(() => setVisible(false), 1050)
+    // This is a secondary receipt for the pile animation, not a blink-and-miss
+    // toast. Keep it long enough to scan during a fast AI or multiplayer turn.
+    const timeout = window.setTimeout(() => setVisible(false), 1800)
     return () => window.clearTimeout(timeout)
   }, [effect?.key])
 
@@ -86,14 +91,19 @@ export function SpecialEffectFeedback({ effect }: { effect: SpecialEffect | null
           key={`${effect.key}-${effect.kind}`}
           className="special-effect-feedback"
           data-effect={effect.kind}
+          data-count={effect.count}
           aria-hidden="true"
-          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.92, rotate: -1.5 }}
-          animate={{ opacity: 1, y: 0, scale: 1, rotate: 0 }}
-          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -5, scale: 1.02 }}
-          transition={{ duration: reduceMotion ? 0.01 : 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -3 }}
+          transition={{ duration: reduceMotion ? 0.01 : 0.24, ease: [0.16, 1, 0.3, 1] }}
         >
-          <strong className="special-effect-feedback__label">{effect.label}</strong>
-          <span className="special-effect-feedback__detail">{effect.detail}</span>
+          <span className="special-effect-feedback__rule" data-effect={effect.kind}>
+            <strong className="special-effect-feedback__label">{effect.label}</strong>
+          </span>
+          <span className="special-effect-feedback__receipt">
+            <span className="special-effect-feedback__detail">{effect.detail}</span>
+          </span>
         </motion.div>
       )}
     </AnimatePresence>

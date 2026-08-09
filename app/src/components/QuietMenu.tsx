@@ -5,6 +5,30 @@
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
 
+function MenuIcon({ name }: { name: 'rules' | 'sound' | 'leave' }) {
+  if (name === 'rules') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z" />
+        <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5v-16Z" />
+      </svg>
+    )
+  }
+  if (name === 'sound') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        <path d="M5 10v4h3l4 3V7l-4 3H5Z" />
+        <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7.5 7.5 0 0 1 0 10" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M10 5H5v14h5M13 8l4 4-4 4M8 12h9" />
+    </svg>
+  )
+}
+
 export interface QuietMenuProps {
   onOpenRules: () => void
   soundOn: boolean
@@ -80,7 +104,11 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
         className="quiet-menu__trigger icon-button"
         aria-label="Menu"
       >
-        <span aria-hidden="true" className="quiet-menu__glyph text-xl leading-none tracking-[0.08em]">•••</span>
+        <svg className="quiet-menu__glyph" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+          <circle cx="5" cy="12" r="1.5" />
+          <circle cx="12" cy="12" r="1.5" />
+          <circle cx="19" cy="12" r="1.5" />
+        </svg>
       </button>
       {open && (
         <div
@@ -93,18 +121,22 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
             onClick={openRules}
             className="quiet-menu__item w-full text-left px-s4 min-h-[44px] text-body text-cream"
           >
-            Rules
+            <span className="quiet-menu__item-icon"><MenuIcon name="rules" /></span>
+            <span className="quiet-menu__item-label">Rules</span>
           </button>
           <button
             type="button"
             role="menuitemcheckbox"
             aria-checked={soundOn}
+            aria-label={`Sound: ${soundOn ? 'on' : 'off'}`}
             onClick={onToggleSound}
             className="quiet-menu__item quiet-menu__item--sound w-full text-left px-s4 min-h-[44px] text-body text-cream"
           >
-            Sound: {soundOn ? 'on' : 'off'}
+            <span className="quiet-menu__item-icon"><MenuIcon name="sound" /></span>
+            <span className="quiet-menu__item-label">Sound</span>
+            <span className="quiet-menu__item-value" aria-hidden="true">{soundOn ? 'On' : 'Off'}</span>
           </button>
-          <div className="quiet-menu__divider h-px bg-hairline mx-s4" aria-hidden="true" />
+          <div className="quiet-menu__divider h-px bg-hairline mx-s4" role="separator" />
           <button
             type="button"
             role="menuitem"
@@ -112,7 +144,8 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
             className={`quiet-menu__item quiet-menu__item--leave w-full text-left px-s4 min-h-[44px] text-body ${confirmingLeave ? 'font-semibold text-danger-bright' : 'text-cream'}`}
             data-confirming={confirmingLeave ? 'true' : 'false'}
           >
-            {confirmingLeave ? 'Leave the game?' : 'Leave'}
+            <span className="quiet-menu__item-icon"><MenuIcon name="leave" /></span>
+            <span className="quiet-menu__item-label">{confirmingLeave ? 'Leave the game?' : 'Leave'}</span>
           </button>
         </div>
       )}

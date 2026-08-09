@@ -8,10 +8,11 @@
 // fires on a single tap of a card. Invalid taps shake + explain in the feed.
 // ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LayoutGroup, useReducedMotion } from 'framer-motion'
 import type { Card as CardT, GameState } from '../engine'
 import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
-import { OpponentStrip, orderSeats, type Seat } from './OpponentStrip'
+import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
 import { ActionFeed } from './ActionFeed'
 import { HandFan } from './HandFan'
@@ -55,6 +56,17 @@ export interface TableScreenProps {
 }
 
 type Zone = 'hand' | 'faceUp' | 'faceDown'
+
+interface BurnSnapshot {
+  actionKey: string
+  top: CardT | null
+  pileCount: number
+  effectiveRank: ReturnType<typeof getTopRank>
+}
+
+export function burnCleanupDelay(reduceMotion: boolean | null): number {
+  return reduceMotion ? 140 : 560
+}
 
 /**
  * Same-rank cards form a multi-play. Choosing another playable rank replaces
@@ -105,18 +117,25 @@ export function TableScreen({
   const [pickupArmed, setPickupArmed] = useState(false)
   const [dismissedQuickSourceSeq, setDismissedQuickSourceSeq] = useState<number | null>(null)
   const [burning, setBurning] = useState(false)
-  const [burnSnapshot, setBurnSnapshot] = useState<{ top: CardT | null; pileCount: number; effectiveRank: ReturnType<typeof getTopRank> } | null>(null)
+  const [burnSnapshot, setBurnSnapshot] = useState<BurnSnapshot | null>(null)
   const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
   const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
   const debounceRef = useRef(0)
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
+  const burnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const burnGenerationRef = useRef(0)
   const announcer = useAnnouncer()
+  const reduceMotion = useReducedMotion()
 
   const later = (ms: number, fn: () => void) => {
     timers.current.push(setTimeout(fn, ms))
   }
-  useEffect(() => () => { timers.current.forEach(clearTimeout) }, [])
+  useEffect(() => () => {
+    timers.current.forEach(clearTimeout)
+    burnGenerationRef.current += 1
+    if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
+  }, [])
 
   // ---- Derived ----
   const zone: Zone | null = viewer ? activeZoneOf(viewer) : null
@@ -150,28 +169,20 @@ export function TableScreen({
     : null
   const showQuickFollowUp = canQuickFollowUp && dismissedQuickSourceSeq !== quickSourceSeq
 
-  // ---- Feed: transient flash > server error > event/turn line ----
+  // ---- Feed: transient flash > server error > latest table event ----
+  // Turn ownership has a persistent, spatial cue in the header/opponent seat.
+  // Repeating "Your turn" here turns the feed into a second status badge and
+  // pushes the last useful table event out of view.
   const feedCtx: FeedContext = { meId: viewerId, players: state.players }
   const lastEvent = feedLine(state, feedCtx)
   const isViewerTurn = current?.id === viewerId
-  const actionEvents = latestActionEvents(state.log)
-  const lastEntry = actionEvents[actionEvents.length - 1]
-  const lastActorId =
-    lastEntry && 'playerId' in lastEntry ? lastEntry.playerId
-    : lastEntry?.type === 'CLEAR_PILE'
-      ? [...actionEvents].reverse().find(e => e.type === 'PLAY_CARDS' || e.type === 'BLIND_REVEAL')?.playerId
-      : undefined
   const feed = flash
     ? { text: flash, key: `flash-${flash}`, tone: 'error' as const }
     : error
       ? { text: error, key: `err-${error}`, tone: 'error' as const }
-      : isViewerTurn && viewerActive && lastActorId !== viewerId
-        ? { text: 'Your turn', key: `turn-${state.turnCount}`, tone: 'turn' as const }
-        : lastEvent
-          ? { text: lastEvent.text, key: lastEvent.key, tone: 'normal' as const }
-          : isViewerTurn && viewerActive
-            ? { text: 'Your turn', key: `turn-${state.turnCount}`, tone: 'turn' as const }
-            : { text: null, key: 'idle', tone: 'normal' as const }
+      : lastEvent
+        ? { text: lastEvent.text, key: lastEvent.key, tone: 'normal' as const }
+        : { text: null, key: 'idle', tone: 'normal' as const }
 
   // ---- Effects: burn detection, announcements, sounds, turn announce ----
   const lastActionSeq = useRef(state.seq ?? state.turnCount)
@@ -182,21 +193,29 @@ export function TableScreen({
     lastActionSeq.current = cursor
     const fresh = latestActionEvents(state.log)
     if (fresh.length === 0) return
-    if (fresh.some(e => e.type === 'CLEAR_PILE')) {
+    const clear = fresh.find(e => e.type === 'CLEAR_PILE')
+    if (clear?.type === 'CLEAR_PILE') {
       const burnPlay = fresh.find(event => event.type === 'PLAY_CARDS')
       const playedTop = burnPlay?.type === 'PLAY_CARDS'
         ? burnPlay.cards[burnPlay.cards.length - 1] ?? previousPile.current.top
         : previousPile.current.top
+      const actionKey = `${cursor}:${clear.reason}:${playedTop?.id ?? 'empty'}`
+      const generation = burnGenerationRef.current + 1
+      burnGenerationRef.current = generation
+      if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
       setBurnSnapshot({
+        actionKey,
         top: playedTop,
         pileCount: previousPile.current.pileCount + (burnPlay?.type === 'PLAY_CARDS' ? burnPlay.cards.length : 0),
         effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
       })
       setBurning(true)
-      later(460, () => {
+      burnTimerRef.current = setTimeout(() => {
+        if (burnGenerationRef.current !== generation) return
         setBurning(false)
-        setBurnSnapshot(null)
-      })
+        setBurnSnapshot(snapshot => snapshot?.actionKey === actionKey ? null : snapshot)
+        burnTimerRef.current = null
+      }, burnCleanupDelay(reduceMotion))
     }
     setSpecialEffect(specialEffectFromEvents(fresh, cursor, topRank))
     const ctx: FeedContext = { meId: viewerId, players: state.players }
@@ -467,6 +486,7 @@ export function TableScreen({
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
       <EmoteFeedback event={displayedEmote} playerName={emotePlayer} />
 
+      <LayoutGroup id={`table-turn-${viewerId}`}>
       <div className="game-shell table-shell">
       <header className="game-header table-header">
         <div className="game-topbar table-topbar">
@@ -475,8 +495,17 @@ export function TableScreen({
             className="game-turn-label table-turn-label"
             data-my-turn={isViewerTurn && viewerActive ? 'true' : 'false'}
             aria-current={isViewerTurn && viewerActive ? 'step' : undefined}
+            aria-label={isViewerTurn && viewerActive
+              ? 'Your turn'
+              : `${current?.name ?? 'Table'}'s turn`}
           >
-            <span>{isViewerTurn && viewerActive ? 'Your turn' : `${current?.name ?? 'Table'}'s turn`}</span>
+            <span className="table-turn-label__indicator" aria-hidden="true" />
+            <span className="table-turn-label__copy">
+              <span className="table-turn-label__eyebrow" aria-hidden="true">Turn</span>
+              <strong className="table-turn-label__name">
+                {isViewerTurn && viewerActive ? 'Your move' : current?.name ?? 'Table'}
+              </strong>
+            </span>
           </div>
           <div className="game-tools table-tools" aria-label="Table controls">
             <EmoteButton onSend={sendEmote} />
@@ -489,7 +518,11 @@ export function TableScreen({
             />
           </div>
         </div>
-        <OpponentStrip seats={seats} activeSeatId={current?.id ?? null} />
+        <OpponentStrip
+          seats={seats}
+          activeSeatId={current?.id ?? null}
+          turnMarkerLayoutId={reduceMotion ? undefined : 'active-turn-marker'}
+        />
       </header>
 
       <main
@@ -498,15 +531,23 @@ export function TableScreen({
         data-empty-pile={ps === 0 ? 'true' : 'false'}
         onClick={() => { setSelection([]); setPickupArmed(false) }}
       >
-        <SpecialEffectFeedback effect={specialEffect} />
-        <PileArea
-          stockCount={state.stock.length}
-          top={burning && burnSnapshot ? burnSnapshot.top : top}
-          pileCount={burning && burnSnapshot ? burnSnapshot.pileCount : ps}
-          effectiveRank={burning && burnSnapshot ? burnSnapshot.effectiveRank : topRank}
-          burning={burning}
-          teachHint={ps === 0 && viewerActive}
-        />
+        <div
+          className="table-pile-stage"
+          data-burning={burning ? 'true' : 'false'}
+          data-burn-key={burnSnapshot?.actionKey}
+        >
+          <SpecialEffectFeedback effect={specialEffect} />
+          <PileArea
+            stockCount={state.stock.length}
+            top={burning && burnSnapshot ? burnSnapshot.top : top}
+            pileCount={burning && burnSnapshot ? burnSnapshot.pileCount : ps}
+            effectiveRank={burning && burnSnapshot ? burnSnapshot.effectiveRank : topRank}
+            burning={burning}
+            burnKey={burnSnapshot?.actionKey}
+            specialEffect={specialEffect}
+            teachHint={ps === 0 && viewerActive}
+          />
+        </div>
         <div className="game-feed table-feed">
           <ActionFeed text={feed.text} feedKey={feed.key} tone={feed.tone} />
         </div>
@@ -531,6 +572,14 @@ export function TableScreen({
         data-hand-count={viewer.hand.length}
         data-active-zone={zone ?? undefined}
       >
+        {isViewerTurn && viewerActive && (
+          <SpatialTurnMarker
+            owner="local"
+            label="Your move"
+            className="table-hand-zone__turn-marker"
+            layoutId={reduceMotion ? undefined : 'active-turn-marker'}
+          />
+        )}
         <div className="table-hand-zone__inner" onClick={e => e.stopPropagation()}>
           {(viewerActive || canBurnIn || canQuickFollowUp) && (
             <ActionBar
@@ -561,6 +610,7 @@ export function TableScreen({
         </div>
       </footer>
       </div>
+      </LayoutGroup>
     </div>
   )
 }

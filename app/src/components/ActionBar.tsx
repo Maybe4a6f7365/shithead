@@ -40,8 +40,10 @@ export function ActionBar({
           data-rank={quickFollowUp.rank}
           data-count={quickFollowUp.count}
         >
-          <strong>Play drawn {quickFollowUp.rank}</strong>
-          <span>Quick match · before the next play</span>
+          <span className="action-button__content quick-follow-up-action__content">
+            <strong className="action-button__label">Play drawn {quickFollowUp.rank}</strong>
+            <span className="action-button__meta">Quick match · play now</span>
+          </span>
         </button>
         {onDismissQuickFollowUp && (
           <button
@@ -52,7 +54,7 @@ export function ActionBar({
               ? 'Continue the normal turn'
               : `${dismissQuickFollowUpLabel} quick match`}
           >
-            {dismissQuickFollowUpLabel}
+            <span className="action-button__label">{dismissQuickFollowUpLabel}</span>
           </button>
         )}
       </div>
@@ -74,7 +76,10 @@ export function ActionBar({
           data-rank={burnIn.rank}
           data-count={burnIn.count}
         >
-          Burn in <span aria-hidden="true">· {burnIn.count}× {burnIn.rank}</span>
+          <span className="action-button__content burn-in-action__content">
+            <span className="action-button__label">Burn in</span>
+            <span className="action-button__meta" aria-hidden="true">{burnIn.count}× {burnIn.rank} · interrupt</span>
+          </span>
         </button>
       </div>
     )
@@ -102,7 +107,10 @@ export function ActionBar({
             )}
             data-armed={pickupArmed ? 'true' : 'false'}
           >
-            {pickupArmed ? 'Tap again to confirm' : 'Pick up'}
+            <span className="action-button__content">
+              <span className="action-button__label">Pick up</span>
+              {pickupArmed && <span className="action-button__meta">Tap again to confirm</span>}
+            </span>
           </button>
         )
       ) : (
@@ -113,7 +121,7 @@ export function ActionBar({
             disabled={!canPickUp}
             className="action-button action-button--secondary secondary-action min-w-[96px] px-s4 text-button font-bold tracking-button uppercase text-cream/80 disabled:opacity-40"
           >
-            Pick up
+            <span className="action-button__label">Pick up</span>
           </button>
           <button
             type="button"
@@ -121,7 +129,10 @@ export function ActionBar({
             className="action-button action-button--primary primary-action min-w-[96px] px-s5 text-button font-bold tracking-button uppercase"
             aria-label={`Play ${selectionCount} selected card${selectionCount === 1 ? '' : 's'}`}
           >
-            Play{selectionCount > 1 ? ` ${selectionCount}×` : ''}
+            <span className="action-button__label">Play</span>
+            {selectionCount > 1 && (
+              <span className="action-button__count" aria-hidden="true">{selectionCount}</span>
+            )}
           </button>
         </>
       )}

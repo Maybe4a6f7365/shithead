@@ -34,10 +34,12 @@ export function ConnectionBadge({ status, attempt = 0, maxAttempts = 5, onRetry 
   }[status]
 
   const content = (
-    <>
+    <span className="connection-badge__content">
       <span className={clsx('connection-badge__dot inline-block w-2 h-2 rounded-full shrink-0', dot)} aria-hidden="true" />
-      <span className="connection-badge__label text-micro font-semibold tracking-micro text-cream-dim whitespace-nowrap">{label}</span>
-    </>
+      <span className="connection-badge__label text-micro font-semibold tracking-micro text-cream-dim whitespace-nowrap">
+        {label}
+      </span>
+    </span>
   )
 
   if (status === 'offline') {
