@@ -4,7 +4,7 @@
 // non-blocking in MP.
 // ============================================================================
 import { useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 
 const SECTIONS: Array<{ title: string; lines: string[] }> = [
   {
@@ -14,8 +14,9 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
   {
     title: 'Setup',
     lines: [
-      'Each player gets 3 face-down cards, 3 face-up cards, and a hand of 3.',
-      'Before the round you may swap hand cards with your face-up row.',
+      'Each player gets 3 face-down cards and 6 visible cards.',
+      'Choose any 3 visible cards for your face-up final row. The other 3 become your hand.',
+      'Before each round, the host chooses whether Jokers and the winner exchange are enabled.',
     ],
   },
   {
@@ -23,7 +24,7 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
     lines: [
       'Play one card — or a set of equal rank — that matches or beats the pile top.',
       'Draw from the stock to refill your hand to 3.',
-      "Can't play? Pick up the whole pile.",
+      "Can't play — or prefer not to? Pick up the whole pile.",
       'Hand empty: play your face-up cards. Those gone: flip a face-down card blind.',
     ],
   },
@@ -33,7 +34,7 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
       '2 — reset. Playable on anything; anything may follow.',
       '10 — burn. Removes the pile from the game; you lead again.',
       'Four of a kind in one play — burns the pile the same way.',
-      'Joker — wild. Playable on anything and burns the pile.',
+      'Joker (when enabled) — wild. Playable on anything and burns the pile.',
     ],
   },
   {
@@ -42,11 +43,15 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
   },
   {
     title: 'The Shithead',
-    lines: ['When everyone else is out, the player still holding cards loses.'],
+    lines: [
+      'When everyone else is out, the player still holding cards loses.',
+      'If winner exchange is enabled, the previous winner may swap one of their 3 chosen face-up final cards with one chosen face-up final card belonging to the previous Shithead — or skip.',
+    ],
   },
 ]
 
 export function RulesSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const reduceMotion = useReducedMotion()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -64,9 +69,9 @@ export function RulesSheet({ open, onClose }: { open: boolean; onClose: () => vo
         className="absolute inset-0 w-full h-full bg-scrim cursor-default"
       />
       <motion.div
-        initial={{ y: '100%' }}
-        animate={{ y: 0 }}
-        transition={{ duration: 0.26, ease: [0.2, 0.8, 0.2, 1] }}
+        initial={reduceMotion ? { opacity: 0 } : { y: '100%' }}
+        animate={reduceMotion ? { opacity: 1 } : { y: 0 }}
+        transition={reduceMotion ? { duration: 0.15 } : { duration: 0.26, ease: [0.2, 0.8, 0.2, 1] }}
         className="absolute bottom-0 left-0 right-0 z-sheet bg-cream text-ink max-h-[70dvh] overflow-y-auto mx-auto max-w-[400px] p-s5 pb-s7"
         style={{ borderRadius: 'var(--radius-sheet)' }}
       >

@@ -5,7 +5,7 @@
 // TableScreen as single-player (§9 convergence): face-down endgame cards,
 // masked stock (count only), BLIND_REVEAL via the log, seq-guarded states.
 // ============================================================================
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMultiplayerRoom } from '../net/useMultiplayerRoom'
 import { ConnectionBadge, type BadgeStatus } from './ConnectionBadge'
 import { WaitingRoom } from './WaitingRoom'
@@ -13,6 +13,7 @@ import { RearrangeScreen } from './RearrangeScreen'
 import { TableScreen } from './TableScreen'
 import { GameOverOverlay } from './GameOverOverlay'
 import { RulesSheet } from './RulesSheet'
+import { TributeScreen } from './TributeScreen'
 
 export interface MultiplayerGameTableProps {
   roomId: string
@@ -30,12 +31,22 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
   const [rulesOpen, setRulesOpen] = useState(false)
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem('shithead:sound') !== 'off')
   const [iAmReady, setIAmReady] = useState(false)
+  const [rematchPending, setRematchPending] = useState(false)
+  const rematchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const phase = gameState?.phase
 
   // READY state resets whenever a (new) rearrange phase begins.
   useEffect(() => {
     if (phase === 'rearrange') setIAmReady(false)
-  }, [phase === 'rearrange']) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phase])
+
+  useEffect(() => {
+    if (phase !== 'gameOver' || notice) setRematchPending(false)
+  }, [phase, notice])
+
+  useEffect(() => () => {
+    if (rematchTimer.current) clearTimeout(rematchTimer.current)
+  }, [])
 
   const toggleSound = () => {
     setSoundOn(on => {
@@ -44,7 +55,20 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
     })
   }
 
-  const quit = () => { leave(); onLeave() }
+  const quit = () => {
+    // A socket that is already offline cannot confirm a leave. Returning to
+    // the menu keeps resume credentials, matching the "seat kept" promise.
+    if (status === 'connected' || status === 'restored' || status === 'reconnecting') leave()
+    onLeave()
+  }
+
+  const requestRematch = () => {
+    if (rematchPending) return
+    setRematchPending(true)
+    send({ type: 'START_GAME' })
+    if (rematchTimer.current) clearTimeout(rematchTimer.current)
+    rematchTimer.current = setTimeout(() => setRematchPending(false), 3000)
+  }
 
   // ---- Full-screen connection states (§4.6) ----
   if (error) {
@@ -95,7 +119,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
               <p className="text-body text-cream-dim mt-s2">The room went quiet. Your seat is kept for a while.</p>
               <div className="mt-s5 flex flex-col gap-s2 w-full max-w-[280px]">
                 <PrimaryBtn onClick={retry}>Retry</PrimaryBtn>
-                <GhostBtn onClick={quit}>Leave</GhostBtn>
+                <GhostBtn onClick={quit}>Menu · seat kept</GhostBtn>
               </div>
             </>
           ) : (
@@ -113,21 +137,12 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
 
   // ---- Waiting room (host branch driven by room.hostId === playerId) ----
   if (room.phase === 'waiting') {
-    const host = room.players.find(p => p.id === room.hostId)
-    if (host && !host.connected && host.id !== playerId) {
-      return (
-        <StatePanel
-          title="Host left"
-          copy="The room is closed."
-          actions={<GhostBtn onClick={quit}>Leave</GhostBtn>}
-        />
-      )
-    }
     return (
       <WaitingRoom
         room={room}
         myPlayerId={playerId}
         onStart={() => send({ type: 'START_GAME' })}
+        onRulesChange={rules => send({ type: 'SET_RULES', rules })}
         onLeave={quit}
       />
     )
@@ -149,7 +164,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
     const me = gameState.players.find(p => p.id === playerId)
     if (!me) {
       return (
-        <StatePanel title="Game in progress" copy="You'll be in next round." actions={<GhostBtn onClick={quit}>Leave</GhostBtn>} />
+        <StatePanel title="Game in progress" copy="You joined after this round was dealt, so you cannot play in the current game." actions={<GhostBtn onClick={quit}>Leave</GhostBtn>} />
       )
     }
     return (
@@ -162,17 +177,48 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
     )
   }
 
+  if (gameState.phase === 'tribute' && gameState.pendingTribute) {
+    const winner = gameState.players.find(player => player.id === gameState.pendingTribute?.winnerId)
+    const lastPlace = gameState.players.find(player => player.id === gameState.pendingTribute?.loserId)
+    if (winner && lastPlace) {
+      return (
+        <TributeScreen
+          winner={winner}
+          loser={lastPlace}
+          viewerId={playerId}
+          error={notice}
+          onSwap={(winnerCardId, loserCardId) => send({ type: 'TRIBUTE_SWAP', winnerCardId, loserCardId })}
+          onSkip={() => send({ type: 'TRIBUTE_SKIP' })}
+        />
+      )
+    }
+  }
+
   const me = gameState.players.find(p => p.id === playerId)
   if (!me) {
-    // Late joiner mid-match (§7.3).
+    if (gameState.phase === 'gameOver') {
+      return (
+        <WaitingRoom
+          room={{ ...room, phase: 'waiting' }}
+          myPlayerId={playerId}
+          heading="Next round"
+          onStart={() => send({ type: 'START_GAME' })}
+          onRulesChange={rules => send({ type: 'SET_RULES', rules })}
+          onLeave={quit}
+        />
+      )
+    }
+    // Late joiner mid-match: state the current limitation, not a promise
+    // about a future seat the server has not dealt yet.
     return (
-      <StatePanel title="Game in progress" copy="You'll be in next round." actions={<GhostBtn onClick={quit}>Leave</GhostBtn>} />
+      <StatePanel title="Game in progress" copy="You joined after this round was dealt, so you cannot play in the current game." actions={<GhostBtn onClick={quit}>Leave</GhostBtn>} />
     )
   }
 
   const isHost = room.hostId === playerId
   const loser = gameState.players.find(p => p.id === gameState.loserId)
   const offlineSeats = new Set(room.players.filter(p => !p.connected).map(p => p.id))
+  const everyoneOnline = room.players.every(player => player.connected)
 
   return (
     <>
@@ -191,14 +237,19 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         seatOffline={id => offlineSeats.has(id)}
       />
 
-      {gameState.phase === 'gameOver' && loser && (
+      {gameState.phase === 'gameOver' && (
         <GameOverOverlay
-          result={gameState.loserId === playerId ? 'lose' : 'win'}
-          shitheadName={loser.name}
-          canRematch={isHost}
-          waitingForHost={!isHost}
-          onRematch={isHost ? () => send({ type: 'START_GAME' }) : undefined}
+          result={!loser ? 'neutral' : gameState.loserId === playerId ? 'lose' : 'win'}
+          shitheadName={loser?.name}
+          canRematch={isHost && everyoneOnline}
+          waitingForHost={!isHost || !everyoneOnline}
+          waitingCopy={isHost ? 'Waiting for everyone to reconnect…' : 'Waiting for host…'}
+          onRematch={isHost && everyoneOnline ? requestRematch : undefined}
+          rematchPending={rematchPending}
           onLeave={quit}
+          rules={room.rules ?? gameState.rules}
+          rulesEditable={isHost}
+          onRulesChange={isHost ? rules => send({ type: 'SET_RULES', rules }) : undefined}
         />
       )}
 

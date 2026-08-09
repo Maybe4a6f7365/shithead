@@ -7,6 +7,7 @@
 // ============================================================================
 import { useEffect, useRef } from 'react'
 import type { GameEvent, GameState } from '../engine'
+import { latestActionEvents } from './feedText'
 
 export type SoundName =
   | 'deal' | 'select' | 'deselect' | 'play' | 'play_multi' | 'draw' | 'pickup'
@@ -47,14 +48,19 @@ export function soundForEvent(ev: GameEvent): SoundName | null {
 
 /** Subscribe a component to the GameEvent stream (state.log) for sound. */
 export function useSoundFromLog(state: GameState | null, enabled: boolean) {
-  const seenRef = useRef(0)
+  const seenSeqRef = useRef<number | null>(null)
   useEffect(() => {
-    if (!state) { seenRef.current = 0; return }
-    if (!enabled) { seenRef.current = state.log.length; return }
-    const from = seenRef.current
-    const fresh = state.log.slice(from)
-    seenRef.current = state.log.length
-    for (const ev of fresh) {
+    if (!state) { seenSeqRef.current = null; return }
+    const cursor = state.seq ?? state.turnCount
+    // Mounting/re-enabling audio must never replay retained history.
+    if (seenSeqRef.current === null) {
+      seenSeqRef.current = cursor
+      return
+    }
+    if (seenSeqRef.current === cursor) return
+    seenSeqRef.current = cursor
+    if (!enabled) return
+    for (const ev of latestActionEvents(state.log)) {
       const name = soundForEvent(ev)
       if (name) emitSoundDebounced(name)
     }

@@ -3,17 +3,20 @@
 // net/ contract tests: GAME_STATE seq guard (protocol: ignore seq <= last
 // seen) and resume-token session persistence.
 // ============================================================================
-import { describe, it, expect, beforeEach } from 'vitest'
-import type { GameState } from '../engine'
+import { act, renderHook } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_GAME_RULES, type Card, type GameState } from '../engine'
+import { PROTOCOL_VERSION, type RoomSummary } from '../engine/protocol'
+import { RoomClient } from './RoomClient'
 import {
-  shouldAcceptGameState, loadSession, saveSession, clearSession,
+  shouldAcceptGameState, loadSession, saveSession, clearSession, useMultiplayerRoom,
 } from './useMultiplayerRoom'
 
 function gs(seq: number, turnCount = seq, phase: GameState['phase'] = 'play'): GameState {
   return {
-    phase, players: [], stock: [], pile: [],
+    phase, rules: { ...DEFAULT_GAME_RULES }, players: [], stock: [], pile: [],
     currentPlayerIdx: 0, playDirection: 1, turnCount,
-    loserId: null, log: [], seq,
+    winnerId: null, loserId: null, pendingTribute: null, log: [], seq,
   }
 }
 
@@ -58,7 +61,7 @@ describe('resume session storage', () => {
     expect(loadSession()?.resumeToken).toBe('tok-b')
   })
 
-  it('works without a token (today’s worker) and clears on demand', () => {
+  it('can read a legacy tokenless record and clears it on demand', () => {
     saveSession({ roomCode: 'ABCDEF', playerId: 'p9', playerName: 'Hans' })
     expect(loadSession()?.resumeToken).toBeUndefined()
     clearSession()
@@ -70,5 +73,149 @@ describe('resume session storage', () => {
     expect(loadSession()).toBeNull()
     localStorage.setItem('shithead:session', '{"playerId":"x"}')
     expect(loadSession()).toBeNull()
+  })
+})
+
+type SocketHandler = (event: any) => void
+
+class FakeWebSocket {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSED = 3
+  static instances: FakeWebSocket[] = []
+  readyState = FakeWebSocket.CONNECTING
+  sent: Array<Record<string, unknown>> = []
+  private handlers = new Map<string, SocketHandler[]>()
+
+  constructor(readonly url: string) {
+    FakeWebSocket.instances.push(this)
+  }
+
+  addEventListener(type: string, handler: SocketHandler) {
+    this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler])
+  }
+
+  open() {
+    this.readyState = FakeWebSocket.OPEN
+    this.emit('open', {})
+  }
+
+  receive(message: Record<string, unknown>) {
+    this.emit('message', { data: JSON.stringify(message) })
+  }
+
+  send(raw: string) {
+    this.sent.push(JSON.parse(raw))
+  }
+
+  close() {
+    this.readyState = FakeWebSocket.CLOSED
+    this.emit('close', { code: 1000 })
+  }
+
+  private emit(type: string, event: unknown) {
+    for (const handler of this.handlers.get(type) ?? []) handler(event)
+  }
+}
+
+const roomSummary = (phase: RoomSummary['phase'] = 'waiting'): RoomSummary => ({
+  code: 'ABC123',
+  phase,
+  hostId: 'p1',
+  maxPlayers: 5,
+  players: [],
+  createdAt: 1,
+  rules: { ...DEFAULT_GAME_RULES },
+})
+
+describe('RoomClient authentication ordering', () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('sends reconnect authentication before flushing a queued PLAY and stamps both v3', () => {
+    let client!: RoomClient
+    client = new RoomClient({
+      url: 'ws://example.test/api/room/ABC123/ws',
+      onMessage: () => {},
+      onOpen: () => client.send({
+        type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'p1', resumeToken: 'token',
+      }),
+    })
+    const socket = FakeWebSocket.instances[0]
+    const card: Card = { id: 'real-card', rank: '5', suit: '♠' }
+    client.send({ type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'p1', resumeToken: 'stale-token' })
+    client.send({ type: 'PLAY', cards: [card] })
+
+    socket.open()
+    expect(socket.sent.map(message => message.type)).toEqual(['RESUME_ROOM'])
+    expect(socket.sent[0].version).toBe(PROTOCOL_VERSION)
+
+    client.markAuthenticated()
+    expect(socket.sent.map(message => message.type)).toEqual(['RESUME_ROOM', 'PLAY'])
+    expect(socket.sent[1].version).toBe(PROTOCOL_VERSION)
+    client.close()
+  })
+
+  it('keeps connecting cancel ordered JOIN then LEAVE', () => {
+    let client!: RoomClient
+    client = new RoomClient({
+      url: 'ws://example.test/api/room/ABC123/ws',
+      onMessage: () => {},
+      onOpen: () => client.send({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'Ada' }),
+    })
+    const socket = FakeWebSocket.instances[0]
+    socket.open()
+    client.send({ type: 'LEAVE_ROOM' })
+    expect(socket.sent.map(message => message.type)).toEqual(['JOIN_ROOM', 'LEAVE_ROOM'])
+    expect(socket.sent.every(message => message.version === PROTOCOL_VERSION)).toBe(true)
+    client.close()
+  })
+
+  it('does not delete a resumable credential when explicit leave is offline', () => {
+    saveSession({ roomCode: 'ABC123', playerId: 'p1', playerName: 'Ada', resumeToken: 'token' })
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    expect(result.current.leave()).toBe(false)
+    expect(loadSession()?.resumeToken).toBe('token')
+    unmount()
+  })
+
+  it('keeps an accepted GAME_STATE authoritative over a later stale ROOM_STATE', () => {
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+    act(() => socket.receive({ type: 'GAME_STATE', version: PROTOCOL_VERSION, state: gs(1, 1, 'play') }))
+    act(() => socket.receive({ type: 'ROOM_STATE', room: roomSummary('waiting') }))
+    expect(result.current.room?.phase).toBe('play')
+    unmount()
+  })
+
+  it('surfaces duplicate START as a temporary notice once authoritative game state exists', () => {
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+    act(() => socket.receive({ type: 'GAME_STATE', state: gs(1, 1, 'rearrange') }))
+    act(() => socket.receive({ type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' }))
+    expect(result.current.error).toBeNull()
+    expect(result.current.notice).toBe('Game already in progress')
+    unmount()
   })
 })

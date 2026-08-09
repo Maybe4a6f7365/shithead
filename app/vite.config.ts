@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// Mobile-first PWA, portrait-locked, no zoom, viewport-fit cover
+// Mobile-first PWA; every orientation is supported.
 export default defineConfig({
   plugins: [
     react(),
@@ -16,7 +16,6 @@ export default defineConfig({
         theme_color: '#2d4a2b',
         background_color: '#faf8f3',
         display: 'standalone',
-        orientation: 'portrait',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },

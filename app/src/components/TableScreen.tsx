@@ -19,7 +19,7 @@ import { TableauWell } from './TableauWell'
 import { ActionBar } from './ActionBar'
 import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
-import { feedLine, type FeedContext } from './feedText'
+import { feedLine, latestActionEvents, type FeedContext } from './feedText'
 import { useSoundFromLog, emitSoundDebounced } from './soundManager'
 
 export interface TableScreenProps {
@@ -92,11 +92,12 @@ export function TableScreen({
   const feedCtx: FeedContext = { meId: viewerId, players: state.players }
   const lastEvent = feedLine(state, feedCtx)
   const isViewerTurn = current?.id === viewerId
-  const lastEntry = state.log[state.log.length - 1]
+  const actionEvents = latestActionEvents(state.log)
+  const lastEntry = actionEvents[actionEvents.length - 1]
   const lastActorId =
     lastEntry && 'playerId' in lastEntry ? lastEntry.playerId
     : lastEntry?.type === 'CLEAR_PILE'
-      ? [...state.log].reverse().find(e => e.type === 'PLAY_CARDS' || e.type === 'BLIND_REVEAL')?.playerId
+      ? [...actionEvents].reverse().find(e => e.type === 'PLAY_CARDS' || e.type === 'BLIND_REVEAL')?.playerId
       : undefined
   const feed = flash
     ? { text: flash, key: `flash-${flash}`, tone: 'error' as const }
@@ -111,10 +112,12 @@ export function TableScreen({
             : { text: null, key: 'idle', tone: 'normal' as const }
 
   // ---- Effects: burn detection, announcements, sounds, turn announce ----
-  const lastLogLen = useRef(state.log.length)
+  const lastActionSeq = useRef(state.seq ?? state.turnCount)
   useEffect(() => {
-    const fresh = state.log.slice(lastLogLen.current)
-    lastLogLen.current = state.log.length
+    const cursor = state.seq ?? state.turnCount
+    if (lastActionSeq.current === cursor) return
+    lastActionSeq.current = cursor
+    const fresh = latestActionEvents(state.log)
     if (fresh.length === 0) return
     if (fresh.some(e => e.type === 'CLEAR_PILE')) {
       setBurning(true)
@@ -128,7 +131,7 @@ export function TableScreen({
       announcer.sayPolite(`Round over. ${loser?.name ?? ''} is the Shithead.`)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.log])
+  }, [state.seq, state.turnCount, state.log])
 
   const lastTurnKey = useRef('')
   useEffect(() => {
@@ -182,6 +185,8 @@ export function TableScreen({
   const commitPickup = () => {
     if (!viewerActive || ps === 0) return
     if (Date.now() - debounceRef.current < 300) return
+    // Picking up is always a separate intent; never leave a stale play set.
+    setSelection([])
     if (anyPlayable && !pickupArmed) {
       // §6.1: guard — second confirming tap within 3s.
       setPickupArmed(true)

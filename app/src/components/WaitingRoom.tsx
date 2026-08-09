@@ -7,6 +7,8 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import type { RoomSummary } from '../engine/protocol'
+import { DEFAULT_GAME_RULES, type GameRules } from '../engine'
+import { RoundRulesControl } from './RoundRulesControl'
 
 /** The one rule that decides what you see. Exported for the regression test. */
 export function waitingRoomRole(room: Pick<RoomSummary, 'hostId'>, myPlayerId: string): 'host' | 'guest' {
@@ -18,13 +20,17 @@ export interface WaitingRoomProps {
   myPlayerId: string
   onStart: () => void
   onLeave: () => void
+  onRulesChange?: (patch: Partial<GameRules>) => void
+  heading?: string
 }
 
-export function WaitingRoom({ room, myPlayerId, onStart, onLeave }: WaitingRoomProps) {
+export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange, heading }: WaitingRoomProps) {
   const [copied, setCopied] = useState(false)
   const [startHint, setStartHint] = useState<string | null>(null)
   const isHost = waitingRoomRole(room, myPlayerId) === 'host'
   const enough = room.players.length >= 2
+  const everyoneOnline = room.players.every(player => player.connected)
+  const hostOnline = room.players.find(player => player.id === room.hostId)?.connected !== false
 
   const copy = async () => {
     try {
@@ -49,13 +55,19 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave }: WaitingRoomP
       setTimeout(() => setStartHint(null), 3000)
       return
     }
+    if (!everyoneOnline) {
+      setStartHint('Everyone must be online before the round can start.')
+      setTimeout(() => setStartHint(null), 3000)
+      return
+    }
     onStart()
   }
 
   return (
     <div className="app-viewport bg-felt text-cream flex flex-col">
-      <main className="flex-1 overflow-y-auto w-full max-w-[400px] mx-auto px-s4 py-s6 flex flex-col justify-center">
+      <main className="waiting-room-main flex-1 overflow-y-auto w-full max-w-[400px] mx-auto px-s4 py-s6 flex flex-col justify-start">
         <div className="text-center mb-s5">
+          {heading && <h1 className="font-display text-title font-semibold mb-s3">{heading}</h1>}
           <div className="text-label font-bold tracking-label uppercase text-cream-dim">Room code</div>
           <div className="font-display text-code font-semibold tracking-code text-cream mt-s1" aria-label={`Room code ${room.code.split('').join(' ')}`}>
             {room.code}
@@ -87,10 +99,10 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave }: WaitingRoomP
               <span
                 className={clsx(
                   'text-micro font-semibold tracking-micro',
-                  p.id === room.hostId ? 'text-gold-bright' : p.connected ? 'text-muted-felt' : 'text-danger-bright',
+                  p.id === room.hostId && p.connected ? 'text-gold-bright' : p.connected ? 'text-muted-felt' : 'text-danger-bright',
                 )}
               >
-                {p.id === room.hostId ? 'host' : p.connected ? 'online' : 'offline'}
+                {p.id === room.hostId ? `host${p.connected ? '' : ' · offline'}` : p.connected ? 'online' : 'offline'}
               </span>
             </div>
           ))}
@@ -99,8 +111,14 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave }: WaitingRoomP
           {room.players.length} of {room.maxPlayers} players
         </p>
 
+        <RoundRulesControl
+          rules={room.rules ?? DEFAULT_GAME_RULES}
+          editable={isHost}
+          onChange={onRulesChange}
+        />
+
         {isHost ? (
-          <>
+          <div className="mt-s5">
             <p className="text-feed text-cream-dim mb-s2">You are the host.</p>
             <button
               type="button"
@@ -110,9 +128,11 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave }: WaitingRoomP
               Start game
             </button>
             {startHint && <p role="alert" className="mt-s2 text-small text-danger-bright">{startHint}</p>}
-          </>
+          </div>
         ) : (
-          <p className="text-feed text-cream-dim mb-s2">Waiting for the host to start…</p>
+          <p className="text-feed text-cream-dim mt-s5 mb-s2">
+            {hostOnline ? 'Waiting for the host to start…' : 'Waiting for the host to reconnect…'}
+          </p>
         )}
 
         <button

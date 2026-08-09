@@ -1,7 +1,8 @@
 // ============================================================================
 // HandFan (Z4) — the hand fan in the thumb zone (§2.5, §3.1).
-// Fan step = max(24px, min(28px, (availableWidth − W) / (n−1))); horizontal
-// momentum scroll at the 24px floor; never wraps to two rows.
+// Normal hands fan at a 24px target floor. Pickups can make a hand very
+// large, so 13+ cards switch to a fixed-height, horizontally scrolling rail
+// with two rows (one row in short landscape) instead of shrinking cards.
 // Roving tabindex + ←/→ keyboard navigation (§6.5).
 // ============================================================================
 import { useLayoutEffect, useRef, useState } from 'react'
@@ -35,6 +36,7 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
   }, [])
 
   const n = cards.length
+  const large = n > 12
   const { avail, cardW } = metrics
   // §2.5 fan step; 24px floor guarantees index visibility + WCAG 24px target.
   const step = n > 1 && cardW > 0 && avail > 0
@@ -54,6 +56,51 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
     next?.focus()
   }
 
+  const renderCard = (c: CardT, i: number, compactRail = false) => (
+    <div
+      key={c.id}
+      style={compactRail ? undefined : { marginLeft: i === 0 ? 0 : -overlap, paddingBottom: 16 }}
+      className={compactRail ? 'shrink-0 pb-s2' : 'shrink-0'}
+    >
+      <Card
+        card={c}
+        state={states.get(c.id) ?? 'rest'}
+        ariaHint={`${ariaHints?.get(c.id) ? `${ariaHints.get(c.id)}, ` : ''}${i + 1} of ${n}`}
+        onActivate={onSelect ? () => onSelect(c.id) : undefined}
+      />
+    </div>
+  )
+
+  if (large) {
+    const columns: CardT[][] = []
+    for (let i = 0; i < cards.length; i += 2) columns.push(cards.slice(i, i + 2))
+    return (
+      <section className="large-hand" aria-label={`Your hand, ${n} cards`} aria-labelledby={labelledBy}>
+        <div className="large-hand__meta px-s4 text-micro font-semibold tracking-micro uppercase text-cream-dim">
+          <span>{n} cards</span>
+          <span aria-hidden="true">Swipe →</span>
+        </div>
+        <div
+          ref={containerRef}
+          className="large-hand__scroller w-full overflow-x-auto overflow-y-hidden"
+          style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch' }}
+          role="group"
+          aria-label={`${n} cards; scroll horizontally`}
+          onKeyDown={onKeyDown}
+        >
+          <div ref={measureRef} className="card invisible absolute pointer-events-none" aria-hidden="true" />
+          <div className="large-hand__grid px-s4 pt-s2">
+            {columns.map((column, columnIndex) => (
+              <div className="large-hand__column" key={column[0].id}>
+                {column.map((card, rowIndex) => renderCard(card, columnIndex * 2 + rowIndex, true))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    )
+  }
+
   return (
     <div
       ref={containerRef}
@@ -70,20 +117,7 @@ export function HandFan({ cards, states, ariaHints, onSelect, labelledBy }: Hand
       >
         {/* Hidden measuring card keeps W honest against the live CSS var. */}
         <div ref={measureRef} className="card invisible absolute pointer-events-none" aria-hidden="true" />
-        {cards.map((c, i) => (
-          <div
-            key={c.id}
-            style={{ marginLeft: i === 0 ? 0 : -overlap, paddingBottom: 16 }}
-            className="shrink-0"
-          >
-            <Card
-              card={c}
-              state={states.get(c.id) ?? 'rest'}
-              ariaHint={ariaHints?.get(c.id)}
-              onActivate={onSelect ? () => onSelect(c.id) : undefined}
-            />
-          </div>
-        ))}
+        {cards.map((c, i) => renderCard(c, i))}
       </div>
     </div>
   )

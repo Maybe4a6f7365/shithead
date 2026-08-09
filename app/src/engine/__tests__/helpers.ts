@@ -1,7 +1,8 @@
 // ============================================================================
 // Shared test helpers for engine tests
 // ============================================================================
-import type { Card, GameState, Phase, Player, Rank, Suit } from '../index'
+import { DEFAULT_GAME_RULES } from '../index'
+import type { Card, GameRules, GameState, PendingTribute, Phase, Player, Rank, Suit } from '../index'
 
 let n = 0
 /** Readable, unique test card. Ids are opaque to the engine. */
@@ -26,7 +27,10 @@ export interface MkState {
   stock?: Card[]
   currentPlayerIdx?: number
   phase?: Phase
+  rules?: GameRules
+  winnerId?: string | null
   loserId?: string | null
+  pendingTribute?: PendingTribute | null
   log?: GameState['log']
 }
 
@@ -44,13 +48,16 @@ export function mkState(over: MkState): GameState {
   }))
   return {
     phase: over.phase ?? 'play',
+    rules: over.rules ?? { ...DEFAULT_GAME_RULES },
     players,
     stock: over.stock ?? [],
     pile: (over.pile ?? []).map(cards => ({ cards, cleared: false })),
     currentPlayerIdx: over.currentPlayerIdx ?? 0,
     playDirection: 1,
     turnCount: 0,
+    winnerId: over.winnerId ?? null,
     loserId: over.loserId ?? null,
+    pendingTribute: over.pendingTribute ?? null,
     log: over.log ?? [],
     seq: 0,
   }

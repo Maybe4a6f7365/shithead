@@ -2,12 +2,10 @@
 // useMultiplayerRoom — room socket lifecycle, session resume, seq guard,
 // truthful connection states (§4.6, Appendix A.10).
 //
-// RESUME CONTRACT (shared with the worker agent; additive + backwards
-// compatible with today's worker, where token fields are simply absent):
-//  - WELCOME may carry `resumeToken` (per-player secret). We persist
+// RESUME CONTRACT (protocol v3):
+//  - WELCOME carries `resumeToken` (per-player secret). We persist
 //    { roomCode, playerId, resumeToken, playerName } in localStorage.
-//  - RESUME_ROOM is sent as { type, roomCode, playerId, resumeToken } —
-//    today's worker validates only playerId and ignores the extra fields.
+//  - RESUME_ROOM is sent as { type, roomCode, playerId, resumeToken }.
 //  - New server message RESUME_FAILED { reason } clears credentials and
 //    routes to the lobby with an explicit "session expired" state.
 //  - On successful resume the server ROTATES the token; the WELCOME that
@@ -22,7 +20,7 @@ export type RoomStatus =
   | 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'restored' | 'offline'
 
 export type RoomErrorKind =
-  | 'invalid-room' | 'room-full' | 'server-error' | 'session-expired' | 'host-unavailable'
+  | 'invalid-room' | 'room-full' | 'server-error' | 'session-expired' | 'host-unavailable' | 'game-in-progress'
 
 export interface RoomError { kind: RoomErrorKind; message: string }
 
@@ -73,11 +71,6 @@ export function shouldAcceptGameState(incoming: GameState, lastSeq: number | nul
   return seq === 0 && incoming.turnCount === 0 && incoming.phase === 'rearrange'
 }
 
-// ---------- Extended (additive) server messages ----------
-
-interface WelcomeExt { playerId: string; room: RoomSummary; resumeToken?: string }
-interface ResumeFailedMsg { type: 'RESUME_FAILED'; reason?: string }
-
 // ---------- The hook ----------
 
 export interface UseMultiplayerRoomArgs {
@@ -97,8 +90,10 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const clientRef = useRef<RoomClient | null>(null)
   const lastSeqRef = useRef<number | null>(null)
   const sessionRef = useRef<StoredSession | null>(null)
+  const authoritativeStateRef = useRef<GameState | null>(null)
   const reconnectingRef = useRef(false)
   const restoredTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!roomId) return
@@ -109,23 +104,44 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     setRoom(null)
     setGameState(null)
     setPlayerId(null)
+    authoritativeStateRef.current = null
     lastSeqRef.current = null
     reconnectingRef.current = false
 
     // Prefer stored credentials for this room (refresh / auto-reconnect).
     const stored = loadSession()
-    sessionRef.current = stored && stored.roomCode === roomId ? stored : null
+    sessionRef.current = stored && stored.roomCode === roomId && stored.resumeToken ? stored : null
+    if (stored && stored.roomCode === roomId && !stored.resumeToken) clearSession()
+
+    const clearAuthoritativeNotice = () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current)
+      noticeTimer.current = null
+      setNotice(null)
+    }
+
+    const showNotice = (message: string) => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current)
+      setNotice(message)
+      noticeTimer.current = setTimeout(() => {
+        noticeTimer.current = null
+        setNotice(null)
+      }, 3000)
+    }
+
+    const clearRestoredTimer = () => {
+      if (restoredTimer.current) clearTimeout(restoredTimer.current)
+      restoredTimer.current = null
+    }
 
     const sendJoinIntent = () => {
       if (sessionRef.current) {
         const s = sessionRef.current
-        // Additive: roomCode + resumeToken are ignored by today's worker.
         clientRef.current?.send({
           type: 'RESUME_ROOM',
           playerId: s.playerId,
           roomCode: s.roomCode,
-          resumeToken: s.resumeToken,
-        } as ClientMsg)
+          resumeToken: s.resumeToken!,
+        })
       } else if (intent === 'join') {
         clientRef.current?.send({ type: 'JOIN_ROOM', code: roomId, playerName })
       } else {
@@ -136,10 +152,12 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     const client = new RoomClient({
       url: buildRoomWSUrl(getDefaultServerURL(), roomId),
       onOpen: () => {
+        clearRestoredTimer()
         setError(null)
         sendJoinIntent()
       },
       onClose: () => {
+        clearRestoredTimer()
         reconnectingRef.current = true
         setStatus(prev => (prev === 'offline' ? prev : 'reconnecting'))
       },
@@ -147,25 +165,28 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
         setStatus(prev => (prev === 'connected' || prev === 'restored' || prev === 'reconnecting') ? prev : 'connecting')
       },
       onReconnecting: (n) => {
+        clearRestoredTimer()
         reconnectingRef.current = true
         setAttempt(n)
         setStatus('reconnecting')
       },
       onGiveUp: () => {
+        clearRestoredTimer()
         setStatus('offline')
       },
-      onMessage: (message: ServerMsg | ResumeFailedMsg) => {
+      onMessage: (message: ServerMsg) => {
         switch (message.type) {
           case 'WELCOME': {
-            const w = message as ServerMsg & WelcomeExt & { type: 'WELCOME' }
-            setPlayerId(w.playerId)
-            setRoom(w.room)
+            clientRef.current?.markAuthenticated()
+            clearAuthoritativeNotice()
+            setPlayerId(message.playerId)
+            setRoom(message.room)
             setError(null)
             // Persist (and rotate) credentials.
             const session: StoredSession = {
-              roomCode: w.room.code,
-              playerId: w.playerId,
-              resumeToken: w.resumeToken ?? sessionRef.current?.resumeToken,
+              roomCode: message.room.code,
+              playerId: message.playerId,
+              resumeToken: message.resumeToken,
               playerName: playerName || sessionRef.current?.playerName || 'Player',
             }
             sessionRef.current = session
@@ -174,20 +195,26 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
               reconnectingRef.current = false
               setAttempt(0)
               setStatus('restored')
-              if (restoredTimer.current) clearTimeout(restoredTimer.current)
+              clearRestoredTimer()
               restoredTimer.current = setTimeout(() => setStatus('connected'), 1500)
             } else {
               setStatus('connected')
             }
             break
           }
-          case 'ROOM_STATE':
-            setRoom(message.room)
+          case 'ROOM_STATE': {
+            clearAuthoritativeNotice()
+            const state = authoritativeStateRef.current
+            setRoom(state ? { ...message.room, phase: state.phase } : message.room)
             break
+          }
           case 'GAME_STATE':
             if (shouldAcceptGameState(message.state, lastSeqRef.current)) {
               lastSeqRef.current = message.state.seq ?? lastSeqRef.current
+              authoritativeStateRef.current = message.state
               setGameState(message.state)
+              setRoom(previous => previous ? { ...previous, phase: message.state.phase, rules: message.state.rules } : previous)
+              clearAuthoritativeNotice()
             }
             break
           case 'ERROR': {
@@ -203,13 +230,17 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
                 clearSession()
                 setError({ kind: 'session-expired', message: message.message })
                 break
+              case 'GAME_IN_PROGRESS':
+                if (authoritativeStateRef.current) showNotice(message.message)
+                else setError({ kind: 'game-in-progress', message: message.message })
+                break
               case 'INTERNAL':
                 setError({ kind: 'server-error', message: message.message })
                 break
               default:
                 // NOT_HOST / NOT_YOUR_TURN / INVALID_MOVE / RATE_LIMITED:
                 // in-game rejections surface in the feed, never full-screen.
-                setNotice(message.message)
+                showNotice(message.message)
             }
             break
           }
@@ -228,6 +259,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     clientRef.current = client
     return () => {
       if (restoredTimer.current) clearTimeout(restoredTimer.current)
+      if (noticeTimer.current) clearTimeout(noticeTimer.current)
       client.close()
       clientRef.current = null
     }
@@ -251,8 +283,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     if (sessionRef.current) {
       const s = sessionRef.current
       clientRef.current?.send({
-        type: 'RESUME_ROOM', playerId: s.playerId, roomCode: s.roomCode, resumeToken: s.resumeToken,
-      } as ClientMsg)
+        type: 'RESUME_ROOM', playerId: s.playerId, roomCode: s.roomCode, resumeToken: s.resumeToken!,
+      })
     } else if (roomId) {
       send(intent === 'join'
         ? { type: 'JOIN_ROOM', code: roomId, playerName }
@@ -260,11 +292,18 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     }
   }, [intent, playerName, roomId, send])
 
-  /** Explicit leave: LEAVE_ROOM + clear stored credentials. */
+  /**
+   * Explicit leave is only committed locally when it can be sent. While
+   * offline the server still owns the seat, so preserving the credential is
+   * the truthful/recoverable outcome instead of pretending the leave won.
+   */
   const leave = useCallback(() => {
-    clientRef.current?.send({ type: 'LEAVE_ROOM' })
+    const client = clientRef.current
+    if (!client?.isConnected()) return false
+    client.send({ type: 'LEAVE_ROOM' })
     sessionRef.current = null
     clearSession()
+    return true
   }, [])
 
   const clearNotice = useCallback(() => setNotice(null), [])

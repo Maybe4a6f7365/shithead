@@ -9,6 +9,7 @@ import { RearrangeScreen } from './RearrangeScreen'
 import { PassGate } from './PassGate'
 import { GameOverOverlay } from './GameOverOverlay'
 import { RulesSheet } from './RulesSheet'
+import { TributeScreen } from './TributeScreen'
 
 const AI_TICK_MS = 900
 
@@ -19,10 +20,14 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const readyIds = useSPGame(s => s.readyIds)
   const lastError = useSPGame(s => s.lastError)
   const initConfigs = useSPGame(s => s.configs)
+  const nextRules = useSPGame(s => s.rules)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem('shithead:sound') !== 'off')
 
-  const { playCards, pickUpPile, endRearrange, rearrange, tickAI, revealFor, rematch, reset } = useSPGame.getState()
+  const {
+    playCards, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
+    exchangeTribute, skipTribute, setRules, rematch, reset,
+  } = useSPGame.getState()
 
   const { players, currentPlayerIdx, phase, loserId, turnCount } = state
   const current = players[currentPlayerIdx]
@@ -31,12 +36,17 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
 
   // Auto-tick AI turns.
   useEffect(() => {
-    if (!current || current.isOut || loserId) return
-    if (!current.isAI) return
+    if (phase === 'tribute') {
+      const tributeWinner = players.find(player => player.id === state.pendingTribute?.winnerId)
+      if (!tributeWinner?.isAI) return
+      const t = setTimeout(() => tickAI(), AI_TICK_MS)
+      return () => clearTimeout(t)
+    }
+    if (!current || current.isOut || loserId || !current.isAI) return
     if (phase !== 'play' && phase !== 'endgame') return
     const t = setTimeout(() => tickAI(), AI_TICK_MS)
     return () => clearTimeout(t)
-  }, [current?.id, current?.isAI, current?.isOut, phase, turnCount, loserId, tickAI])
+  }, [current?.id, current?.isAI, current?.isOut, phase, turnCount, loserId, state.pendingTribute?.winnerId, players, tickAI])
 
   // AI players never rearrange — auto-ready any stragglers.
   useEffect(() => {
@@ -74,6 +84,23 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
     }
   }
 
+  if (phase === 'tribute' && state.pendingTribute) {
+    const winner = players.find(player => player.id === state.pendingTribute?.winnerId)
+    const lastPlace = players.find(player => player.id === state.pendingTribute?.loserId)
+    if (winner && lastPlace) {
+      return (
+        <TributeScreen
+          winner={winner}
+          loser={lastPlace}
+          viewerId={winner.id}
+          error={lastError}
+          onSwap={(winnerCardId, loserCardId) => exchangeTribute(winner.id, winnerCardId, loserCardId)}
+          onSkip={() => skipTribute(winner.id)}
+        />
+      )
+    }
+  }
+
   const viewerId = resolveViewerId(players, currentPlayerIdx, meId, revealedId)
   const gateNeeded = (phase === 'play' || phase === 'endgame') &&
     needsPassGate(players, currentPlayerIdx, meId, revealedId)
@@ -100,13 +127,16 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
         <PassGate player={current} onReveal={() => revealFor(current.id)} />
       )}
 
-      {phase === 'gameOver' && loser && (
+      {phase === 'gameOver' && (
         <GameOverOverlay
-          result={meIsShithead ? 'lose' : 'win'}
-          shitheadName={loser.name}
+          result={!loser ? 'neutral' : meIsShithead ? 'lose' : 'win'}
+          shitheadName={loser?.name}
           canRematch={initConfigs.length > 0}
           onRematch={() => rematch()}
           onLeave={leave}
+          rules={nextRules}
+          rulesEditable
+          onRulesChange={setRules}
         />
       )}
 

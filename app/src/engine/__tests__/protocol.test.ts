@@ -10,19 +10,29 @@ describe('isClientMsg', () => {
   it('accepts valid message types and resume payloads', () => {
     expect(isClientMsg({ type: 'CREATE_ROOM', playerName: 'X' })).toBe(true)
     expect(isClientMsg({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'X' })).toBe(true)
-    expect(isClientMsg({ type: 'RESUME_ROOM', playerId: 'player-id' })).toBe(true)
+    expect(isClientMsg({ type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'player-id', resumeToken: 'secret' })).toBe(true)
     expect(isClientMsg({ type: 'PING' })).toBe(true)
     expect(isClientMsg({ type: 'CHAT', text: 'hi' })).toBe(true)
+    expect(isClientMsg({ type: 'SET_RULES', rules: { includeJokers: false } })).toBe(true)
+    expect(isClientMsg({ type: 'TRIBUTE_SWAP', winnerCardId: 'a', loserCardId: 'b' })).toBe(true)
+    expect(isClientMsg({ type: 'TRIBUTE_SKIP' })).toBe(true)
   })
 
   it('rejects malformed or oversized payloads', () => {
     expect(isClientMsg({ type: 'CREATE_ROOM' })).toBe(false)
     expect(isClientMsg({ type: 'CREATE_ROOM', playerName: 'X', maxPlayers: 99 })).toBe(false)
     expect(isClientMsg({ type: 'JOIN_ROOM', code: 'bad', playerName: 'X' })).toBe(false)
-    expect(isClientMsg({ type: 'RESUME_ROOM', playerId: '' })).toBe(false)
+    expect(isClientMsg({ type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: '', resumeToken: 'secret' })).toBe(false)
+    expect(isClientMsg({ type: 'RESUME_ROOM', playerId: 'p', resumeToken: 'secret' })).toBe(false)
     expect(isClientMsg({ type: 'PLAY', cards: [] })).toBe(false)
     expect(isClientMsg({ type: 'PLAY', cards: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }] })).toBe(false)
     expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(201) })).toBe(false)
+    expect(isClientMsg({ type: 'CREATE_ROOM', playerName: '   ' })).toBe(false)
+    expect(isClientMsg({ type: 'JOIN_ROOM', code: 'ABC123', playerName: '\t' })).toBe(false)
+    expect(isClientMsg({ type: 'SET_RULES', rules: {} })).toBe(false)
+    expect(isClientMsg({ type: 'SET_RULES', rules: { includeJokers: 'no' } })).toBe(false)
+    expect(isClientMsg({ type: 'SET_RULES', rules: { includeJokers: true, surprise: true } })).toBe(false)
+    expect(isClientMsg({ type: 'TRIBUTE_SWAP', winnerCardId: 'same', loserCardId: 'same' })).toBe(false)
     expect(isClientMsg({ type: 'NOPE' })).toBe(false)
     expect(isClientMsg({})).toBe(false)
     expect(isClientMsg(null)).toBe(false)
@@ -90,6 +100,10 @@ describe('serializeGameState (security)', () => {
       expect(player.faceDown).toHaveLength(3)
       expect(player.faceDown.every(cd => cd.suit === null)).toBe(true)
     }
+    const originalViewer = state.players.find(player => player.id === 'viewer')!
+    const viewer = serialized.players.find(player => player.id === 'viewer')!
+    expect(viewer.faceDown.map(card => card.id)).toEqual(['blind:down:0', 'blind:down:1', 'blind:down:2'])
+    for (const card of originalViewer.faceDown) expect(JSON.stringify(serialized)).not.toContain(card.id)
   })
 
   it('shows the viewers hand and every public face-up card', () => {

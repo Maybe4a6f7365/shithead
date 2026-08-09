@@ -32,8 +32,9 @@
 //      only after PLAYING cards (README: "draw from stock to refill").
 //      Pickup is only legal in play/endgame phases and only on a non-empty
 //      pile.
-//  D9. Starting player: first with a 3 face-up (README); fallback searches
-//      hand+face-up for 3,4,...,A,2 so a game can always start.
+//  D9. Starting player: first with the lowest final FACE-UP card only. The
+//      choice is recomputed after rearranging (and after an optional tribute)
+//      so cards kept in hand can never decide who opens the round.
 //  D10. playDirection is kept for state compatibility; no card reverses it.
 //  D11. Stalemate cap (house rule): a game may run at most MAX_GAME_TURNS
 //      actions. Shithead has genuine stalemates (e.g. both players hoarding
@@ -71,23 +72,40 @@ export interface PileEntry {
   cleared: boolean
 }
 
-export type Phase = 'lobby' | 'rearrange' | 'play' | 'endgame' | 'roundEnd' | 'gameOver'
+export interface GameRules {
+  includeJokers: boolean
+  winnerSwapsFaceUp: boolean
+}
+
+/** Result carried into the following round for the optional winner tribute. */
+export interface PreviousRoundResult {
+  winnerId: string
+  loserId: string
+}
+
+/** The one optional face-up-for-face-up exchange still awaiting a decision. */
+export interface PendingTribute extends PreviousRoundResult {}
+
+export type Phase = 'lobby' | 'rearrange' | 'tribute' | 'play' | 'endgame' | 'roundEnd' | 'gameOver'
 
 export interface GameState {
   phase: Phase
+  rules: GameRules
   players: Player[]
   stock: Card[]
   pile: PileEntry[]
   currentPlayerIdx: number
   playDirection: 1 | -1
   turnCount: number
+  winnerId: string | null // first player to get rid of every card
   loserId: string | null  // player who is "shithead" (last with cards)
+  pendingTribute: PendingTribute | null
   log: GameEvent[]
   /**
    * Monotonic action sequence number, assigned by the engine: 0 at init,
-   * +1 for every state-mutating action (rearrange, startPlay, playCards,
-   * pickUpPile). Per-room this lets clients detect duplicate/replayed or
-   * out-of-order GAME_STATE broadcasts (ignore seq <= last seen).
+   * +1 for every state-mutating action (rearrange, startPlay, tribute,
+   * playCards, pickUpPile). Per-room this lets clients detect duplicate/
+   * replayed or out-of-order GAME_STATE broadcasts (ignore seq <= last seen).
    * Optional so existing consumers constructing lobby placeholders compile;
    * every engine-produced state always carries it.
    */
@@ -109,6 +127,11 @@ export type GameEvent =
 
 export const SUITS: Suit[] = ['♠', '♥', '♦', '♣']
 export const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
+
+export const DEFAULT_GAME_RULES: Readonly<GameRules> = Object.freeze({
+  includeJokers: true,
+  winnerSwapsFaceUp: false,
+})
 
 /** Maximum number of log entries retained in state (ring buffer). */
 export const MAX_LOG_ENTRIES = 50
@@ -249,6 +272,31 @@ function nextActiveIdx(players: Player[], fromIdx: number, dir: 1 | -1): number 
   return fromIdx
 }
 
+/** Opening priority after every player has finalized their public row (D9). */
+const START_RANKS: readonly Rank[] = [
+  '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2', 'JOKER',
+]
+
+function startingPlayerIdx(players: Player[]): number {
+  for (const rank of START_RANKS) {
+    const idx = players.findIndex(player =>
+      !player.isOut && player.faceUp.some(card => card.rank === rank),
+    )
+    if (idx !== -1) return idx
+  }
+  const firstActive = players.findIndex(player => !player.isOut)
+  return firstActive === -1 ? 0 : firstActive
+}
+
+function validPendingTribute(state: GameState): PendingTribute | null {
+  const pending = state.pendingTribute
+  const rules = state.rules ?? DEFAULT_GAME_RULES
+  if (!rules.winnerSwapsFaceUp || !pending || pending.winnerId === pending.loserId) return null
+  const winner = state.players.find(player => player.id === pending.winnerId)
+  const loser = state.players.find(player => player.id === pending.loserId)
+  return winner && loser ? pending : null
+}
+
 type CardZone = 'hand' | 'faceUp' | 'faceDown'
 
 /** The zone a player must play from right now (D6). */
@@ -292,6 +340,9 @@ function applyStalemateCap(state: GameState): GameState {
 
 export interface InitConfig {
   players: Array<{ id: string; name: string; isAI?: boolean; aiDifficulty?: 'easy'|'medium'|'hard' }>
+  rules?: GameRules
+  previousRound?: PreviousRoundResult | null
+  /** @deprecated Pass rules.includeJokers. Kept for legacy callers. */
   includeJokers?: boolean
   rng?: () => number
 }
@@ -301,7 +352,15 @@ export function initGame(cfg: InitConfig): GameState {
     throw new Error(`initGame requires 2-${MAX_PLAYERS} players`)
   }
   const rng = cfg.rng ?? Math.random
-  const deck = shuffle(makeDeck(cfg.includeJokers ?? true, rng), rng)
+  const rules: GameRules = {
+    ...DEFAULT_GAME_RULES,
+    ...(cfg.rules ?? {}),
+  }
+  // The new rules object is authoritative when both APIs are supplied.
+  if (cfg.rules === undefined && cfg.includeJokers !== undefined) {
+    rules.includeJokers = cfg.includeJokers
+  }
+  const deck = shuffle(makeDeck(rules.includeJokers, rng), rng)
   if (deck.length < cfg.players.length * 9) {
     throw new Error('Deck too small for player count')
   }
@@ -328,28 +387,28 @@ export function initGame(cfg: InitConfig): GameState {
   }
   const stock = deck.slice(idx)
 
-  // Eldest hand = first player with a 3 face-up; fallback chain so a game
-  // can always start (D9).
-  let startIdx = players.findIndex(p => p.faceUp.some(c => c.rank === '3'))
-  if (startIdx === -1) {
-    for (const rank of ['3','4','5','6','7','8','9','10','J','Q','K','A','2'] as Rank[]) {
-      startIdx = players.findIndex(p =>
-        p.hand.some(c => c.rank === rank) || p.faceUp.some(c => c.rank === rank)
-      )
-      if (startIdx !== -1) break
-    }
-  }
-  if (startIdx === -1) startIdx = 0
+  const startIdx = startingPlayerIdx(players)
+
+  const previous = cfg.previousRound
+  const ids = new Set(players.map(player => player.id))
+  const pendingTribute: PendingTribute | null =
+    rules.winnerSwapsFaceUp && previous && previous.winnerId !== previous.loserId &&
+    ids.has(previous.winnerId) && ids.has(previous.loserId)
+      ? { winnerId: previous.winnerId, loserId: previous.loserId }
+      : null
 
   return {
     phase: 'rearrange',
+    rules,
     players,
     stock,
     pile: [],
     currentPlayerIdx: startIdx,
     playDirection: 1,
     turnCount: 0,
+    winnerId: null,
     loserId: null,
+    pendingTribute,
     log: [{ type: 'PHASE_CHANGE', phase: 'rearrange' }],
     seq: 0,
   }
@@ -376,10 +435,17 @@ export function rearrange(state: GameState, playerId: string, handIdx: number, u
 
 export function startPlay(state: GameState): GameState {
   if (state.phase !== 'rearrange') return state
+  const pendingTribute = validPendingTribute(state)
+  const phase: Phase = pendingTribute ? 'tribute' : 'play'
+  const tributeWinnerIdx = pendingTribute
+    ? state.players.findIndex(player => player.id === pendingTribute.winnerId)
+    : -1
   return {
     ...state,
-    phase: 'play',
-    log: appendLog(state.log, { type: 'PHASE_CHANGE', phase: 'play' }),
+    phase,
+    pendingTribute,
+    currentPlayerIdx: pendingTribute ? tributeWinnerIdx : startingPlayerIdx(state.players),
+    log: appendLog(state.log, { type: 'PHASE_CHANGE', phase }),
     seq: (state.seq ?? 0) + 1,
   }
 }
@@ -387,6 +453,58 @@ export function startPlay(state: GameState): GameState {
 export interface PlayResult {
   state: GameState
   error?: string
+}
+
+function finishTribute(state: GameState, players: Player[]): GameState {
+  return {
+    ...state,
+    players,
+    phase: 'play',
+    pendingTribute: null,
+    currentPlayerIdx: startingPlayerIdx(players),
+    log: appendLog(state.log, { type: 'PHASE_CHANGE', phase: 'play' }),
+    seq: (state.seq ?? 0) + 1,
+  }
+}
+
+/**
+ * The previous winner may optionally exchange exactly one card from their
+ * finalized public row with exactly one card from the previous loser's row.
+ */
+export function exchangeFaceUpCards(
+  state: GameState,
+  actorId: string,
+  winnerCardId: string,
+  loserCardId: string,
+): PlayResult {
+  if (state.phase !== 'tribute') return { state, error: 'Cannot exchange cards in current phase' }
+  const pending = validPendingTribute(state)
+  if (!pending) return { state, error: 'No valid tribute is pending' }
+  if (actorId !== pending.winnerId) return { state, error: 'Only the previous winner may exchange cards' }
+
+  const winnerIdx = state.players.findIndex(player => player.id === pending.winnerId)
+  const loserIdx = state.players.findIndex(player => player.id === pending.loserId)
+  const winnerCardIdx = state.players[winnerIdx].faceUp.findIndex(card => card.id === winnerCardId)
+  const loserCardIdx = state.players[loserIdx].faceUp.findIndex(card => card.id === loserCardId)
+  if (winnerCardIdx === -1 || loserCardIdx === -1) {
+    return { state, error: 'Tribute may exchange face-up cards only' }
+  }
+
+  const players = state.players.map(player => ({ ...player, faceUp: [...player.faceUp] }))
+  const winnerCard = players[winnerIdx].faceUp[winnerCardIdx]
+  const loserCard = players[loserIdx].faceUp[loserCardIdx]
+  players[winnerIdx].faceUp[winnerCardIdx] = loserCard
+  players[loserIdx].faceUp[loserCardIdx] = winnerCard
+  return { state: finishTribute(state, players) }
+}
+
+/** The previous winner may decline the optional exchange. */
+export function skipTribute(state: GameState, actorId: string): PlayResult {
+  if (state.phase !== 'tribute') return { state, error: 'Cannot skip tribute in current phase' }
+  const pending = validPendingTribute(state)
+  if (!pending) return { state, error: 'No valid tribute is pending' }
+  if (actorId !== pending.winnerId) return { state, error: 'Only the previous winner may skip tribute' }
+  return { state: finishTribute(state, state.players) }
 }
 
 export function playCards(state: GameState, playerId: string, cards: Card[]): PlayResult {
@@ -515,7 +633,11 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
     return { ...p, hand }
   })
 
-  // Check player out
+  // Check player out. Preserve whether somebody was already out before this
+  // action: legacy snapshots may have no winnerId even though their first
+  // PLAYER_OUT event has fallen out of the capped log. A later player must
+  // never steal that historically unknown winner slot.
+  const hadPriorOut = state.players.some(p => p.isOut)
   nextPlayers = nextPlayers.map(p => {
     if (p.id !== playerId) return p
     if (p.hand.length + p.faceUp.length + p.faceDown.length === 0) {
@@ -525,6 +647,8 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
   })
 
   const wentOut = nextPlayers.find(p => p.id === playerId)?.isOut === true
+  let winnerId = state.winnerId ?? null
+  if (wentOut && winnerId === null && !hadPriorOut) winnerId = playerId
 
   // Phase transition
   let phase: Phase = endgamePhase(state.phase, nextPlayers, stock)
@@ -564,6 +688,7 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
       currentPlayerIdx: nextIdx,
       phase,
       turnCount: state.turnCount + 1,
+      winnerId,
       loserId,
       log: appendLog(state.log, ...events),
       seq: (state.seq ?? 0) + 1,

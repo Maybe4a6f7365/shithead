@@ -70,7 +70,7 @@ function SuitGlyph({ suit, size, className }: { suit: Suit; size: number | strin
 }
 
 export function cardAriaLabel(card: CardT | undefined, faceDown: boolean | undefined, hint?: string): string {
-  if (faceDown || !card) return 'Face-down card'
+  if (faceDown || !card) return hint ? `Face-down card, ${hint}` : 'Face-down card'
   const base = card.rank === 'JOKER'
     ? 'Joker'
     : `${rankName(card.rank)} of ${card.suit ? SUIT_NAME[card.suit] : 'unknown suit'}`

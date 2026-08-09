@@ -35,13 +35,14 @@ A web-first, mobile-optimized Shithead implementation with AI bots, online multi
 
 Standard German Shithead variant:
 
-- **Deck:** 52 French + 2 Jokers (52 only without jokers)
-- **Deal:** 9 cards each = 3 face-down + 3 face-up (on top) + 3 in hand
+- **Round options:** the host chooses whether Jokers are included and whether the previous winner gets the optional face-up exchange
+- **Deal:** 3 cards face-down, then 6 visible cards. Choose any 3 of those 6 for the face-up final row; the other 3 become your hand
 - **Goal:** Lose all your cards. Last player holding = **Shithead**.
-- **Start:** eldest hand = first player with a 3 face-up
+- **Start:** the player with the lowest-ranked face-up final card begins
 - **Play:** play a card or equal-rank set ≥ top of wastepile. Can't/won't → pick up pile
-- **Hand minimum:** 3 cards always; draw from stock to refill
+- **Refill:** after playing, draw back up to 3 cards while the stock still has cards
 - **Endgame phase:** when stock runs out, play from face-up, then face-down blind
+- **Next-round exchange (optional):** after everyone chooses their face-up final row, the previous winner may swap exactly one of those 3 cards with exactly one face-up final card belonging to the previous Shithead — or skip the exchange
 
 ### Special cards
 

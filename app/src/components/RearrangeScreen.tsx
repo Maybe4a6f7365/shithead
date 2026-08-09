@@ -61,7 +61,7 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
   }, [player.faceUp])
 
   return (
-    <div className="app-viewport bg-felt text-cream flex flex-col table-select-none">
+    <div className="app-viewport rearrange-screen bg-felt text-cream flex flex-col table-select-none overflow-y-auto">
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
 

@@ -18,6 +18,9 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
   const [createError, setCreateError] = useState<string | null>(null)
   const [joinError, setJoinError] = useState<string | null>(null)
   const joinRef = useRef<HTMLInputElement>(null)
+  const requestId = useRef(0)
+
+  useEffect(() => () => { requestId.current++ }, [])
 
   // Paste/share-link support: ?room=CODE pre-fills and focuses JOIN (§7.2).
   useEffect(() => {
@@ -30,22 +33,27 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
   }, [])
 
   const create = async () => {
+    if (busy) return
     const n = name.trim()
     if (!n) { setCreateError('Enter your name first.'); return }
+    const attemptId = ++requestId.current
     setBusy(true)
     setCreateError(null)
     try {
-      const id = await createRoom()
+      const roomId = await createRoom()
+      if (requestId.current !== attemptId) return
       saveName(n)
-      onEnterRoom(id, n, 'create')
+      onEnterRoom(roomId, n, 'create')
     } catch (e) {
+      if (requestId.current !== attemptId) return
       setCreateError(e instanceof Error ? e.message : 'Failed to create room')
     } finally {
-      setBusy(false)
+      if (requestId.current === attemptId) setBusy(false)
     }
   }
 
   const join = () => {
+    if (busy) return
     const n = name.trim()
     if (!n) { setJoinError('Enter your name first.'); return }
     if (!/^[A-Z0-9]{6}$/.test(code)) { setJoinError('A room code is 6 letters.'); return }
@@ -59,7 +67,8 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
         <button
           type="button"
           onClick={onBack}
-          className="self-start min-h-[44px] text-label font-bold tracking-label uppercase text-cream-dim mb-s5"
+          disabled={busy}
+          className="self-start min-h-[44px] text-label font-bold tracking-label uppercase text-cream-dim mb-s5 disabled:opacity-40"
         >
           ← Menu
         </button>
@@ -105,7 +114,8 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
           <button
             type="button"
             onClick={join}
-            className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+            disabled={busy}
+            className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1 disabled:opacity-50"
           >
             Join
           </button>

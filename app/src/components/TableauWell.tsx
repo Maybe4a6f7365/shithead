@@ -31,13 +31,13 @@ export function TableauWell({
       style={{ scrollbarWidth: 'none' }}
       aria-label="Your tableau"
     >
-      {faceDown.map(c => (
+      {faceDown.map((c, index) => (
         <div key={c.id} className="shrink-0" style={{ paddingBottom: fullSize ? 16 : 0 }}>
           <Card
             faceDown
             size={size}
             state={faceDownStates?.get(c.id) ?? 'rest'}
-            ariaHint={faceDownHints?.get(c.id)}
+            ariaHint={faceDownHints?.get(c.id) ?? `${index + 1} of ${faceDown.length}`}
             onActivate={onActivateFaceDown ? () => onActivateFaceDown(c.id) : undefined}
           />
         </div>

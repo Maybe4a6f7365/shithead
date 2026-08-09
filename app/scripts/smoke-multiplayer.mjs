@@ -33,7 +33,7 @@ async function waitForDeployment() {
         const version = JSON.parse(text)
         if (!expectedCommit || version.commit === expectedCommit) {
           assert.equal(version.service, 'shithead-multiplayer')
-          assert.equal(version.protocol, 2)
+          assert.equal(version.protocol, 3)
           log(`deployed commit ${version.commit}`)
           return version
         }
@@ -238,6 +238,7 @@ async function run() {
 
   host.send({ type: 'CREATE_ROOM', playerName: 'Smoke Host' })
   const hostWelcome = await host.waitType('WELCOME')
+  assert.equal(hostWelcome.version, 3)
   assert.equal(hostWelcome.room.code, roomId)
   assert.equal(hostWelcome.room.hostId, hostWelcome.playerId)
   const hostId = hostWelcome.playerId
@@ -258,7 +259,7 @@ async function run() {
 
   host = await new Peer('host-resumed', wsUrl).connect()
   assert(hostWelcome.resumeToken, 'WELCOME is missing the secret resumeToken')
-  host.send({ type: 'RESUME_ROOM', playerId: hostId, resumeToken: hostWelcome.resumeToken })
+  host.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostWelcome.resumeToken })
   const resumedWelcome = await host.waitType('WELCOME')
   assert.equal(resumedWelcome.playerId, hostId)
   assert(resumedWelcome.resumeToken, 'resume did not rotate the resumeToken')
@@ -302,14 +303,17 @@ async function run() {
   const myState = currentPeer.latestGameState
   const me = myState.players.find(player => player.id === myId)
   assert(me && me.hand.length > 0, 'current player has no hand cards to play')
-  // avoid a 10: burning keeps the lead with the same player and would break the turn-advance assertion below
-  const candidate = me.hand.find(card => card.rank !== '10') ?? me.hand[0]
+  // avoid a burn: it keeps the lead with the same player and would break the
+  // turn-advance assertion below (both 10 and Joker clear the pile).
+  const candidate = me.hand.find(card => card.rank !== '10' && card.rank !== 'JOKER') ?? me.hand[0]
   currentPeer.send({ type: 'PLAY', cards: [candidate] })
 
   const hostAdvanced = await host.waitType('GAME_STATE', message => message.state.turnCount > previousTurn)
   const guestAdvanced = await guest.waitType('GAME_STATE', message => message.state.turnCount > previousTurn)
   assert.equal(hostAdvanced.state.turnCount, guestAdvanced.state.turnCount)
-  assert.notEqual(hostAdvanced.state.currentPlayerIdx, currentState.currentPlayerIdx)
+  if (candidate.rank !== '10' && candidate.rank !== 'JOKER') {
+    assert.notEqual(hostAdvanced.state.currentPlayerIdx, currentState.currentPlayerIdx)
+  }
   log('game mutation propagated to both players')
 
   await Promise.all([host.close(), guest.close()])

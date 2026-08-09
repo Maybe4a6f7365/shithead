@@ -7,7 +7,6 @@
 import { memo } from 'react'
 import clsx from 'clsx'
 import type { Card as CardT, Player } from '../engine'
-import { Card } from './Card'
 
 export interface Seat {
   player: Player
@@ -35,32 +34,11 @@ export const OpponentSeat = memo(function OpponentSeat({ seat, active }: { seat:
   return (
     <div
       className={clsx(
-        'flex flex-col items-center justify-between w-[68px] min-h-[72px] py-s1 rounded-button',
+        'flex flex-col items-center justify-between w-[84px] min-h-[88px] py-s1 rounded-button',
         active && 'bg-felt-raised',
       )}
       aria-label={`${player.name}: ${seat.handCount} in hand, ${seat.faceUp.length} face up, ${seat.faceDownCount} face down${active ? ', their turn' : ''}${seat.offline ? ', offline' : ''}${player.isOut ? ', out' : ''}`}
     >
-      {/* Miniatures: one back + count; up to 3 faces; face-down strips */}
-      <div className="flex items-end gap-[2px] h-[26px]">
-        {seat.handCount > 0 && (
-          <div className="relative">
-            <div className="w-[18px] h-[26px] rounded-[2px] bg-burgundy shadow-[var(--shadow-card-rest)]" aria-hidden="true" />
-            <span className="absolute inset-0 flex items-center justify-center text-micro font-semibold text-cream">
-              {seat.handCount}
-            </span>
-          </div>
-        )}
-        {seat.faceUp.slice(0, 3).map(c => (
-          <div key={c.id} className="w-[18px] h-[26px] rounded-[2px] bg-cream flex items-center justify-center shadow-[var(--shadow-card-rest)]" aria-hidden="true">
-            <span className={clsx('text-[11px] leading-none font-bold', (c.suit === '♥' || c.suit === '♦' || c.rank === 'JOKER') ? 'text-burgundy' : 'text-ink')}>
-              {c.rank === 'JOKER' ? 'J' : c.rank}
-            </span>
-          </div>
-        ))}
-        {Array.from({ length: seat.faceDownCount }).map((_, i) => (
-          <div key={`d${i}`} className="w-[8px] h-[24px] rounded-[1px] bg-burgundy/80" aria-hidden="true" />
-        ))}
-      </div>
       <span
         className={clsx(
           'text-feed font-medium truncate max-w-full',
@@ -71,6 +49,38 @@ export const OpponentSeat = memo(function OpponentSeat({ seat, active }: { seat:
       >
         {name}
       </span>
+      <div className="flex items-center gap-[4px]">
+        <div className="relative w-[18px] h-[26px] rounded-[2px] bg-burgundy shadow-[var(--shadow-card-rest)]" role="img" aria-label={`${seat.handCount} cards in hand`}>
+          <span className="absolute inset-0 flex items-center justify-center text-micro font-semibold text-cream" aria-hidden="true">
+            {seat.handCount}
+          </span>
+        </div>
+        {/* Stable public final-card rail below the username. */}
+        <div className="final-mini-row" aria-label={`${player.name}'s final cards`}>
+        <div className="final-mini-row__line">
+          {Array.from({ length: 3 }).map((_, index) => {
+            const card = seat.faceUp[index]
+            return card ? (
+              <div
+                key={`up-${index}`}
+                className="final-mini-card final-mini-card--up"
+                role="img"
+                aria-label={`${card.rank === 'JOKER' ? 'Joker' : card.rank}, face-up final card ${index + 1} of 3`}
+              >
+                <span className={clsx((card.suit === '♥' || card.suit === '♦' || card.rank === 'JOKER') ? 'text-burgundy' : 'text-ink')} aria-hidden="true">
+                  {card.rank === 'JOKER' ? 'JK' : card.rank}
+                </span>
+              </div>
+            ) : <span key={`up-${index}`} className="final-mini-card final-mini-card--empty" aria-hidden="true" />
+          })}
+        </div>
+        <div className="final-mini-row__line">
+          {Array.from({ length: 3 }).map((_, index) => index < seat.faceDownCount ? (
+            <span key={`down-${index}`} className="final-mini-card final-mini-card--down" role="img" aria-label={`Face-down final card ${index + 1} of ${seat.faceDownCount}`} />
+          ) : <span key={`down-${index}`} className="final-mini-card final-mini-card--empty" aria-hidden="true" />)}
+        </div>
+        </div>
+      </div>
       {seat.offline ? (
         <span className="text-micro font-semibold tracking-micro text-danger-bright">offline</span>
       ) : (
@@ -91,7 +101,7 @@ export interface OpponentStripProps {
 export function OpponentStrip({ seats, activeSeatId }: OpponentStripProps) {
   return (
     <div
-      className="flex items-start justify-center gap-s2 min-h-[72px]"
+      className="flex items-start justify-start sm:justify-center gap-s2 min-h-[88px] overflow-x-auto"
       role="list"
       aria-label="Opponents"
     >

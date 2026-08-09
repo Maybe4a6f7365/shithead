@@ -6,17 +6,21 @@
 //  Client → Server:
 //    CREATE_ROOM {playerName, maxPlayers?}   create a room, become host
 //    JOIN_ROOM {code, playerName}            join an open room
-//    RESUME_ROOM {playerId}                  reclaim a seat after reconnect
+//    RESUME_ROOM {roomCode, playerId, resumeToken} reclaim a seat securely
 //    LEAVE_ROOM {}                           leave (seat kept during a game)
 //    START_GAME {}                           host only; deals and enters rearrange
 //    READY {}                                mark rearrange done; game starts when all ready
 //    REARRANGE {handIdx, upIdx}              swap one hand card with one face-up card
 //    PLAY {cards: Card[]}                    play 1-4 cards (unique ids, one rank)
 //    PICK_UP {}                              pick up the pile (play/endgame only)
+//    SET_RULES {rules}                       host updates waiting/next-round rules
+//    TRIBUTE_SWAP {winnerCardId, loserCardId} optional public-row exchange
+//    TRIBUTE_SKIP {}                         previous winner declines the exchange
 //    CHAT {text}                             in-room chat (<=200 chars)
 //    PING {}                                 keepalive
 //  Server → Client:
-//    WELCOME {playerId, room, version?}      seat assigned
+//    WELCOME {playerId, room, resumeToken}   seat assigned; token is secret
+//    RESUME_FAILED {reason}                  resume credential rejected
 //    ROOM_STATE {room}                       lobby state broadcast
 //    GAME_STATE {state, version?}            per-viewer game state broadcast
 //    ERROR {code, message}                   action rejected
@@ -39,32 +43,36 @@
 //    with real card ids, and a constant placeholder rank/suit.
 // ============================================================================
 
-import type { Card, GameState, Phase } from './index'
+import type { Card, GameRules, GameState, Phase } from './index'
 import { MAX_LOG_ENTRIES } from './index'
 
 /** Wire protocol version. Bump on any breaking message change. */
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 
 // ---------- Client → Server ----------
 
 export type ClientMsg =
   | { type: 'CREATE_ROOM'; playerName: string; maxPlayers?: number; version?: number }
   | { type: 'JOIN_ROOM'; code: string; playerName: string; version?: number }
-  | { type: 'RESUME_ROOM'; playerId: string; version?: number }
+  | { type: 'RESUME_ROOM'; roomCode: string; playerId: string; resumeToken: string; version?: number }
   | { type: 'LEAVE_ROOM'; version?: number }
   | { type: 'START_GAME'; version?: number }
   | { type: 'READY'; version?: number }
   | { type: 'REARRANGE'; handIdx: number; upIdx: number; version?: number }
   | { type: 'PLAY'; cards: Card[]; version?: number }
   | { type: 'PICK_UP'; version?: number }
+  | { type: 'SET_RULES'; rules: Partial<GameRules>; version?: number }
+  | { type: 'TRIBUTE_SWAP'; winnerCardId: string; loserCardId: string; version?: number }
+  | { type: 'TRIBUTE_SKIP'; version?: number }
   | { type: 'CHAT'; text: string; version?: number }
   | { type: 'PING'; version?: number }
 
 // ---------- Server → Client ----------
 
 export type ServerMsg =
-  | { type: 'WELCOME'; playerId: string; room: RoomSummary; version?: number }
-  | { type: 'ROOM_STATE'; room: RoomSummary }
+  | { type: 'WELCOME'; playerId: string; room: RoomSummary; resumeToken: string; version: number }
+  | { type: 'RESUME_FAILED'; reason: string; version: number }
+  | { type: 'ROOM_STATE'; room: RoomSummary; version?: number }
   | { type: 'GAME_STATE'; state: GameState; version?: number }
   | { type: 'ERROR'; code: ErrorCode; message: string }
   | { type: 'PLAYER_JOINED'; player: PlayerSummary }
@@ -90,6 +98,7 @@ export interface RoomSummary {
   maxPlayers: number
   players: PlayerSummary[]
   createdAt: number
+  rules: GameRules
 }
 
 export type ErrorCode =
@@ -99,6 +108,7 @@ export type ErrorCode =
   | 'NOT_HOST'
   | 'NOT_YOUR_TURN'
   | 'INVALID_MOVE'
+  | 'GAME_IN_PROGRESS'
   | 'RATE_LIMITED'
   | 'INTERNAL'
 
@@ -110,6 +120,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isShortString = (value: unknown, max: number) =>
   typeof value === 'string' && value.length > 0 && value.length <= max
 
+const isNonBlankShortString = (value: unknown, max: number) =>
+  typeof value === 'string' && value.length > 0 && value.length <= max && value.trim().length > 0
+
+const isRulesPatch = (value: unknown): value is Partial<GameRules> => {
+  if (!isRecord(value)) return false
+  const keys = Object.keys(value)
+  if (keys.length === 0) return false
+  const allowed = new Set(['includeJokers', 'winnerSwapsFaceUp'])
+  return keys.every(key => allowed.has(key) && typeof value[key] === 'boolean')
+}
+
 /** Optional version field: when present it must match PROTOCOL_VERSION. */
 const versionOk = (data: Record<string, unknown>) =>
   data.version === undefined || data.version === PROTOCOL_VERSION
@@ -120,13 +141,14 @@ export function isClientMsg(data: unknown): data is ClientMsg {
 
   switch (data.type) {
     case 'CREATE_ROOM':
-      return isShortString(data.playerName, 32) &&
+      return isNonBlankShortString(data.playerName, 32) &&
         (data.maxPlayers === undefined ||
           (Number.isInteger(data.maxPlayers) && Number(data.maxPlayers) >= 2 && Number(data.maxPlayers) <= 5))
     case 'JOIN_ROOM':
-      return typeof data.code === 'string' && /^[A-Z0-9]{6}$/.test(data.code) && isShortString(data.playerName, 32)
+      return typeof data.code === 'string' && /^[A-Z0-9]{6}$/.test(data.code) && isNonBlankShortString(data.playerName, 32)
     case 'RESUME_ROOM':
-      return isShortString(data.playerId, 128)
+      return typeof data.roomCode === 'string' && /^[A-Z0-9]{6}$/.test(data.roomCode) &&
+        isShortString(data.playerId, 128) && isShortString(data.resumeToken, 256)
     case 'REARRANGE':
       return Number.isInteger(data.handIdx) && Number.isInteger(data.upIdx)
     case 'PLAY': {
@@ -138,10 +160,16 @@ export function isClientMsg(data: unknown): data is ClientMsg {
     }
     case 'CHAT':
       return typeof data.text === 'string' && data.text.length > 0 && data.text.length <= 200
+    case 'SET_RULES':
+      return isRulesPatch(data.rules)
+    case 'TRIBUTE_SWAP':
+      return isShortString(data.winnerCardId, 128) && isShortString(data.loserCardId, 128) &&
+        data.winnerCardId !== data.loserCardId
     case 'LEAVE_ROOM':
     case 'START_GAME':
     case 'READY':
     case 'PICK_UP':
+    case 'TRIBUTE_SKIP':
     case 'PING':
       return true
     default:
@@ -182,7 +210,9 @@ export function serializeGameState(state: GameState, viewerId: string): GameStat
         : player.hand.map((_, i) => hiddenCard(`hidden:${player.id}:hand:${i}`)),
       faceDown: revealAll
         ? player.faceDown
-        : player.faceDown.map((_, i) => hiddenCard(`hidden:${player.id}:down:${i}`)),
+        : player.faceDown.map((_, i) => hiddenCard(
+          player.id === viewerId ? `blind:down:${i}` : `hidden:${player.id}:down:${i}`,
+        )),
     })),
     log: state.log.length > MAX_LOG_ENTRIES
       ? state.log.slice(state.log.length - MAX_LOG_ENTRIES)

@@ -7,7 +7,9 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import { useSPGame } from '../sp/SPSinglePlayer'
+import { DEFAULT_GAME_RULES, type GameRules } from '../engine'
 import { loadSavedName, saveName } from './NameField'
+import { RoundRulesControl } from './RoundRulesControl'
 
 interface PlayerConfig {
   name: string
@@ -23,6 +25,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
     { name: loadSavedName('You'), isAI: false },
     { name: 'Hans', isAI: true, difficulty: 'medium' },
   ])
+  const [rules, setRules] = useState<GameRules>({ ...DEFAULT_GAME_RULES })
 
   const update = (idx: number, patch: Partial<PlayerConfig>) =>
     setPlayers(ps => ps.map((p, i) => (i === idx ? { ...p, ...patch } : p)))
@@ -30,7 +33,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
   const deal = () => {
     const first = players[0]
     if (first && !first.isAI) saveName(first.name)
-    initGame(players.map((p, i) => ({ ...p, name: p.name.trim() || `Player ${i + 1}` })))
+    initGame(players.map((p, i) => ({ ...p, name: p.name.trim() || `Player ${i + 1}` })), rules)
   }
 
   return (
@@ -45,7 +48,13 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
         </button>
         <h1 className="font-display text-title font-semibold mb-s4">Pass &amp; play</h1>
 
-        <div className="flex flex-col gap-s4">
+        <RoundRulesControl
+          rules={rules}
+          editable
+          onChange={patch => setRules(current => ({ ...current, ...patch }))}
+        />
+
+        <div className="flex flex-col gap-s4 mt-s5">
           {players.map((p, i) => (
             <div key={i} className="flex flex-col gap-s2">
               <div className="flex items-end gap-s2">

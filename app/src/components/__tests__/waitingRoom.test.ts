@@ -4,11 +4,12 @@
 // the host/guest branch must be driven by room.hostId === myPlayerId.
 // Production shipped the guest branch to the host; this pins the fix.
 // ============================================================================
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createElement } from 'react'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { WaitingRoom, waitingRoomRole } from '../WaitingRoom'
 import type { RoomSummary } from '../../engine/protocol'
+import { DEFAULT_GAME_RULES } from '../../engine'
 
 function room(partial: Partial<RoomSummary> = {}): RoomSummary {
   return {
@@ -17,6 +18,7 @@ function room(partial: Partial<RoomSummary> = {}): RoomSummary {
     hostId: 'host-1',
     maxPlayers: 5,
     createdAt: 0,
+    rules: { ...DEFAULT_GAME_RULES },
     players: [
       { id: 'host-1', name: 'Greta', isAI: false, connected: true, isOut: false, cardCount: { hand: 0, faceUp: 0, faceDown: 0 } },
       { id: 'guest-2', name: 'Hans', isAI: false, connected: true, isOut: false, cardCount: { hand: 0, faceUp: 0, faceDown: 0 } },
@@ -58,5 +60,37 @@ describe('WaitingRoom', () => {
     expect(btn.disabled).toBe(false) // enabled — tapping explains
     fireEvent.click(btn)
     expect(screen.getByText(/need at least 2 players/i)).toBeTruthy()
+  })
+
+  it('lets only the host change authoritative round rules', () => {
+    const change = vi.fn()
+    const { rerender } = render(createElement(WaitingRoom, {
+      room: room(), myPlayerId: 'host-1', onStart: noop, onLeave: noop, onRulesChange: change,
+    }))
+    fireEvent.click(screen.getByRole('switch', { name: /jokers/i }))
+    expect(change).toHaveBeenCalledWith({ includeJokers: false })
+
+    rerender(createElement(WaitingRoom, {
+      room: room(), myPlayerId: 'guest-2', onStart: noop, onLeave: noop, onRulesChange: change,
+    }))
+    expect((screen.getByRole('switch', { name: /jokers/i }) as HTMLInputElement).disabled).toBe(true)
+  })
+
+  it('keeps an offline host visible and waits for reconnection', () => {
+    const offlineHost = room({
+      players: room().players.map(player => player.id === 'host-1' ? { ...player, connected: false } : player),
+    })
+    render(createElement(WaitingRoom, { room: offlineHost, myPlayerId: 'guest-2', onStart: noop, onLeave: noop }))
+    expect(screen.getByText(/host · offline/i)).toBeTruthy()
+    expect(screen.getByText(/host to reconnect/i)).toBeTruthy()
+  })
+
+  it('explains that every seat must be online before starting', () => {
+    const offlineGuest = room({
+      players: room().players.map(player => player.id === 'guest-2' ? { ...player, connected: false } : player),
+    })
+    render(createElement(WaitingRoom, { room: offlineGuest, myPlayerId: 'host-1', onStart: noop, onLeave: noop }))
+    fireEvent.click(screen.getByRole('button', { name: /start game/i }))
+    expect(screen.getByText(/everyone must be online/i)).toBeTruthy()
   })
 })

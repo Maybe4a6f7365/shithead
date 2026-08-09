@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import type { GameState, Player } from '../engine'
 import { orderSeats } from './OpponentStrip'
-import { feedLine } from './feedText'
+import { feedLine, latestActionEvents } from './feedText'
 import { pileTilt } from './Card'
 
 function player(id: string): Player {
@@ -27,8 +27,10 @@ describe('orderSeats', () => {
 
 function gs(log: GameState['log']): GameState {
   return {
-    phase: 'play', players: [player('me'), player('greta')], stock: [], pile: [],
-    currentPlayerIdx: 0, playDirection: 1, turnCount: 1, loserId: null, log, seq: 1,
+    phase: 'play', rules: { includeJokers: true, winnerSwapsFaceUp: false },
+    players: [player('me'), player('greta')], stock: [], pile: [],
+    currentPlayerIdx: 0, playDirection: 1, turnCount: 1,
+    winnerId: null, loserId: null, pendingTribute: null, log, seq: 1,
   }
 }
 
@@ -58,6 +60,28 @@ describe('feedLine', () => {
     expect(ok?.text).toContain('blind')
     const bad = feedLine(gs([{ type: 'BLIND_REVEAL', playerId: 'me', card: { id: 'x', suit: '♠', rank: '4' }, success: false }]), ctx)
     expect(bad?.text).toContain('too low')
+  })
+
+  it('folds a trailing draw into the play and keys the feed by seq, not capped log length', () => {
+    const state = {
+      ...gs([
+        { type: 'PLAY_CARDS' as const, playerId: 'greta', cards: [{ id: 'x', suit: '♥' as const, rank: '9' as const }] },
+        { type: 'DRAW' as const, playerId: 'greta', count: 1 },
+      ]),
+      seq: 77,
+    }
+    const line = feedLine(state, ctx)
+    expect(line?.text).toBe('Greta played the 9 of hearts')
+    expect(line?.key).toBe(77)
+  })
+
+  it('treats a bare GAME_OVER as its own block instead of replaying the prior action', () => {
+    const log: GameState['log'] = [
+      { type: 'PLAY_CARDS', playerId: 'greta', cards: [{ id: 'x', suit: '♥', rank: '9' }] },
+      { type: 'GAME_OVER', loserId: 'greta' },
+    ]
+    expect(latestActionEvents(log)).toEqual([{ type: 'GAME_OVER', loserId: 'greta' }])
+    expect(feedLine({ ...gs(log), loserId: 'greta' }, ctx)?.text).toContain('Round over')
   })
 })
 

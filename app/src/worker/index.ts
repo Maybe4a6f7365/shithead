@@ -1,8 +1,19 @@
-import type { Card, GameState, Player } from '../engine'
-import { initGame, pickUpPile, playCards, rearrange, startPlay } from '../engine'
+import type { Card, GameRules, GameState, Player, PreviousRoundResult } from '../engine'
+import {
+  DEFAULT_GAME_RULES,
+  exchangeFaceUpCards,
+  initGame,
+  pickUpPile,
+  playCards,
+  rearrange,
+  skipTribute,
+  startPlay,
+} from '../engine'
 import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
 import { isClientMsg, PROTOCOL_VERSION, serializeGameState, toPlayerSummary } from '../engine/protocol'
 import { BUILD_COMMIT } from './build-meta'
+import { applyPlayerForfeit } from './forfeit'
+import { normalizePersistedGameState } from './migrateState'
 
 interface Env {
   ROOM: DurableObjectNamespace
@@ -18,12 +29,13 @@ interface Session {
 }
 
 interface RoomData {
-  version: 1
+  version: 2
   code: string
   hostId: string
   maxPlayers: number
   players: Player[]
   state: GameState | null
+  rules: GameRules
   readyPlayerIds: string[]
   /** playerId -> SHA-256 hex hash of the current resume token (secret). */
   resumeTokens: Record<string, string>
@@ -31,25 +43,16 @@ interface RoomData {
   lastActivity: number
 }
 
-type StoredRoomData = Omit<RoomData, 'version' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens'> & {
-  version?: 1
+type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'state'> & {
+  version?: 1 | 2
+  state: GameState | null
+  rules?: Partial<GameRules>
   readyPlayerIds?: string[]
   lastActivity?: number
   resumeTokens?: Record<string, string>
 }
 
-// ---------- Worker-local protocol extensions (engine is frozen) ----------
-// WELCOME carries the per-player secret resumeToken (never broadcast);
-// RESUME_FAILED is the typed refusal for a bad RESUME_ROOM.
-type WelcomeMsg = {
-  type: 'WELCOME'
-  playerId: string
-  room: RoomSummary
-  version: number
-  resumeToken: string
-}
-type ResumeFailedMsg = { type: 'RESUME_FAILED'; reason: string }
-type OutMsg = ServerMsg | WelcomeMsg | ResumeFailedMsg
+type OutMsg = ServerMsg
 
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_MESSAGES_PER_SECOND = 20
@@ -126,9 +129,17 @@ export class Room {
       const stored = await this.state.storage.get<StoredRoomData>('room')
       if (!stored) return
 
+      const rules: GameRules = {
+        ...DEFAULT_GAME_RULES,
+        ...(stored.state?.rules ?? {}),
+        ...(stored.rules ?? {}),
+      }
+
       this.data = {
         ...stored,
-        version: 1,
+        version: 2,
+        rules,
+        state: normalizePersistedGameState(stored.state, rules),
         readyPlayerIds: stored.readyPlayerIds ?? [],
         lastActivity: stored.lastActivity ?? stored.createdAt,
         resumeTokens: stored.resumeTokens ?? {},
@@ -275,9 +286,7 @@ export class Room {
         await this.joinRoom(session, message.code, message.playerName)
         break
       case 'RESUME_ROOM': {
-        // resumeToken rides along as an extra field (engine schema unchanged).
-        const resumeToken = (parsed as { resumeToken?: unknown }).resumeToken
-        await this.resumeRoom(sessionId, session, message.playerId, resumeToken)
+        await this.resumeRoom(sessionId, session, message.roomCode, message.playerId, message.resumeToken)
         break
       }
       case 'LEAVE_ROOM':
@@ -297,6 +306,15 @@ export class Room {
         break
       case 'PICK_UP':
         await this.pickUp(session)
+        break
+      case 'SET_RULES':
+        await this.setRules(session, message.rules)
+        break
+      case 'TRIBUTE_SWAP':
+        await this.exchangeTribute(session, message.winnerCardId, message.loserCardId)
+        break
+      case 'TRIBUTE_SKIP':
+        await this.declineTribute(session)
         break
       case 'CHAT':
         this.chat(session, message.text)
@@ -364,12 +382,13 @@ export class Room {
     const resumeToken = generateResumeToken()
     session.playerId = player.id
     this.data = {
-      version: 1,
+      version: 2,
       code: this.code,
       hostId: player.id,
       maxPlayers: Math.max(2, Math.min(5, requestedMaxPlayers)),
       players: [player],
       state: null,
+      rules: { ...DEFAULT_GAME_RULES },
       readyPlayerIds: [],
       resumeTokens: { [player.id]: await hashResumeToken(resumeToken) },
       createdAt: Date.now(),
@@ -402,8 +421,8 @@ export class Room {
       this.send(session, { type: 'ERROR', code: 'ROOM_FULL', message: 'Room is full' })
       return
     }
-    if (data.state) {
-      this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Game already started' })
+    if (data.state && data.state.phase !== 'gameOver') {
+      this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' })
       return
     }
 
@@ -423,14 +442,20 @@ export class Room {
    * rotated on every successful resume). The broadcast playerId alone is
    * NOT a credential. Failures send RESUME_FAILED and never attach.
    */
-  private async resumeRoom(sessionId: string, session: Session, playerId: string, resumeToken: unknown): Promise<void> {
+  private async resumeRoom(
+    sessionId: string,
+    session: Session,
+    roomCode: string,
+    playerId: string,
+    resumeToken: string,
+  ): Promise<void> {
     const fail = (reason: string) => {
       logEvent('resume_failed', { code: this.code, reason })
-      this.send(session, { type: 'RESUME_FAILED', reason })
+      this.send(session, { type: 'RESUME_FAILED', reason, version: PROTOCOL_VERSION })
     }
 
     const data = this.data
-    if (!data) {
+    if (!data || roomCode !== data.code) {
       fail('room_not_found')
       return
     }
@@ -472,21 +497,83 @@ export class Room {
       this.send(session, { type: 'ERROR', code: 'NOT_HOST', message: 'Only the host can start' })
       return
     }
-    if (data.state) {
-      this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Game already started' })
+    if (data.state && data.state.phase !== 'gameOver') {
+      this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' })
       return
     }
     if (data.players.length < 2) {
       this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'At least two players are required' })
       return
     }
+    if (data.players.some(player => !this.isConnected(player.id))) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'All players must be online before starting' })
+      return
+    }
+
+    const prior = data.state
+    const rosterIds = new Set(data.players.map(player => player.id))
+    const previousRound: PreviousRoundResult | null =
+      prior?.phase === 'gameOver' && prior.winnerId && prior.loserId &&
+      prior.winnerId !== prior.loserId &&
+      rosterIds.has(prior.winnerId) && rosterIds.has(prior.loserId)
+        ? { winnerId: prior.winnerId, loserId: prior.loserId }
+        : null
 
     data.state = initGame({
       players: data.players.map(player => ({ id: player.id, name: player.name, isAI: false })),
+      rules: data.rules,
+      previousRound,
     })
     data.readyPlayerIds = []
 
     await this.save()
+    this.broadcastRoom()
+    this.broadcastGame()
+  }
+
+  private async setRules(session: Session, patch: Partial<GameRules>): Promise<void> {
+    const data = this.data
+    if (!data || session.playerId !== data.hostId) {
+      this.send(session, { type: 'ERROR', code: 'NOT_HOST', message: 'Only the host can change rules' })
+      return
+    }
+    if (data.state && data.state.phase !== 'gameOver') {
+      this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Rules are locked during a round' })
+      return
+    }
+
+    // Merge against the current authoritative value so two rapid toggles do
+    // not overwrite one another with stale whole-object snapshots.
+    data.rules = { ...data.rules, ...patch }
+    await this.save()
+    this.broadcastRoom()
+  }
+
+  private async exchangeTribute(session: Session, winnerCardId: string, loserCardId: string): Promise<void> {
+    const data = this.data
+    if (!data?.state || !session.playerId) return
+    const result = exchangeFaceUpCards(data.state, session.playerId, winnerCardId, loserCardId)
+    if (result.error) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
+      return
+    }
+    data.state = result.state
+    await this.save()
+    this.broadcastRoom()
+    this.broadcastGame()
+  }
+
+  private async declineTribute(session: Session): Promise<void> {
+    const data = this.data
+    if (!data?.state || !session.playerId) return
+    const result = skipTribute(data.state, session.playerId)
+    if (result.error) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
+      return
+    }
+    data.state = result.state
+    await this.save()
+    this.broadcastRoom()
     this.broadcastGame()
   }
 
@@ -522,7 +609,11 @@ export class Room {
     const ids = requested.map(card => card.id)
     if (new Set(ids).size !== ids.length) return null
 
-    const cards = ids.map(id => owned.get(id))
+    const cards = ids.map(id => {
+      const blind = /^blind:down:(\d+)$/.exec(id)
+      if (blind) return player.faceDown[Number(blind[1])]
+      return owned.get(id)
+    })
     return cards.every((card): card is Card => !!card) ? cards : null
   }
 
@@ -579,22 +670,15 @@ export class Room {
     const data = this.data
     if (!data || !session.playerId) return
 
-    // An explicit LEAVE always destroys the resume token (the credential is
-    // surrendered). During a running game the seat itself is preserved for
-    // game integrity, but without a token it can no longer be reclaimed.
     const leavingId = session.playerId
     delete data.resumeTokens[leavingId]
-
-    if (data.state) {
-      session.playerId = null
-      await this.save()
-      this.broadcastRoom()
-      return
-    }
-
     data.players = data.players.filter(player => player.id !== leavingId)
     data.readyPlayerIds = data.readyPlayerIds.filter(id => id !== leavingId)
     session.playerId = null
+
+    if (data.state && data.state.phase !== 'gameOver') {
+      data.state = applyPlayerForfeit(data.state, leavingId)
+    }
 
     if (data.players.length === 0) {
       this.data = null
@@ -605,6 +689,7 @@ export class Room {
     await this.save()
     this.broadcast({ type: 'PLAYER_LEFT', playerId: leavingId })
     this.broadcastRoom()
+    this.broadcastGame()
   }
 
   private closeSession(sessionId: string): void {
@@ -628,6 +713,7 @@ export class Room {
         return toPlayerSummary(currentPlayer, this.isConnected(lobbyPlayer.id))
       }),
       createdAt: data.createdAt,
+      rules: data.rules,
     }
   }
 
@@ -665,11 +751,16 @@ export class Room {
   }
 
   private send(session: Session, message: OutMsg): void {
-    try { session.webSocket.send(JSON.stringify(message)) } catch {}
+    try { session.webSocket.send(JSON.stringify({ ...message, version: PROTOCOL_VERSION })) } catch {}
   }
 
   private broadcast(message: OutMsg): void {
-    for (const session of this.sessions.values()) this.send(session, message)
+    // A WebSocket is not a room member until CREATE/JOIN/RESUME succeeds.
+    // Rejected late joins and idle unauthenticated sockets must not observe
+    // roster updates or chat (and sendGame independently applies this guard).
+    for (const session of this.sessions.values()) {
+      if (session.playerId) this.send(session, message)
+    }
   }
 }
 
@@ -765,13 +856,19 @@ export default {
 
     // Same-origin policy for the API: a present-but-disallowed Origin is
     // rejected outright (covers cross-origin WS upgrades too).
-    if (path.startsWith('/api/') && origin && !originAllowed) {
+    const isApiPath = path === '/api' || path.startsWith('/api/')
+    const isAssetPath = path === '/assets' || path.startsWith('/assets/')
+    if (isApiPath && origin && !originAllowed) {
       return withSecurityHeaders(new Response('Forbidden origin', { status: 403 }))
     }
 
     const headers = corsHeaders(origin, originAllowed)
 
     if (request.method === 'OPTIONS') return withSecurityHeaders(new Response(null, { headers }))
+
+    if (path === '/api' || path === '/assets') {
+      return withSecurityHeaders(new Response('Not found', { status: 404, headers }))
+    }
 
     if (path === '/api/health') {
       return withSecurityHeaders(new Response('OK', { headers }))
@@ -819,7 +916,7 @@ export default {
       const assetResponse = await env.ASSETS.fetch(request)
       if (assetResponse.status !== 404) return withSecurityHeaders(assetResponse)
 
-      if (request.method === 'GET' && !path.startsWith('/api/')) {
+      if (request.method === 'GET' && !isApiPath && !isAssetPath) {
         const fallback = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url)))
         return withSecurityHeaders(fallback)
       }

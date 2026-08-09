@@ -104,6 +104,70 @@ async function newRoom() {
 
 const isError = code => message => message.type === 'ERROR' && (code ? message.code === code : true)
 
+const rankOrder = new Map([
+  ['JOKER', -2], ['2', -1], ['3', 0], ['4', 1], ['5', 2], ['6', 3], ['7', 4],
+  ['8', 5], ['9', 6], ['10', 7], ['J', 8], ['Q', 9], ['K', 10], ['A', 11],
+])
+const openingRanks = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2', 'JOKER']
+
+function expectedOpenerId(state) {
+  for (const rank of openingRanks) {
+    const player = state.players.find(candidate => !candidate.isOut && candidate.faceUp.some(card => card.rank === rank))
+    if (player) return player.id
+  }
+  return state.players.find(player => !player.isOut)?.id
+}
+
+function effectiveTopRank(state) {
+  for (let i = state.pile.length - 1; i >= 0; i--) {
+    const entry = state.pile[i]
+    if (!entry.cleared && entry.cards.length) return entry.cards[0].rank
+  }
+  return null
+}
+
+function canPlayRank(rank, top) {
+  return top === null || rank === '2' || rank === '10' || rank === 'JOKER' || rankOrder.get(rank) >= rankOrder.get(top)
+}
+
+async function finishRound(peersById, initialState) {
+  const peers = [...peersById.values()]
+  let state = initialState
+  let blindPlays = 0
+  for (let step = 0; step < 1100; step++) {
+    if (state.phase === 'gameOver') return { state, blindPlays }
+    assert(['play', 'endgame'].includes(state.phase), `auto-play encountered phase ${state.phase}`)
+    const currentId = state.players[state.currentPlayerIdx].id
+    const peer = peersById.get(currentId)
+    assert(peer, `missing peer for current player ${currentId}`)
+    if (!peer.latestGameState || peer.latestGameState.seq < state.seq) {
+      await peer.waitType('GAME_STATE', message => message.state.seq >= state.seq)
+    }
+    const view = peer.latestGameState
+    const player = view.players.find(candidate => candidate.id === currentId)
+    const zone = player.hand.length ? player.hand : player.faceUp.length ? player.faceUp : player.faceDown
+    const top = effectiveTopRank(view)
+    let play = []
+    if (player.hand.length === 0 && player.faceUp.length === 0) {
+      play = zone.slice(0, 1) // blind alias; worker resolves it server-side
+      blindPlays++
+    } else {
+      const legal = zone.filter(card => canPlayRank(card.rank, top))
+        .sort((a, b) => rankOrder.get(a.rank) - rankOrder.get(b.rank))
+      if (legal.length) play = legal.filter(card => card.rank === legal[0].rank).slice(0, 4)
+    }
+
+    const before = state.seq
+    peer.send(play.length ? { type: 'PLAY', cards: play } : { type: 'PICK_UP' })
+    const updates = await Promise.all(peers.map(candidate => candidate.waitType(
+      'GAME_STATE', message => message.state.seq > before,
+    )))
+    state = updates[0].state
+    await sleep(65) // remain below the per-socket 20 msg/s limit on repeated burns
+  }
+  throw new Error('auto-play did not finish before the engine turn cap')
+}
+
 async function main() {
   // ---- T1: create/join happy path, WELCOME carries version + secret token
   const roomId = await newRoom()
@@ -111,19 +175,19 @@ async function main() {
   let host = await new Peer('host', wsUrl).connect()
   const guest = await new Peer('guest', wsUrl).connect()
 
-  host.send({ type: 'CREATE_ROOM', playerName: 'Host', version: 2 })
+  host.send({ type: 'CREATE_ROOM', playerName: 'Host', version: 3 })
   const hostWelcome = await host.waitType('WELCOME')
-  assert.equal(hostWelcome.version, 2, 'WELCOME must echo protocol version')
+  assert.equal(hostWelcome.version, 3, 'WELCOME must echo protocol version')
   assert.match(hostWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/, 'WELCOME must carry a high-entropy resumeToken')
   const hostId = hostWelcome.playerId
   const hostToken1 = hostWelcome.resumeToken
 
-  guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Guest', version: 2 })
+  guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Guest', version: 3 })
   const guestWelcome = await guest.waitType('WELCOME')
   assert.match(guestWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/)
   assert.notEqual(guestWelcome.resumeToken, hostToken1, 'tokens must be per-player unique')
   const guestId = guestWelcome.playerId
-  ok('T1 create/join: WELCOME carries version=2 and unique per-player resumeToken')
+  ok('T1 create/join: WELCOME carries version=3 and unique per-player resumeToken')
 
   // Token must never leak into broadcasts seen by the other player.
   await host.waitType('ROOM_STATE', m => m.room.players.length === 2)
@@ -134,14 +198,13 @@ async function main() {
 
   // ---- T2: RESUME without a token -> RESUME_FAILED, seat untouched
   const noToken = await new Peer('no-token', wsUrl).connect()
-  noToken.send({ type: 'RESUME_ROOM', playerId: hostId, version: 2 })
-  const fail1 = await noToken.waitType('RESUME_FAILED')
-  assert.equal(fail1.reason, 'invalid_token')
-  ok('T2 RESUME with playerId but NO token -> RESUME_FAILED')
+  noToken.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: '', version: 3 })
+  await noToken.waitType('ERROR', m => /invalid message/i.test(m.message))
+  ok('T2 malformed typed RESUME without a token is rejected')
 
   // ---- T3: stolen playerId + wrong token -> RESUME_FAILED, victim not kicked
   const attacker = await new Peer('attacker', wsUrl).connect()
-  attacker.send({ type: 'RESUME_ROOM', playerId: hostId, resumeToken: 'A'.repeat(43), version: 2 })
+  attacker.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: 'A'.repeat(43), version: 3 })
   const fail2 = await attacker.waitType('RESUME_FAILED')
   assert.equal(fail2.reason, 'invalid_token')
   await sleep(300)
@@ -154,20 +217,20 @@ async function main() {
   await host.close()
   await guest.waitType('ROOM_STATE', m => m.room.players.find(p => p.id === hostId)?.connected === false)
   host = await new Peer('host-resumed', wsUrl).connect()
-  host.send({ type: 'RESUME_ROOM', playerId: hostId, resumeToken: hostToken1, version: 2 })
+  host.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 3 })
   const resumed = await host.waitType('WELCOME')
   assert.equal(resumed.playerId, hostId)
-  assert.equal(resumed.version, 2)
+  assert.equal(resumed.version, 3)
   assert.notEqual(resumed.resumeToken, hostToken1, 'resume must rotate the token')
   const hostToken2 = resumed.resumeToken
   const stale = await new Peer('stale-token', wsUrl).connect()
-  stale.send({ type: 'RESUME_ROOM', playerId: hostId, resumeToken: hostToken1, version: 2 })
+  stale.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostToken1, version: 3 })
   await stale.waitType('RESUME_FAILED')
   ok('T4 resume rotates token; old (rotated-out) token is rejected')
 
   // ---- T5: unknown room -> RESUME_FAILED room_not_found
   const stranger = await new Peer('stranger', `${wsBase}/api/room/ZZZZZ9/ws`).connect()
-  stranger.send({ type: 'RESUME_ROOM', playerId: hostId, resumeToken: hostToken2, version: 2 })
+  stranger.send({ type: 'RESUME_ROOM', roomCode: 'ZZZZZ9', playerId: hostId, resumeToken: hostToken2, version: 3 })
   const fail3 = await stranger.waitType('RESUME_FAILED')
   assert.equal(fail3.reason, 'room_not_found')
   await stranger.close()
@@ -177,20 +240,41 @@ async function main() {
   host.send({ type: 'PING', version: 1 })
   const versionError = await host.waitType('ERROR', m => /protocol version/i.test(m.message))
   assert(versionError, 'expected protocol-version error')
-  host.send({ type: 'PING', version: 2 })
+  host.send({ type: 'PING', version: 3 })
   await host.waitType('PONG')
-  ok('T6 client message with version != 2 rejected with clean error')
+  ok('T6 client message with version != 3 rejected with clean error')
 
   // ---- T7: malformed message rejected
   host.send('this is not json{')
   await host.waitType('ERROR', m => /invalid message/i.test(m.message))
   ok('T7 malformed payload -> ERROR, connection stays open')
 
+  // Rejected/unauthenticated sockets remain physically connected, but must
+  // never become passive spectators of room, chat, or game broadcasts.
+  const unauthenticated = [noToken, attacker, stale]
+  const unauthLogStarts = new Map(unauthenticated.map(peer => [peer, peer.rawLog.length]))
+  host.send({ type: 'CHAT', text: 'authenticated-only' })
+  await guest.waitType('CHAT', message => message.text === 'authenticated-only')
+
+  // ---- T7b: strict partial rules, host authority, rapid merge
+  guest.send({ type: 'SET_RULES', rules: { includeJokers: false } })
+  await guest.waitType('ERROR', isError('NOT_HOST'))
+  host.send({ type: 'SET_RULES', rules: {} })
+  await host.waitType('ERROR', m => /invalid message/i.test(m.message))
+  host.send({ type: 'SET_RULES', rules: { includeJokers: false } })
+  host.send({ type: 'SET_RULES', rules: { winnerSwapsFaceUp: true } })
+  const mergedRules = await host.waitType(
+    'ROOM_STATE',
+    m => m.room.rules.includeJokers === false && m.room.rules.winnerSwapsFaceUp === true,
+  )
+  assert.deepEqual(mergedRules.room.rules, { includeJokers: false, winnerSwapsFaceUp: true })
+  ok('T7b SET_RULES is strict, host-only, and rapid partial toggles merge authoritatively')
+
   // ---- T8: start game; per-viewer masking in GAME_STATE
   host.send({ type: 'START_GAME' })
   await host.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
   const guestRearrange = await guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
-  assert.equal(guestRearrange.version, 2, 'GAME_STATE must echo protocol version')
+  assert.equal(guestRearrange.version, 3, 'GAME_STATE must echo protocol version')
   assert.equal(typeof guestRearrange.state.seq, 'number', 'GAME_STATE must carry seq')
   const guestViewOfHost = guestRearrange.state.players.find(p => p.id === hostId)
   assert(guestViewOfHost.hand.every(c => c.rank === '3' && c.suit === null && c.id.startsWith('hidden:')), 'opponent hand must be masked')
@@ -199,6 +283,22 @@ async function main() {
   // NB: Jokers legitimately have suit null — only the id distinguishes masked cards.
   assert(guestOwn.hand.every(c => !c.id.startsWith('hidden:')), 'own hand must be real')
   ok('T8 GAME_STATE is per-viewer: stock + opponent hand masked, own hand real')
+
+  await sleep(200)
+  for (const peer of unauthenticated) {
+    const broadcastTypes = peer.rawLog.slice(unauthLogStarts.get(peer)).map(raw => JSON.parse(raw).type)
+      .filter(type => ['ROOM_STATE', 'CHAT', 'GAME_STATE'].includes(type))
+    assert.deepEqual(broadcastTypes, [], `${peer.label} received authenticated room traffic`)
+  }
+  ok('T8a rejected and unauthenticated sockets receive no room/chat/game broadcasts')
+
+  host.send({ type: 'SET_RULES', rules: { includeJokers: true } })
+  await host.waitType('ERROR', isError('GAME_IN_PROGRESS'))
+  host.send({ type: 'START_GAME' })
+  await host.waitType('ERROR', isError('GAME_IN_PROGRESS'))
+  host.send({ type: 'PING' })
+  await host.waitType('PONG')
+  ok('T8b active-round rules and duplicate START are nonfatal GAME_IN_PROGRESS errors')
 
   host.send({ type: 'READY' })
   guest.send({ type: 'READY' })
@@ -239,6 +339,74 @@ async function main() {
   assert.equal(current.latestGameState.seq, applied.state.seq, 'duplicate PLAY must not apply twice')
   ok('T11 duplicate identical PLAY does not double-apply (ownership re-check)')
 
+  // ---- T11b-e: finish real rounds to exercise blind aliases + tribute
+  const peersById = new Map([[hostId, host], [guestId, guest]])
+  const firstFinished = await finishRound(peersById, applied.state)
+  const round1 = firstFinished.state
+  assert(firstFinished.blindPlays > 0, 'auto-play must have exercised opaque face-down ids')
+  assert(round1.winnerId && round1.loserId && round1.winnerId !== round1.loserId)
+  ok('T11b opaque owner-only face-down ids remain playable through a complete round')
+
+  host.send({ type: 'START_GAME' })
+  const [hostRematch, guestRematch] = await Promise.all([
+    host.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
+  ])
+  assert.equal(hostRematch.state.rules.winnerSwapsFaceUp, true)
+  host.send({ type: 'READY' })
+  guest.send({ type: 'READY' })
+  const [hostTribute, guestTribute] = await Promise.all([
+    host.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
+  ])
+  assert.deepEqual(hostTribute.state.pendingTribute, { winnerId: round1.winnerId, loserId: round1.loserId })
+
+  const round1WinnerPeer = peersById.get(round1.winnerId)
+  const round1LoserPeer = peersById.get(round1.loserId)
+  round1LoserPeer.send({ type: 'TRIBUTE_SKIP' })
+  await round1LoserPeer.waitType('ERROR', isError('INVALID_MOVE'))
+  round1WinnerPeer.send({ type: 'TRIBUTE_SKIP' })
+  const [hostAfterSkip, guestAfterSkip] = await Promise.all([
+    host.waitType('GAME_STATE', m => m.state.phase === 'play' && m.state.seq > hostTribute.state.seq),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'play' && m.state.seq > guestTribute.state.seq),
+  ])
+  assert.equal(
+    hostAfterSkip.state.players[hostAfterSkip.state.currentPlayerIdx].id,
+    expectedOpenerId(hostAfterSkip.state),
+    'opener must be recomputed from finalized public rows after skip',
+  )
+  ok('T11c tribute skip is winner-only and recomputes the opening player')
+
+  const secondFinished = await finishRound(peersById, hostAfterSkip.state)
+  const round2 = secondFinished.state
+  assert(round2.winnerId && round2.loserId && round2.winnerId !== round2.loserId)
+  host.send({ type: 'START_GAME' })
+  await Promise.all([
+    host.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'rearrange' && m.state.seq === 0),
+  ])
+  host.send({ type: 'READY' })
+  guest.send({ type: 'READY' })
+  const [hostTribute2] = await Promise.all([
+    host.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'tribute'),
+  ])
+  const pending2 = hostTribute2.state.pendingTribute
+  assert.deepEqual(pending2, { winnerId: round2.winnerId, loserId: round2.loserId })
+  const winnerFaceUp = hostTribute2.state.players.find(p => p.id === pending2.winnerId).faceUp[0]
+  const loserFaceUp = hostTribute2.state.players.find(p => p.id === pending2.loserId).faceUp[0]
+  peersById.get(pending2.winnerId).send({
+    type: 'TRIBUTE_SWAP', winnerCardId: winnerFaceUp.id, loserCardId: loserFaceUp.id,
+  })
+  const [afterSwap] = await Promise.all([
+    host.waitType('GAME_STATE', m => m.state.phase === 'play'),
+    guest.waitType('GAME_STATE', m => m.state.phase === 'play'),
+  ])
+  assert(afterSwap.state.players.find(p => p.id === pending2.winnerId).faceUp.some(c => c.id === loserFaceUp.id))
+  assert(afterSwap.state.players.find(p => p.id === pending2.loserId).faceUp.some(c => c.id === winnerFaceUp.id))
+  assert.equal(afterSwap.state.players[afterSwap.state.currentPlayerIdx].id, expectedOpenerId(afterSwap.state))
+  ok('T11d authorized tribute swaps face-up cards only and recomputes opener')
+
   // ---- T12: LEAVE destroys the resume token
   const room2 = await newRoom()
   const ws2 = `${wsBase}/api/room/${room2}/ws`
@@ -248,12 +416,105 @@ async function main() {
   leaver.send({ type: 'LEAVE_ROOM' })
   await sleep(300)
   const reResume = await new Peer('re-resume', ws2).connect()
-  reResume.send({ type: 'RESUME_ROOM', playerId: leaverWelcome.playerId, resumeToken: leaverWelcome.resumeToken })
+  reResume.send({ type: 'RESUME_ROOM', roomCode: room2, playerId: leaverWelcome.playerId, resumeToken: leaverWelcome.resumeToken })
   const leaveFail = await reResume.waitType('RESUME_FAILED')
   assert(['invalid_token', 'not_a_member', 'room_not_found'].includes(leaveFail.reason))
   await leaver.close()
   await reResume.close()
   ok('T12 explicit LEAVE_ROOM destroys the resume token')
+
+  // ---- T12b: offline seats block a fresh start
+  const offlineRoom = await newRoom()
+  const offlineUrl = `${wsBase}/api/room/${offlineRoom}/ws`
+  const offlineHost = await new Peer('offline-host', offlineUrl).connect()
+  const offlineGuest = await new Peer('offline-guest', offlineUrl).connect()
+  offlineHost.send({ type: 'CREATE_ROOM', playerName: 'Online host' })
+  await offlineHost.waitType('WELCOME')
+  offlineGuest.send({ type: 'JOIN_ROOM', code: offlineRoom, playerName: 'Drops' })
+  const offlineGuestWelcome = await offlineGuest.waitType('WELCOME')
+  await offlineHost.waitType('ROOM_STATE', m => m.room.players.length === 2)
+  await offlineGuest.close()
+  await offlineHost.waitType('ROOM_STATE', m => m.room.players.some(p => p.id === offlineGuestWelcome.playerId && !p.connected))
+  offlineHost.send({ type: 'START_GAME' })
+  const offlineStartError = await offlineHost.waitType('ERROR', isError('INVALID_MOVE'))
+  assert.match(offlineStartError.message, /online/i)
+  await offlineHost.close()
+  ok('T12b an offline roster seat blocks start/rematch')
+
+  // ---- T12c: active join refusal, 2P forfeit, then late-join host rollover
+  const lateRoom = await newRoom()
+  const lateUrl = `${wsBase}/api/room/${lateRoom}/ws`
+  const oldHost = await new Peer('old-host', lateUrl).connect()
+  const surrender = await new Peer('surrender', lateUrl).connect()
+  oldHost.send({ type: 'CREATE_ROOM', playerName: 'Old host' })
+  const oldHostWelcome = await oldHost.waitType('WELCOME')
+  surrender.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'Surrender' })
+  const surrenderWelcome = await surrender.waitType('WELCOME')
+  await oldHost.waitType('ROOM_STATE', m => m.room.players.length === 2)
+  oldHost.send({ type: 'START_GAME' })
+  await Promise.all([
+    oldHost.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+    surrender.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+  ])
+
+  const activeJoin = await new Peer('active-join', lateUrl).connect()
+  activeJoin.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'Too soon' })
+  await activeJoin.waitType('ERROR', isError('GAME_IN_PROGRESS'))
+  await activeJoin.close()
+
+  surrender.send({ type: 'LEAVE_ROOM' })
+  const forfeitOver = await oldHost.waitType('GAME_STATE', m => m.state.phase === 'gameOver')
+  assert.equal(forfeitOver.state.winnerId, oldHostWelcome.playerId)
+  assert.equal(forfeitOver.state.loserId, surrenderWelcome.playerId)
+
+  const lateHost = await new Peer('late-host', lateUrl).connect()
+  lateHost.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'New host' })
+  const lateHostWelcome = await lateHost.waitType('WELCOME')
+  const lateGuest = await new Peer('late-guest', lateUrl).connect()
+  lateGuest.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'New guest' })
+  const lateGuestWelcome = await lateGuest.waitType('WELCOME')
+  await lateHost.waitType('ROOM_STATE', m => m.room.players.length === 3)
+  oldHost.send({ type: 'LEAVE_ROOM' })
+  const rolled = await lateHost.waitType('ROOM_STATE', m => m.room.hostId === lateHostWelcome.playerId)
+  assert.deepEqual(
+    new Set(rolled.room.players.map(player => player.id)),
+    new Set([lateHostWelcome.playerId, lateGuestWelcome.playerId]),
+  )
+  lateHost.send({ type: 'START_GAME' })
+  const lateFreshGame = await lateHost.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
+  assert.deepEqual(
+    new Set(lateFreshGame.state.players.map(player => player.id)),
+    new Set([lateHostWelcome.playerId, lateGuestWelcome.playerId]),
+  )
+  assert.equal(lateFreshGame.state.pendingTribute, null)
+  await Promise.all([oldHost.close(), surrender.close(), lateHost.close(), lateGuest.close()])
+  ok('T12c join is gameOver-only; late joiners inherit host and start with the current roster')
+
+  // ---- T12d: 3P surrender before anyone is out must not invent a winner
+  const threeRoom = await newRoom()
+  const threeUrl = `${wsBase}/api/room/${threeRoom}/ws`
+  const threeHost = await new Peer('three-host', threeUrl).connect()
+  const threeB = await new Peer('three-b', threeUrl).connect()
+  const threeC = await new Peer('three-c', threeUrl).connect()
+  threeHost.send({ type: 'CREATE_ROOM', playerName: 'Three host' })
+  await threeHost.waitType('WELCOME')
+  threeB.send({ type: 'JOIN_ROOM', code: threeRoom, playerName: 'Three B' })
+  await threeB.waitType('WELCOME')
+  threeC.send({ type: 'JOIN_ROOM', code: threeRoom, playerName: 'Three C' })
+  const threeCWelcome = await threeC.waitType('WELCOME')
+  await threeHost.waitType('ROOM_STATE', m => m.room.players.length === 3)
+  threeHost.send({ type: 'START_GAME' })
+  await Promise.all([
+    threeHost.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+    threeB.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+    threeC.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+  ])
+  threeC.send({ type: 'LEAVE_ROOM' })
+  const noWinner = await threeHost.waitType('GAME_STATE', m => m.state.phase === 'gameOver')
+  assert.equal(noWinner.state.loserId, threeCWelcome.playerId)
+  assert.equal(noWinner.state.winnerId, null)
+  await Promise.all([threeHost.close(), threeB.close(), threeC.close()])
+  ok('T12d a 3P pre-winner surrender records the loser without fabricating first place')
 
   // ---- T13: per-room socket cap (13th connection rejected)
   const capUrl = `${wsBase}/api/room/CAPCAP/ws`
@@ -313,6 +574,9 @@ async function main() {
   assert.equal(preflight.status, 403, 'preflight with disallowed Origin must be 403')
   const goodPreflight = await fetch(`${baseUrl}/api/room/new`, { method: 'OPTIONS', headers: { Origin: baseUrl } })
   assert.equal(goodPreflight.headers.get('access-control-allow-origin'), baseUrl)
+  assert.equal((await fetch(`${baseUrl}/api`)).status, 404, 'exact /api must not receive the SPA shell')
+  assert.equal((await fetch(`${baseUrl}/assets`)).status, 404, 'exact /assets must not receive the SPA shell')
+  assert.equal((await fetch(`${baseUrl}/assets/missing.js`)).status, 404, 'missing assets must not receive the SPA shell')
   ok('T17 security headers on /, /assets/*, /api/*; no ACAO *, bad Origin -> 403')
 
   // ---- T18: direct CREATE_ROOM without a prior /api/room/new claim is refused
