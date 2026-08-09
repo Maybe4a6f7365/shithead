@@ -33,7 +33,7 @@ async function waitForDeployment() {
         const version = JSON.parse(text)
         if (!expectedCommit || version.commit === expectedCommit) {
           assert.equal(version.service, 'shithead-multiplayer')
-          assert.equal(version.protocol, 2)
+          assert.equal(version.protocol, 3)
           log(`deployed commit ${version.commit}`)
           return version
         }
@@ -154,8 +154,73 @@ function connected(room, playerId) {
   return room.players.find(player => player.id === playerId)?.connected
 }
 
+// Static-asset / UI-freshness assertions. This is the blind spot that let a
+// frozen (stale) UI bundle and a missing service worker ship while the
+// protocol tests below stayed green.
+async function verifyStaticAssets() {
+  const htmlResponse = await request('/', {
+    cache: 'no-store',
+    headers: { Accept: 'text/html' },
+  })
+  assert.equal(htmlResponse.status, 200, 'GET / did not return 200')
+  const html = await htmlResponse.text()
+
+  // 1. UI freshness: the deployed HTML must carry the build commit stamped by
+  //    scripts/write-build-meta.mjs, and it must match the commit under test.
+  const commitMeta = html.match(/<meta name="build-commit" content="([^"]+)"/)
+  assert(commitMeta, 'index.html is missing the build-commit meta tag (stale artifact?)')
+  if (expectedCommit) {
+    assert.equal(
+      commitMeta[1],
+      expectedCommit,
+      `deployed UI is stale: HTML was built from ${commitMeta[1]}, expected ${expectedCommit}`,
+    )
+  }
+
+  // 2. The HTML must reference a freshly built hashed bundle that serves 200
+  //    and contains a marker string from the current client source.
+  const scriptMatch = html.match(/src="(\/assets\/index-[A-Za-z0-9_-]+\.js)"/)
+  assert(scriptMatch, 'index.html does not reference a hashed /assets/index-*.js bundle')
+  const bundleResponse = await request(scriptMatch[1], { headers: { Accept: '*/*' } })
+  assert.equal(bundleResponse.status, 200, `${scriptMatch[1]} did not return 200`)
+  const bundle = await bundleResponse.text()
+  assert(
+    bundle.includes('CREATE_ROOM'),
+    'deployed bundle is missing the CREATE_ROOM source marker — the UI is stale',
+  )
+  log(`UI bundle ${scriptMatch[1]} is fresh (build commit ${commitMeta[1]})`)
+
+  // 3. The service worker must serve as JavaScript (not the HTML fallback).
+  const swResponse = await request('/sw.js', { headers: { Accept: '*/*' } })
+  assert.equal(swResponse.status, 200, '/sw.js did not return 200')
+  assert.match(
+    swResponse.headers.get('content-type') || '',
+    /javascript/,
+    '/sw.js is not served with a JavaScript content-type',
+  )
+  log('service worker /sw.js is served')
+
+  // 4. Every icon referenced by the web app manifest must exist.
+  const manifestResponse = await request('/manifest.webmanifest', { cache: 'no-store' })
+  assert.equal(manifestResponse.status, 200, '/manifest.webmanifest did not return 200')
+  const manifest = await manifestResponse.json()
+  assert(Array.isArray(manifest.icons) && manifest.icons.length > 0, 'manifest has no icons')
+  for (const icon of manifest.icons) {
+    const iconPath = `/${String(icon.src).replace(/^\//, '')}`
+    const iconResponse = await request(iconPath, { headers: { Accept: 'image/*' } })
+    assert.equal(iconResponse.status, 200, `manifest icon ${iconPath} did not return 200`)
+    assert.match(
+      iconResponse.headers.get('content-type') || '',
+      /^image\//,
+      `manifest icon ${iconPath} is not served as an image`,
+    )
+  }
+  log(`all ${manifest.icons.length} manifest icons are served`)
+}
+
 async function run() {
   await waitForDeployment()
+  await verifyStaticAssets()
 
   const health = await request('/api/health', { cache: 'no-store' })
   assert.equal(health.status, 200)
@@ -173,6 +238,7 @@ async function run() {
 
   host.send({ type: 'CREATE_ROOM', playerName: 'Smoke Host' })
   const hostWelcome = await host.waitType('WELCOME')
+  assert.equal(hostWelcome.version, 3)
   assert.equal(hostWelcome.room.code, roomId)
   assert.equal(hostWelcome.room.hostId, hostWelcome.playerId)
   const hostId = hostWelcome.playerId
@@ -192,9 +258,11 @@ async function run() {
   assert.equal(connected(hostOffline.room, guestId), true)
 
   host = await new Peer('host-resumed', wsUrl).connect()
-  host.send({ type: 'RESUME_ROOM', playerId: hostId })
+  assert(hostWelcome.resumeToken, 'WELCOME is missing the secret resumeToken')
+  host.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostWelcome.resumeToken })
   const resumedWelcome = await host.waitType('WELCOME')
   assert.equal(resumedWelcome.playerId, hostId)
+  assert(resumedWelcome.resumeToken, 'resume did not rotate the resumeToken')
   const hostOnline = await guest.waitType('ROOM_STATE', message => connected(message.room, hostId) === true)
   assert.equal(hostOnline.room.hostId, hostId)
   log('host session resumed without duplicating the player')
@@ -231,12 +299,21 @@ async function run() {
   const currentId = currentState.players[currentState.currentPlayerIdx].id
   const currentPeer = currentId === hostId ? host : guest
   const previousTurn = currentPeer.latestGameState.turnCount
-  currentPeer.send({ type: 'PICK_UP' })
+  const myId = currentId
+  const myState = currentPeer.latestGameState
+  const me = myState.players.find(player => player.id === myId)
+  assert(me && me.hand.length > 0, 'current player has no hand cards to play')
+  // avoid a burn: it keeps the lead with the same player and would break the
+  // turn-advance assertion below (both 10 and Joker clear the pile).
+  const candidate = me.hand.find(card => card.rank !== '10' && card.rank !== 'JOKER') ?? me.hand[0]
+  currentPeer.send({ type: 'PLAY', cards: [candidate] })
 
   const hostAdvanced = await host.waitType('GAME_STATE', message => message.state.turnCount > previousTurn)
   const guestAdvanced = await guest.waitType('GAME_STATE', message => message.state.turnCount > previousTurn)
   assert.equal(hostAdvanced.state.turnCount, guestAdvanced.state.turnCount)
-  assert.notEqual(hostAdvanced.state.currentPlayerIdx, currentState.currentPlayerIdx)
+  if (candidate.rank !== '10' && candidate.rank !== 'JOKER') {
+    assert.notEqual(hostAdvanced.state.currentPlayerIdx, currentState.currentPlayerIdx)
+  }
   log('game mutation propagated to both players')
 
   await Promise.all([host.close(), guest.close()])

@@ -1,8 +1,10 @@
 // ============================================================================
-// WebSocket client — typed wrapper for the multiplayer protocol
+// WebSocket client — typed wrapper for the multiplayer protocol.
+// Reconnect truthfulness (§4.6, Appendix A.10): the client reports every
+// attempt with a real counter, and when it gives up it says so — the UI can
+// then turn the badge into a retry button instead of lying "reconnecting…".
 // ============================================================================
-import type { ClientMsg, ServerMsg } from '../engine/protocol'
-import { isClientMsg } from '../engine/protocol'
+import { PROTOCOL_VERSION, type ClientMsg, type ServerMsg } from '../engine/protocol'
 
 export interface RoomClientOptions {
   url: string                  // ws://... or wss://...
@@ -10,6 +12,10 @@ export interface RoomClientOptions {
   onOpen?: () => void
   onClose?: (event: CloseEvent) => void
   onError?: (err: Event) => void
+  /** Fired before each scheduled retry with the real attempt counter. */
+  onReconnecting?: (attempt: number, maxAttempts: number) => void
+  /** Fired once when all attempts are exhausted. Never reconnects after. */
+  onGiveUp?: () => void
   reconnectDelayMs?: number
   maxReconnectAttempts?: number
 }
@@ -19,6 +25,8 @@ export class RoomClient {
   private opts: Required<RoomClientOptions>
   private reconnectAttempts = 0
   private closed = false
+  private gaveUp = false
+  private authenticated = false
   private queue: ClientMsg[] = []
 
   constructor(opts: RoomClientOptions) {
@@ -28,13 +36,15 @@ export class RoomClient {
       onOpen: () => {},
       onClose: () => {},
       onError: () => {},
+      onReconnecting: () => {},
+      onGiveUp: () => {},
       ...opts,
     }
     this.connect()
   }
 
   private connect() {
-    if (this.closed) return
+    if (this.closed || this.gaveUp) return
     try {
       this.ws = new WebSocket(this.opts.url)
     } catch (err) {
@@ -45,10 +55,12 @@ export class RoomClient {
 
     this.ws.addEventListener('open', () => {
       this.reconnectAttempts = 0
-      // Flush queued messages
-      for (const msg of this.queue) this.send(msg)
-      this.queue = []
+      this.authenticated = false
+      // The hook sends CREATE/JOIN/RESUME here. It must be the first frame on
+      // every connection; gameplay queued while offline is flushed only once
+      // WELCOME proves that the socket has reclaimed its seat.
       this.opts.onOpen()
+      this.flushPreAuthLeave()
     })
 
     this.ws.addEventListener('message', (ev) => {
@@ -57,12 +69,13 @@ export class RoomClient {
         if (typeof data === 'object' && data !== null && 'type' in data) {
           this.opts.onMessage(data as ServerMsg)
         }
-      } catch (e) {
+      } catch {
         // ignore parse errors
       }
     })
 
     this.ws.addEventListener('close', (ev) => {
+      this.authenticated = false
       this.opts.onClose(ev)
       if (!this.closed) this.scheduleReconnect()
     })
@@ -73,20 +86,72 @@ export class RoomClient {
   }
 
   private scheduleReconnect() {
-    if (this.closed) return
-    if (this.reconnectAttempts >= this.opts.maxReconnectAttempts) return
+    if (this.closed || this.gaveUp) return
+    if (this.reconnectAttempts >= this.opts.maxReconnectAttempts) {
+      this.gaveUp = true
+      this.opts.onGiveUp()
+      return
+    }
     this.reconnectAttempts++
+    this.opts.onReconnecting(this.reconnectAttempts, this.opts.maxReconnectAttempts)
     const delay = this.opts.reconnectDelayMs * Math.min(this.reconnectAttempts, 5)
     setTimeout(() => this.connect(), delay)
   }
 
+  /** Manual retry after give-up (the badge-as-button path, §4.6). */
+  retry() {
+    if (this.closed) return
+    this.gaveUp = false
+    this.reconnectAttempts = 0
+    this.connect()
+  }
+
+  hasGivenUp(): boolean {
+    return this.gaveUp
+  }
+
   send(msg: ClientMsg) {
+    const stamped = { ...msg, version: PROTOCOL_VERSION } as ClientMsg
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg))
+      if (this.isAuthentication(stamped) || stamped.type === 'LEAVE_ROOM' || this.authenticated) {
+        this.ws.send(JSON.stringify(stamped))
+      } else {
+        this.queue.push(stamped)
+      }
     } else {
-      // Queue for after reconnect
-      this.queue.push(msg)
+      // The lifecycle owner re-sends fresh authentication from onOpen. Never
+      // retain an offline auth frame: a queued RESUME would carry the token
+      // that WELCOME just rotated and could invalidate the recovered session.
+      if (!this.isAuthentication(stamped)) this.queue.push(stamped)
     }
+  }
+
+  /** Called after WELCOME: queued gameplay is now safe to send. */
+  markAuthenticated() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    this.authenticated = true
+    const queued = this.queue
+    this.queue = []
+    for (const msg of queued) this.ws.send(JSON.stringify({ ...msg, version: PROTOCOL_VERSION }))
+  }
+
+  private isAuthentication(msg: ClientMsg): boolean {
+    return msg.type === 'CREATE_ROOM' || msg.type === 'JOIN_ROOM' || msg.type === 'RESUME_ROOM'
+  }
+
+  /**
+   * Cancel may happen after the socket opened but before WELCOME. Send only
+   * the terminal LEAVE at that point: TCP ordering keeps JOIN -> LEAVE, while
+   * PLAY and other queued actions still wait for authentication.
+   */
+  private flushPreAuthLeave() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    const remaining: ClientMsg[] = []
+    for (const msg of this.queue) {
+      if (msg.type === 'LEAVE_ROOM') this.ws.send(JSON.stringify({ ...msg, version: PROTOCOL_VERSION }))
+      else remaining.push(msg)
+    }
+    this.queue = remaining
   }
 
   close() {

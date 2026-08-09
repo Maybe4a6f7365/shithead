@@ -26,11 +26,42 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            package-lock.json
+      - name: Use current npm
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - run: npm ci
       - run: npm test
       - run: npm run typecheck:worker
       - run: npm run build
+      - name: Install WebSocket adversarial-test client
+        run: npm install --no-save --no-package-lock ws@8
+      - name: Exercise the local Worker adversarially
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          npm run worker:dev -- --port 8787 > "$RUNNER_TEMP/wrangler.log" 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..80}; do
+            if curl --fail --silent http://127.0.0.1:8787/api/health > /dev/null; then
+              if ! BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial; then
+                cat "$RUNNER_TEMP/wrangler.log"
+                exit 1
+              fi
+              exit 0
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/wrangler.log"
+              exit 1
+            fi
+            sleep 0.25
+          done
+
+          cat "$RUNNER_TEMP/wrangler.log"
+          exit 1
 
   production-smoke:
     name: Verify deployed multiplayer
@@ -47,7 +78,11 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            package-lock.json
+      - name: Use current npm
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - run: npm ci
       - name: Install WebSocket smoke-test client
         run: npm install --no-save --no-package-lock ws@8

@@ -1,50 +1,297 @@
-import { useEffect, useState } from 'react'
+// ============================================================================
+// MultiplayerGameTable — every MP screen on top of useMultiplayerRoom:
+// connecting / waiting room / rearrange / table / game-over, plus the
+// full-screen connection states of §4.6. The table itself is the SAME
+// TableScreen as single-player (§9 convergence): face-down endgame cards,
+// masked stock (count only), BLIND_REVEAL via the log, seq-guarded states.
+// ============================================================================
+import { useEffect, useRef, useState } from 'react'
 import { useMultiplayerRoom } from '../net/useMultiplayerRoom'
-import type { GameState } from '../engine'
-import { canPlay, getCurrentPlayer, getTopCard, pileSize } from '../engine'
-import { Card as CardView } from './Card'
+import { ConnectionBadge, type BadgeStatus } from './ConnectionBadge'
+import { WaitingRoom } from './WaitingRoom'
+import { RearrangeScreen } from './RearrangeScreen'
+import { TableScreen } from './TableScreen'
+import { GameOverOverlay } from './GameOverOverlay'
+import { RulesSheet } from './RulesSheet'
+import { TributeScreen } from './TributeScreen'
 
-interface Props { roomId: string; onLeave: () => void }
+export interface MultiplayerGameTableProps {
+  roomId: string
+  playerName: string
+  intent: 'create' | 'join'
+  onLeave: () => void
+}
 
-export function MultiplayerGameTable({ roomId, onLeave }: Props) {
-  const { status, room, gameState, error, playerId, send } = useMultiplayerRoom(roomId)
-  const [playerName] = useState(() => sessionStorage.getItem(`shithead:name:${roomId}`) ?? 'Player')
+export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
+  const {
+    status, attempt, maxAttempts, room, gameState, playerId,
+    error, notice, send, retry, tryAgain, leave,
+  } = useMultiplayerRoom({ roomId, playerName, intent })
+
+  const [rulesOpen, setRulesOpen] = useState(false)
+  const [soundOn, setSoundOn] = useState(() => localStorage.getItem('shithead:sound') !== 'off')
+  const [iAmReady, setIAmReady] = useState(false)
+  const [rematchPending, setRematchPending] = useState(false)
+  const rematchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const phase = gameState?.phase
+
+  // READY state resets whenever a (new) rearrange phase begins.
+  useEffect(() => {
+    if (phase === 'rearrange') setIAmReady(false)
+  }, [phase])
 
   useEffect(() => {
-    if (status !== 'connected') return
+    if (phase !== 'gameOver' || notice) setRematchPending(false)
+  }, [phase, notice])
 
-    const savedPlayerId = sessionStorage.getItem(`shithead:player:${roomId}`)
-    if (savedPlayerId) {
-      send({ type: 'RESUME_ROOM', playerId: savedPlayerId })
-      return
-    }
+  useEffect(() => () => {
+    if (rematchTimer.current) clearTimeout(rematchTimer.current)
+  }, [])
 
-    const intent = sessionStorage.getItem(`shithead:intent:${roomId}`) ?? 'create'
-    send(intent === 'join'
-      ? { type: 'JOIN_ROOM', code: roomId, playerName }
-      : { type: 'CREATE_ROOM', playerName })
-  }, [status, roomId, playerName, send])
+  const toggleSound = () => {
+    setSoundOn(on => {
+      localStorage.setItem('shithead:sound', on ? 'off' : 'on')
+      return !on
+    })
+  }
 
-  const leave = () => {
-    send({ type: 'LEAVE_ROOM' })
-    sessionStorage.removeItem(`shithead:player:${roomId}`)
-    sessionStorage.removeItem(`shithead:intent:${roomId}`)
-    sessionStorage.removeItem(`shithead:name:${roomId}`)
+  const quit = () => {
+    // A socket that is already offline cannot confirm a leave. Returning to
+    // the menu keeps resume credentials, matching the "seat kept" promise.
+    if (status === 'connected' || status === 'restored' || status === 'reconnecting') leave()
     onLeave()
   }
 
-  if (status === 'connecting' || status === 'idle') return <Loading message="Connecting to room…" />
-  if (status === 'error' || status === 'disconnected') return <Shell><h2 className="text-xl font-black text-[#a23a1e]">Connection lost</h2><p className="my-3 text-sm">{error ?? 'Reconnecting…'}</p><button onClick={leave}>Leave</button></Shell>
-  if (!room || !playerId) return <Loading message="Joining room…" />
-  if (room.phase === 'waiting') return <Shell><div className="text-xs uppercase opacity-50">Room Code</div><div className="text-5xl font-mono font-black text-[#a23a1e] tracking-widest my-2">{room.code}</div><p className="text-xs opacity-60 mb-4">Share this code with friends</p><div className="space-y-2 mb-4">{room.players.map(p => <div key={p.id} className="flex justify-between p-3 bg-[#2d4a2b]/10 rounded-lg"><b>{p.name}{p.id === playerId ? ' (you)' : ''}</b><span className="text-xs">{p.connected ? 'CONNECTED' : 'OFFLINE'}</span></div>)}</div>{playerId === room.hostId ? <button onClick={() => send({ type: 'START_GAME' })} disabled={room.players.length < 2} className="w-full py-3 rounded-xl bg-[#a23a1e] text-white font-black disabled:opacity-50">{room.players.length < 2 ? 'WAITING FOR PLAYERS…' : 'START GAME'}</button> : <p>Waiting for host to start…</p>}<button onClick={leave} className="mt-4 text-xs">← Leave room</button></Shell>
-  if (!gameState) return <Loading message="Loading game…" />
-  if (gameState.phase === 'rearrange') return <Rearrange state={gameState} id={playerId} swap={(h, u) => send({ type: 'REARRANGE', handIdx: h, upIdx: u })} ready={() => send({ type: 'READY' })} />
-  if (gameState.phase === 'gameOver') { const loser = gameState.players.find(p => p.id === gameState.loserId); return <Shell><div className="text-6xl">🤡</div><h2 className="text-2xl font-bold">{loser?.name}</h2><h1 className="text-5xl font-black text-[#a23a1e]">SHITHEAD</h1><button onClick={leave} className="mt-4">LEAVE</button></Shell> }
+  const requestRematch = () => {
+    if (rematchPending) return
+    setRematchPending(true)
+    send({ type: 'START_GAME' })
+    if (rematchTimer.current) clearTimeout(rematchTimer.current)
+    rematchTimer.current = setTimeout(() => setRematchPending(false), 3000)
+  }
 
-  const cur = getCurrentPlayer(gameState), top = getTopCard(gameState), ps = pileSize(gameState), me = gameState.players.find(p => p.id === playerId), turn = cur?.id === playerId
-  return <div className="min-h-screen bg-[#2d4a2b] flex flex-col p-3 max-w-lg mx-auto text-[#faf8f3]"><div className="flex justify-between text-xs"><span>Stock: {gameState.stock.length} · Pile: {ps}</span><span>{room.code}</span></div><div className="grid grid-cols-4 gap-1 my-3">{gameState.players.filter(p => p.id !== playerId).map(p => <div key={p.id} className={`p-2 rounded text-center text-xs ${p.id === cur?.id ? 'bg-[#a23a1e]' : 'bg-white/10'}`}>{p.name}<br />H{p.hand.length} U{p.faceUp.length} D{p.faceDown.length}</div>)}</div><div className="flex-1 flex items-center justify-center gap-8"><div><div className="text-xs text-center">PILE</div>{top ? <CardView card={top} size="md" /> : <CardView faceDown size="md" />}</div></div><div className="bg-white/5 rounded-2xl p-3"><div className="flex justify-between"><b>{me?.name}</b><span className="text-xs">{turn ? 'YOUR TURN' : cur ? `${cur.name}'s turn` : ''}</span></div><div className="flex justify-center gap-2 flex-wrap my-2">{me?.hand.map(c => { const ok = turn && canPlay(c, top?.rank ?? null); return <CardView key={c.id} card={c} size="md" playable={ok} onClick={() => ok && send({ type: 'PLAY', cards: [c] })} /> })}</div>{me?.hand.length === 0 && <div className="flex justify-center gap-2 flex-wrap">{me.faceUp.map(c => { const ok = turn && canPlay(c, top?.rank ?? null); return <CardView key={c.id} card={c} size="md" playable={ok} onClick={() => ok && send({ type: 'PLAY', cards: [c] })} /> })}</div>}{turn && <button onClick={() => send({ type: 'PICK_UP' })} disabled={!ps} className="w-full mt-2 py-2 bg-[#a23a1e] rounded disabled:opacity-30">PICK UP {ps ? `(${ps})` : ''}</button>}</div><button onClick={leave} className="mt-3 text-xs opacity-50">Leave</button></div>
+  // ---- Full-screen connection states (§4.6) ----
+  if (error) {
+    return (
+      <StatePanel
+        title={
+          error.kind === 'invalid-room' ? 'Room not found'
+          : error.kind === 'room-full' ? 'Room is full'
+          : error.kind === 'session-expired' ? 'Session expired'
+          : 'Something went wrong'
+        }
+        copy={
+          error.kind === 'invalid-room' ? 'Check the code and try again.'
+          : error.kind === 'room-full' ? 'This room already has all its players.'
+          : error.kind === 'session-expired' ? 'This game has moved on.'
+          : "It's us, not you."
+        }
+        actions={
+          error.kind === 'invalid-room'
+            ? <><PrimaryBtn onClick={tryAgain}>Try again</PrimaryBtn><GhostBtn onClick={quit}>Menu</GhostBtn></>
+          : error.kind === 'server-error'
+            ? <><PrimaryBtn onClick={tryAgain}>Retry</PrimaryBtn><GhostBtn onClick={quit}>Menu</GhostBtn></>
+            : <GhostBtn onClick={quit}>Menu</GhostBtn>
+        }
+      />
+    )
+  }
+
+  const badgeStatus: BadgeStatus =
+    status === 'offline' ? 'offline'
+    : status === 'reconnecting' ? 'reconnecting'
+    : status === 'restored' ? 'restored'
+    : status === 'connected' ? 'connected'
+    : 'connecting'
+
+  const badge = (
+    <ConnectionBadge status={badgeStatus} attempt={attempt} maxAttempts={maxAttempts} onRetry={retry} />
+  )
+
+  if (status === 'idle' || status === 'connecting' || status === 'offline' || !room || !playerId) {
+    return (
+      <div className="app-viewport bg-felt text-cream flex flex-col p-s4">
+        <div>{badge}</div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          {status === 'offline' ? (
+            <>
+              <h1 className="font-display text-title font-semibold">Connection lost</h1>
+              <p className="text-body text-cream-dim mt-s2">The room went quiet. Your seat is kept for a while.</p>
+              <div className="mt-s5 flex flex-col gap-s2 w-full max-w-[280px]">
+                <PrimaryBtn onClick={retry}>Retry</PrimaryBtn>
+                <GhostBtn onClick={quit}>Menu · seat kept</GhostBtn>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-body text-cream-dim">Joining room…</p>
+              <div className="mt-s5 w-full max-w-[280px]">
+                <GhostBtn onClick={quit}>Cancel</GhostBtn>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Waiting room (host branch driven by room.hostId === playerId) ----
+  if (room.phase === 'waiting') {
+    return (
+      <WaitingRoom
+        room={room}
+        myPlayerId={playerId}
+        onStart={() => send({ type: 'START_GAME' })}
+        onRulesChange={rules => send({ type: 'SET_RULES', rules })}
+        onLeave={quit}
+      />
+    )
+  }
+
+  if (!gameState) {
+    return (
+      <div className="app-viewport bg-felt text-cream flex flex-col p-s4">
+        <div>{badge}</div>
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-body text-cream-dim">Dealing…</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Rearrange ----
+  if (gameState.phase === 'rearrange') {
+    const me = gameState.players.find(p => p.id === playerId)
+    if (!me) {
+      return (
+        <StatePanel title="Game in progress" copy="You joined after this round was dealt, so you cannot play in the current game." actions={<GhostBtn onClick={quit}>Leave</GhostBtn>} />
+      )
+    }
+    return (
+      <RearrangeScreen
+        player={me}
+        waitingForOthers={iAmReady}
+        onSwap={(h, u) => send({ type: 'REARRANGE', handIdx: h, upIdx: u })}
+        onReady={() => { send({ type: 'READY' }); setIAmReady(true) }}
+      />
+    )
+  }
+
+  if (gameState.phase === 'tribute' && gameState.pendingTribute) {
+    const winner = gameState.players.find(player => player.id === gameState.pendingTribute?.winnerId)
+    const lastPlace = gameState.players.find(player => player.id === gameState.pendingTribute?.loserId)
+    if (winner && lastPlace) {
+      return (
+        <TributeScreen
+          winner={winner}
+          loser={lastPlace}
+          viewerId={playerId}
+          error={notice}
+          onSwap={(winnerCardId, loserCardId) => send({ type: 'TRIBUTE_SWAP', winnerCardId, loserCardId })}
+          onSkip={() => send({ type: 'TRIBUTE_SKIP' })}
+        />
+      )
+    }
+  }
+
+  const me = gameState.players.find(p => p.id === playerId)
+  if (!me) {
+    if (gameState.phase === 'gameOver') {
+      return (
+        <WaitingRoom
+          room={{ ...room, phase: 'waiting' }}
+          myPlayerId={playerId}
+          heading="Next round"
+          onStart={() => send({ type: 'START_GAME' })}
+          onRulesChange={rules => send({ type: 'SET_RULES', rules })}
+          onLeave={quit}
+        />
+      )
+    }
+    // Late joiner mid-match: state the current limitation, not a promise
+    // about a future seat the server has not dealt yet.
+    return (
+      <StatePanel title="Game in progress" copy="You joined after this round was dealt, so you cannot play in the current game." actions={<GhostBtn onClick={quit}>Leave</GhostBtn>} />
+    )
+  }
+
+  const isHost = room.hostId === playerId
+  const loser = gameState.players.find(p => p.id === gameState.loserId)
+  const offlineSeats = new Set(room.players.filter(p => !p.connected).map(p => p.id))
+  const everyoneOnline = room.players.every(player => player.connected)
+
+  return (
+    <>
+      <TableScreen
+        state={gameState}
+        viewerId={playerId}
+        viewerActive={gameState.players[gameState.currentPlayerIdx]?.id === playerId && gameState.phase !== 'gameOver'}
+        error={notice}
+        onPlay={cards => send({ type: 'PLAY', cards })}
+        onPickUp={() => send({ type: 'PICK_UP' })}
+        onLeave={quit}
+        onOpenRules={() => setRulesOpen(true)}
+        soundOn={soundOn}
+        onToggleSound={toggleSound}
+        connectionBadge={badge}
+        seatOffline={id => offlineSeats.has(id)}
+      />
+
+      {gameState.phase === 'gameOver' && (
+        <GameOverOverlay
+          result={!loser ? 'neutral' : gameState.loserId === playerId ? 'lose' : 'win'}
+          shitheadName={loser?.name}
+          canRematch={isHost && everyoneOnline}
+          waitingForHost={!isHost || !everyoneOnline}
+          waitingCopy={isHost ? 'Waiting for everyone to reconnect…' : 'Waiting for host…'}
+          onRematch={isHost && everyoneOnline ? requestRematch : undefined}
+          rematchPending={rematchPending}
+          onLeave={quit}
+          rules={room.rules ?? gameState.rules}
+          rulesEditable={isHost}
+          onRulesChange={isHost ? rules => send({ type: 'SET_RULES', rules }) : undefined}
+        />
+      )}
+
+      <RulesSheet open={rulesOpen} onClose={() => setRulesOpen(false)} />
+    </>
+  )
 }
 
-function Shell({ children }: { children: React.ReactNode }) { return <div className="min-h-screen bg-[#2d4a2b] flex items-center justify-center p-4"><div className="max-w-md w-full bg-[#faf8f3] rounded-2xl p-6 text-center text-[#1a1a1a]">{children}</div></div> }
-function Loading({ message }: { message: string }) { return <div className="min-h-screen bg-[#2d4a2b] flex items-center justify-center text-[#faf8f3]"><div className="text-center"><div className="text-4xl animate-pulse">♠</div><p>{message}</p></div></div> }
-function Rearrange({ state, id, swap, ready }: { state: GameState; id: string; swap: (h: number, u: number) => void; ready: () => void }) { const me = state.players.find(p => p.id === id), [sel, setSel] = useState<number | null>(null); if (!me) return <Loading message="Joining…" />; return <div className="min-h-screen bg-[#2d4a2b] p-4 text-white"><h2 className="text-center font-bold mb-3">Choose your face-up cards</h2><div className="flex justify-center gap-2 mb-4">{me.faceUp.map((c, i) => <CardView key={c.id} card={c} size="md" playable={sel !== null} onClick={() => { if (sel !== null) { swap(sel, i); setSel(null) } }} />)}</div><div className="flex justify-center gap-2 flex-wrap">{me.hand.map((c, i) => <CardView key={c.id} card={c} size="md" selected={sel === i} onClick={() => setSel(i)} />)}</div><button onClick={ready} className="mt-6 w-full py-4 bg-[#a23a1e] rounded-xl font-black">READY TO PLAY →</button></div> }
+// ---------- shared bits ----------
+
+function StatePanel({ title, copy, actions }: { title: string; copy: string; actions: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-scrim bg-scrim flex items-center justify-center p-s4" role="alertdialog" aria-label={title}>
+      <div className="w-full max-w-[320px] bg-cream text-ink rounded-button p-s5 text-center">
+        <h1 className="font-display text-title font-semibold">{title}</h1>
+        <p className="text-body text-ink-soft mt-s2">{copy}</p>
+        <div className="mt-s5 flex flex-col gap-s2">{actions}</div>
+      </div>
+    </div>
+  )
+}
+
+function PrimaryBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+    >
+      {children}
+    </button>
+  )
+}
+
+function GhostBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full min-h-[48px] rounded-button text-button font-bold tracking-button uppercase text-burgundy"
+    >
+      {children}
+    </button>
+  )
+}

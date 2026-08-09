@@ -1,12 +1,25 @@
-import type { Card, GameState, Player } from '../engine'
-import { initGame, pickUpPile, playCards, rearrange, startPlay } from '../engine'
+import type { Card, GameRules, GameState, Player, PreviousRoundResult } from '../engine'
+import {
+  DEFAULT_GAME_RULES,
+  exchangeFaceUpCards,
+  initGame,
+  pickUpPile,
+  playCards,
+  rearrange,
+  skipTribute,
+  startPlay,
+} from '../engine'
 import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
-import { isClientMsg, serializeGameState, toPlayerSummary } from '../engine/protocol'
+import { isClientMsg, PROTOCOL_VERSION, serializeGameState, toPlayerSummary } from '../engine/protocol'
 import { BUILD_COMMIT } from './build-meta'
+import { applyPlayerForfeit } from './forfeit'
+import { normalizePersistedGameState } from './migrateState'
 
 interface Env {
   ROOM: DurableObjectNamespace
   ASSETS: Fetcher
+  /** Optional comma-separated extra allowed Origins (exact matches). */
+  ALLOWED_ORIGINS?: string
 }
 
 interface Session {
@@ -16,36 +29,80 @@ interface Session {
 }
 
 interface RoomData {
-  version: 1
+  version: 2
   code: string
   hostId: string
   maxPlayers: number
   players: Player[]
   state: GameState | null
+  rules: GameRules
   readyPlayerIds: string[]
+  /** playerId -> SHA-256 hex hash of the current resume token (secret). */
+  resumeTokens: Record<string, string>
   createdAt: number
   lastActivity: number
 }
 
-type StoredRoomData = Omit<RoomData, 'version' | 'readyPlayerIds' | 'lastActivity'> & {
-  version?: 1
+type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'state'> & {
+  version?: 1 | 2
+  state: GameState | null
+  rules?: Partial<GameRules>
   readyPlayerIds?: string[]
   lastActivity?: number
+  resumeTokens?: Record<string, string>
 }
+
+type OutMsg = ServerMsg
 
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_MESSAGES_PER_SECOND = 20
+const MAX_MESSAGE_CHARS = 16 * 1024 // per-socket WS message cap; oversize -> close 1009
+const MAX_SOCKETS_PER_ROOM = 12 // 5 players + spectator/duplicate-tab allowance
 const ROOM_CODE_RE = /^[A-Z0-9]{6}$/
-const EXTRA_ALLOWED_ORIGINS = new Set([
-  'https://shithead.pages.dev',
-  'https://shithead.maybe4a6f7365.workers.dev',
-  'http://localhost:5173',
-  'http://localhost:8787',
-])
+const CLAIM_TTL_MS = 2 * 60 * 1000 // room-code reservation validity
 
-function isAllowedOrigin(origin: string | null, requestUrl: string): boolean {
+// Room-creation abuse limits (per isolate, best effort — see module comment).
+const ROOM_CREATE_MAX_PER_MINUTE = 10
+const ROOM_CREATE_WINDOW_MS = 60_000
+const ACTIVE_ROOMS_PER_IP_MAX = 30
+
+const DEFAULT_DEV_ORIGINS = ['http://localhost:5173', 'http://localhost:8787']
+
+function parseAllowedOrigins(env: Env): Set<string> {
+  const configured = env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(Boolean)
+  return new Set(configured && configured.length > 0 ? configured : DEFAULT_DEV_ORIGINS)
+}
+
+function isAllowedOrigin(origin: string | null, requestUrl: string, extra: Set<string>): boolean {
   if (!origin) return false
-  return origin === new URL(requestUrl).origin || EXTRA_ALLOWED_ORIGINS.has(origin)
+  return origin === new URL(requestUrl).origin || extra.has(origin)
+}
+
+/** Structured server-side log (observability enabled in wrangler.toml). */
+function logEvent(event: string, fields: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ level: 'info', event, ts: Date.now(), ...fields }))
+}
+
+// ---------- Resume tokens ----------
+
+function generateResumeToken(): string {
+  const bytes = new Uint8Array(32) // 256 bits of entropy
+  crypto.getRandomValues(bytes)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function hashResumeToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
 }
 
 function makePlayer(name: string): Player {
@@ -72,11 +129,20 @@ export class Room {
       const stored = await this.state.storage.get<StoredRoomData>('room')
       if (!stored) return
 
+      const rules: GameRules = {
+        ...DEFAULT_GAME_RULES,
+        ...(stored.state?.rules ?? {}),
+        ...(stored.rules ?? {}),
+      }
+
       this.data = {
         ...stored,
-        version: 1,
+        version: 2,
+        rules,
+        state: normalizePersistedGameState(stored.state, rules),
         readyPlayerIds: stored.readyPlayerIds ?? [],
         lastActivity: stored.lastActivity ?? stored.createdAt,
+        resumeTokens: stored.resumeTokens ?? {},
       }
       await this.scheduleCleanup()
     })
@@ -92,6 +158,21 @@ export class Room {
       })
     }
 
+    // Atomically reserve this room code for one creator (fixes the
+    // check-then-act race in /api/room/new and makes the per-IP creation
+    // limit un-bypassable: CREATE_ROOM requires a fresh claim).
+    if (path === '/internal/claim' && request.method === 'POST') {
+      const claimed = await this.state.storage.transaction(async () => {
+        if (this.data) return false
+        const now = Date.now()
+        const claim = await this.state.storage.get<{ at: number }>('claim')
+        if (claim && now - claim.at < CLAIM_TTL_MS) return false
+        await this.state.storage.put('claim', { at: now })
+        return true
+      })
+      return new Response(claimed ? 'claimed' : 'unavailable', { status: claimed ? 200 : 409 })
+    }
+
     const match = path.match(/^\/api\/room\/([A-Z0-9]{6})\/ws$/)
     if (!match) return new Response('Not found', { status: 404 })
 
@@ -99,11 +180,15 @@ export class Room {
     if (this.data && this.data.code !== this.code) {
       return new Response('Room identity mismatch', { status: 409 })
     }
-    if (!isAllowedOrigin(request.headers.get('Origin'), request.url)) {
+    if (!isAllowedOrigin(request.headers.get('Origin'), request.url, parseAllowedOrigins(this.env))) {
       return new Response('Forbidden origin', { status: 403 })
     }
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('WebSocket upgrade required', { status: 426 })
+    }
+    if (this.sessions.size >= MAX_SOCKETS_PER_ROOM) {
+      logEvent('socket_cap', { code: this.code, sockets: this.sessions.size })
+      return new Response('Too many connections', { status: 429 })
     }
 
     return this.openWebSocket()
@@ -137,8 +222,15 @@ export class Room {
 
     server.accept()
     server.addEventListener('message', event => {
+      const raw = String(event.data)
+      if (raw.length > MAX_MESSAGE_CHARS) {
+        logEvent('oversize_message', { code: this.code, size: raw.length })
+        this.sessions.delete(sessionId)
+        try { server.close(1009, 'Message too large') } catch {}
+        return
+      }
       this.operation = this.operation
-        .then(() => this.onMessage(sessionId, String(event.data)))
+        .then(() => this.onMessage(sessionId, raw))
         .catch(error => {
           console.error('Room message failed', error)
           const session = this.sessions.get(sessionId)
@@ -160,15 +252,31 @@ export class Room {
       return
     }
 
-    let message: ClientMsg
+    let parsed: unknown
     try {
-      const parsed: unknown = JSON.parse(raw)
-      if (!isClientMsg(parsed)) throw new Error('invalid payload')
-      message = parsed
+      parsed = JSON.parse(raw)
     } catch {
       this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Invalid message' })
       return
     }
+
+    // Protocol-version boundary check: a present-but-wrong `version` gets a
+    // clean, specific error instead of a generic parse failure.
+    const version = (parsed as { version?: unknown }).version
+    if (version !== undefined && version !== PROTOCOL_VERSION) {
+      this.send(session, {
+        type: 'ERROR',
+        code: 'INTERNAL',
+        message: `Unsupported protocol version; expected ${PROTOCOL_VERSION}`,
+      })
+      return
+    }
+
+    if (!isClientMsg(parsed)) {
+      this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Invalid message' })
+      return
+    }
+    const message: ClientMsg = parsed
 
     switch (message.type) {
       case 'CREATE_ROOM':
@@ -177,9 +285,10 @@ export class Room {
       case 'JOIN_ROOM':
         await this.joinRoom(session, message.code, message.playerName)
         break
-      case 'RESUME_ROOM':
-        this.resumeRoom(sessionId, session, message.playerId)
+      case 'RESUME_ROOM': {
+        await this.resumeRoom(sessionId, session, message.roomCode, message.playerId, message.resumeToken)
         break
+      }
       case 'LEAVE_ROOM':
         await this.leaveRoom(session)
         break
@@ -197,6 +306,15 @@ export class Room {
         break
       case 'PICK_UP':
         await this.pickUp(session)
+        break
+      case 'SET_RULES':
+        await this.setRules(session, message.rules)
+        break
+      case 'TRIBUTE_SWAP':
+        await this.exchangeTribute(session, message.winnerCardId, message.loserCardId)
+        break
+      case 'TRIBUTE_SKIP':
+        await this.declineTribute(session)
         break
       case 'CHAT':
         this.chat(session, message.text)
@@ -246,22 +364,40 @@ export class Room {
       return
     }
 
+    // The code must have been reserved via POST /api/room/new (which is
+    // per-IP rate limited). This closes the direct-WS room-creation bypass.
+    const claimOk = await this.state.storage.transaction(async () => {
+      const now = Date.now()
+      const claim = await this.state.storage.get<{ at: number }>('claim')
+      if (!claim || now - claim.at >= CLAIM_TTL_MS) return false
+      await this.state.storage.delete('claim')
+      return true
+    })
+    if (!claimOk) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_CODE', message: 'Room code not allocated; request a new room first' })
+      return
+    }
+
     const player = makePlayer(name)
+    const resumeToken = generateResumeToken()
     session.playerId = player.id
     this.data = {
-      version: 1,
+      version: 2,
       code: this.code,
       hostId: player.id,
       maxPlayers: Math.max(2, Math.min(5, requestedMaxPlayers)),
       players: [player],
       state: null,
+      rules: { ...DEFAULT_GAME_RULES },
       readyPlayerIds: [],
+      resumeTokens: { [player.id]: await hashResumeToken(resumeToken) },
       createdAt: Date.now(),
       lastActivity: Date.now(),
     }
 
     await this.save()
-    this.welcomeAndState(session)
+    logEvent('room_created', { code: this.code })
+    this.welcomeAndState(session, resumeToken)
     this.broadcastRoom()
   }
 
@@ -285,26 +421,63 @@ export class Room {
       this.send(session, { type: 'ERROR', code: 'ROOM_FULL', message: 'Room is full' })
       return
     }
-    if (data.state) {
-      this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Game already started' })
+    if (data.state && data.state.phase !== 'gameOver') {
+      this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' })
       return
     }
 
     const player = makePlayer(name)
+    const resumeToken = generateResumeToken()
     session.playerId = player.id
     data.players.push(player)
+    data.resumeTokens[player.id] = await hashResumeToken(resumeToken)
 
     await this.save()
-    this.welcomeAndState(session)
+    this.welcomeAndState(session, resumeToken)
     this.broadcastRoom()
   }
 
-  private resumeRoom(sessionId: string, session: Session, playerId: string): void {
+  /**
+   * Resume requires the per-player secret token issued in WELCOME (and
+   * rotated on every successful resume). The broadcast playerId alone is
+   * NOT a credential. Failures send RESUME_FAILED and never attach.
+   */
+  private async resumeRoom(
+    sessionId: string,
+    session: Session,
+    roomCode: string,
+    playerId: string,
+    resumeToken: string,
+  ): Promise<void> {
+    const fail = (reason: string) => {
+      logEvent('resume_failed', { code: this.code, reason })
+      this.send(session, { type: 'RESUME_FAILED', reason, version: PROTOCOL_VERSION })
+    }
+
     const data = this.data
-    if (!data || !data.players.some(player => player.id === playerId)) {
-      this.send(session, { type: 'ERROR', code: 'SESSION_EXPIRED', message: 'Saved room session no longer exists' })
+    if (!data || roomCode !== data.code) {
+      fail('room_not_found')
       return
     }
+    if (!data.players.some(player => player.id === playerId)) {
+      fail('not_a_member')
+      return
+    }
+    const storedHash = data.resumeTokens[playerId]
+    if (typeof resumeToken !== 'string' || !storedHash) {
+      fail('invalid_token')
+      return
+    }
+    const presentedHash = await hashResumeToken(resumeToken)
+    if (!constantTimeEqual(presentedHash, storedHash)) {
+      fail('invalid_token')
+      return
+    }
+
+    // Rotate: the presented token is single-use; the new one goes only to
+    // this socket in WELCOME.
+    const nextToken = generateResumeToken()
+    data.resumeTokens[playerId] = await hashResumeToken(nextToken)
 
     for (const [otherId, other] of this.sessions) {
       if (otherId === sessionId || other.playerId !== playerId) continue
@@ -313,7 +486,8 @@ export class Room {
     }
 
     session.playerId = playerId
-    this.welcomeAndState(session)
+    await this.save()
+    this.welcomeAndState(session, nextToken)
     this.broadcastRoom()
   }
 
@@ -323,21 +497,83 @@ export class Room {
       this.send(session, { type: 'ERROR', code: 'NOT_HOST', message: 'Only the host can start' })
       return
     }
-    if (data.state) {
-      this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Game already started' })
+    if (data.state && data.state.phase !== 'gameOver') {
+      this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' })
       return
     }
     if (data.players.length < 2) {
       this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'At least two players are required' })
       return
     }
+    if (data.players.some(player => !this.isConnected(player.id))) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'All players must be online before starting' })
+      return
+    }
+
+    const prior = data.state
+    const rosterIds = new Set(data.players.map(player => player.id))
+    const previousRound: PreviousRoundResult | null =
+      prior?.phase === 'gameOver' && prior.winnerId && prior.loserId &&
+      prior.winnerId !== prior.loserId &&
+      rosterIds.has(prior.winnerId) && rosterIds.has(prior.loserId)
+        ? { winnerId: prior.winnerId, loserId: prior.loserId }
+        : null
 
     data.state = initGame({
       players: data.players.map(player => ({ id: player.id, name: player.name, isAI: false })),
+      rules: data.rules,
+      previousRound,
     })
     data.readyPlayerIds = []
 
     await this.save()
+    this.broadcastRoom()
+    this.broadcastGame()
+  }
+
+  private async setRules(session: Session, patch: Partial<GameRules>): Promise<void> {
+    const data = this.data
+    if (!data || session.playerId !== data.hostId) {
+      this.send(session, { type: 'ERROR', code: 'NOT_HOST', message: 'Only the host can change rules' })
+      return
+    }
+    if (data.state && data.state.phase !== 'gameOver') {
+      this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Rules are locked during a round' })
+      return
+    }
+
+    // Merge against the current authoritative value so two rapid toggles do
+    // not overwrite one another with stale whole-object snapshots.
+    data.rules = { ...data.rules, ...patch }
+    await this.save()
+    this.broadcastRoom()
+  }
+
+  private async exchangeTribute(session: Session, winnerCardId: string, loserCardId: string): Promise<void> {
+    const data = this.data
+    if (!data?.state || !session.playerId) return
+    const result = exchangeFaceUpCards(data.state, session.playerId, winnerCardId, loserCardId)
+    if (result.error) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
+      return
+    }
+    data.state = result.state
+    await this.save()
+    this.broadcastRoom()
+    this.broadcastGame()
+  }
+
+  private async declineTribute(session: Session): Promise<void> {
+    const data = this.data
+    if (!data?.state || !session.playerId) return
+    const result = skipTribute(data.state, session.playerId)
+    if (result.error) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
+      return
+    }
+    data.state = result.state
+    await this.save()
+    this.broadcastRoom()
     this.broadcastGame()
   }
 
@@ -373,7 +609,11 @@ export class Room {
     const ids = requested.map(card => card.id)
     if (new Set(ids).size !== ids.length) return null
 
-    const cards = ids.map(id => owned.get(id))
+    const cards = ids.map(id => {
+      const blind = /^blind:down:(\d+)$/.exec(id)
+      if (blind) return player.faceDown[Number(blind[1])]
+      return owned.get(id)
+    })
     return cards.every((card): card is Card => !!card) ? cards : null
   }
 
@@ -381,6 +621,11 @@ export class Room {
     const data = this.data
     if (!data?.state || !session.playerId) return
 
+    // Cards are re-derived from server state by id: forged suits/ranks are
+    // discarded, and a replayed PLAY fails ownership because the cards have
+    // already moved to the pile. Combined with the turn check in playCards,
+    // retried/duplicated PLAYs cannot double-apply (replay defense via
+    // server-side idempotency; state.seq lets clients dedupe broadcasts).
     const cards = this.canonicalCards(session.playerId, requestedCards)
     if (!cards) {
       this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'Card is not owned by this player' })
@@ -425,17 +670,15 @@ export class Room {
     const data = this.data
     if (!data || !session.playerId) return
 
-    // During a running game, preserve the seat so a temporary disconnect can resume.
-    if (data.state) {
-      session.playerId = null
-      this.broadcastRoom()
-      return
-    }
-
     const leavingId = session.playerId
+    delete data.resumeTokens[leavingId]
     data.players = data.players.filter(player => player.id !== leavingId)
     data.readyPlayerIds = data.readyPlayerIds.filter(id => id !== leavingId)
     session.playerId = null
+
+    if (data.state && data.state.phase !== 'gameOver') {
+      data.state = applyPlayerForfeit(data.state, leavingId)
+    }
 
     if (data.players.length === 0) {
       this.data = null
@@ -446,6 +689,7 @@ export class Room {
     await this.save()
     this.broadcast({ type: 'PLAYER_LEFT', playerId: leavingId })
     this.broadcastRoom()
+    this.broadcastGame()
   }
 
   private closeSession(sessionId: string): void {
@@ -469,11 +713,20 @@ export class Room {
         return toPlayerSummary(currentPlayer, this.isConnected(lobbyPlayer.id))
       }),
       createdAt: data.createdAt,
+      rules: data.rules,
     }
   }
 
-  private welcomeAndState(session: Session): void {
-    this.send(session, { type: 'WELCOME', playerId: session.playerId!, room: this.summary() })
+  private welcomeAndState(session: Session, resumeToken: string): void {
+    // resumeToken is per-player secret: it goes ONLY to this socket, never
+    // into ROOM_STATE/GAME_STATE broadcasts.
+    this.send(session, {
+      type: 'WELCOME',
+      playerId: session.playerId!,
+      room: this.summary(),
+      version: PROTOCOL_VERSION,
+      resumeToken,
+    })
     this.sendGame(session)
   }
 
@@ -484,9 +737,12 @@ export class Room {
   private sendGame(session: Session): void {
     const data = this.data
     if (!data?.state || !session.playerId) return
+    // Per-recipient serialization: stock/opponent cards are masked for THIS
+    // viewer; log is capped by the engine (MAX_LOG_ENTRIES ring buffer).
     this.send(session, {
       type: 'GAME_STATE',
       state: serializeGameState(data.state, session.playerId),
+      version: PROTOCOL_VERSION,
     })
   }
 
@@ -494,76 +750,178 @@ export class Room {
     for (const session of this.sessions.values()) this.sendGame(session)
   }
 
-  private send(session: Session, message: ServerMsg): void {
-    try { session.webSocket.send(JSON.stringify(message)) } catch {}
+  private send(session: Session, message: OutMsg): void {
+    try { session.webSocket.send(JSON.stringify({ ...message, version: PROTOCOL_VERSION })) } catch {}
   }
 
-  private broadcast(message: ServerMsg): void {
-    for (const session of this.sessions.values()) this.send(session, message)
+  private broadcast(message: OutMsg): void {
+    // A WebSocket is not a room member until CREATE/JOIN/RESUME succeeds.
+    // Rejected late joins and idle unauthenticated sockets must not observe
+    // roster updates or chat (and sendGame independently applies this guard).
+    for (const session of this.sessions.values()) {
+      if (session.playerId) this.send(session, message)
+    }
   }
 }
 
 function generateRoomCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('')
+  const bytes = new Uint8Array(6)
+  crypto.getRandomValues(bytes)
+  return [...bytes].map(byte => alphabet[byte % alphabet.length]).join('')
 }
 
-function corsHeaders(origin: string | null, requestUrl: string): HeadersInit {
-  return {
-    'Access-Control-Allow-Origin': isAllowedOrigin(origin, requestUrl) && origin ? origin : '*',
+// ---------- HTTP hygiene ----------
+
+const SECURITY_HEADERS: Record<string, string> = {
+  'Content-Security-Policy':
+    "default-src 'self'; connect-src 'self' wss:; img-src 'self' data:; " +
+    "style-src 'self' 'unsafe-inline'; script-src 'self'; manifest-src 'self'; " +
+    "worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+}
+
+/** Apply security headers to every HTTP response (assets included). */
+function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers)
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value)
+  headers.delete('X-Powered-By')
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
+/** Same-origin only: no ACAO is emitted for missing/disallowed origins. */
+function corsHeaders(origin: string | null, originAllowed: boolean): HeadersInit {
+  const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     'Cache-Control': 'no-store',
     'Vary': 'Origin',
   }
+  if (originAllowed && origin) headers['Access-Control-Allow-Origin'] = origin
+  return headers
+}
+
+// ---------- Per-IP room-creation limits ----------
+// In-memory, per-isolate sliding window + concurrent-room cap. Best effort:
+// Cloudflare may run several isolates, so a distributed attacker gets
+// N isolates x 10 rooms/min. Sufficient against scripted single-source
+// abuse; for strict global limits add a Cloudflare Rate Limiting rule.
+interface IpRoomUsage {
+  window: number[]
+  codes: Map<string, number>
+}
+const ipRoomUsage = new Map<string, IpRoomUsage>()
+
+function roomCreationAllowed(ip: string): boolean {
+  const now = Date.now()
+  let usage = ipRoomUsage.get(ip)
+  if (!usage) {
+    usage = { window: [], codes: new Map() }
+    ipRoomUsage.set(ip, usage)
+    // Bound the map: drop fully-expired entries when it grows large.
+    if (ipRoomUsage.size > 5000) {
+      for (const [key, entry] of ipRoomUsage) {
+        if (entry.window.length === 0 && entry.codes.size === 0) ipRoomUsage.delete(key)
+      }
+    }
+  }
+  usage.window = usage.window.filter(timestamp => now - timestamp < ROOM_CREATE_WINDOW_MS)
+  for (const [code, at] of usage.codes) {
+    if (now - at > ROOM_TTL_MS) usage.codes.delete(code)
+  }
+  return usage.window.length < ROOM_CREATE_MAX_PER_MINUTE && usage.codes.size < ACTIVE_ROOMS_PER_IP_MAX
+}
+
+function recordRoomCreation(ip: string, code: string): void {
+  const usage = ipRoomUsage.get(ip)
+  if (!usage) return
+  usage.window.push(Date.now())
+  usage.codes.set(code, Date.now())
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname
-    const headers = corsHeaders(request.headers.get('Origin'), request.url)
+    const origin = request.headers.get('Origin')
+    const originAllowed = isAllowedOrigin(origin, request.url, parseAllowedOrigins(env))
 
-    if (request.method === 'OPTIONS') return new Response(null, { headers })
+    // Same-origin policy for the API: a present-but-disallowed Origin is
+    // rejected outright (covers cross-origin WS upgrades too).
+    const isApiPath = path === '/api' || path.startsWith('/api/')
+    const isAssetPath = path === '/assets' || path.startsWith('/assets/')
+    if (isApiPath && origin && !originAllowed) {
+      return withSecurityHeaders(new Response('Forbidden origin', { status: 403 }))
+    }
+
+    const headers = corsHeaders(origin, originAllowed)
+
+    if (request.method === 'OPTIONS') return withSecurityHeaders(new Response(null, { headers }))
+
+    if (path === '/api' || path === '/assets') {
+      return withSecurityHeaders(new Response('Not found', { status: 404, headers }))
+    }
 
     if (path === '/api/health') {
-      return new Response('OK', { headers })
+      return withSecurityHeaders(new Response('OK', { headers }))
     }
 
     if (path === '/api/version') {
-      return Response.json({
+      return withSecurityHeaders(Response.json({
         service: 'shithead-multiplayer',
         commit: BUILD_COMMIT,
-        protocol: 2,
-      }, { headers })
+        protocol: PROTOCOL_VERSION,
+      }, { headers }))
     }
 
     if (path === '/api/room/new' && request.method === 'POST') {
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'local'
+      if (!roomCreationAllowed(ip)) {
+        logEvent('room_creation_rate_limited', { ip })
+        return withSecurityHeaders(Response.json(
+          { error: 'Room creation rate limit exceeded' },
+          { status: 429, headers: { ...headers, 'Retry-After': '60' } },
+        ))
+      }
+      // Atomic claim in the DO removes the probe-then-create TOCTOU.
       for (let attempt = 0; attempt < 10; attempt++) {
         const roomId = generateRoomCode()
         const stub = env.ROOM.get(env.ROOM.idFromName(roomId))
-        const status = await stub.fetch('https://room.internal/internal/status')
-        if (status.status === 404) return Response.json({ roomId }, { headers })
+        const claim = await stub.fetch('https://room.internal/internal/claim', { method: 'POST' })
+        if (claim.status === 200) {
+          recordRoomCreation(ip, roomId)
+          return withSecurityHeaders(Response.json({ roomId }, { headers }))
+        }
       }
-      return Response.json({ error: 'Could not allocate a room code' }, { status: 503, headers })
+      return withSecurityHeaders(Response.json({ error: 'Could not allocate a room code' }, { status: 503, headers }))
     }
 
     const roomMatch = path.match(/^\/api\/room\/([A-Z0-9]{6})\/ws$/)
     if (roomMatch && ROOM_CODE_RE.test(roomMatch[1])) {
       const stub = env.ROOM.get(env.ROOM.idFromName(roomMatch[1]))
-      return stub.fetch(request)
+      const response = await stub.fetch(request)
+      // 101 upgrades pass through untouched; rejections get headers.
+      return response.status === 101 ? response : withSecurityHeaders(response)
     }
 
     if (env.ASSETS) {
       const assetResponse = await env.ASSETS.fetch(request)
-      if (assetResponse.status !== 404) return assetResponse
+      if (assetResponse.status !== 404) return withSecurityHeaders(assetResponse)
 
-      if (request.method === 'GET' && !path.startsWith('/api/')) {
-        return env.ASSETS.fetch(new Request(new URL('/index.html', request.url)))
+      if (request.method === 'GET' && !isApiPath && !isAssetPath) {
+        const fallback = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url)))
+        return withSecurityHeaders(fallback)
       }
     }
 
-    return new Response('Not found', { status: 404, headers })
+    return withSecurityHeaders(new Response('Not found', { status: 404, headers }))
   },
 }
