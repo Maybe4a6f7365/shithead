@@ -1,8 +1,8 @@
 // ============================================================================
 // OpponentStrip (Z1) — 1–4 seats + stable ordering by turn order relative to
 // me; seats never re-order or disappear between turns (§3.1–3.3).
-// OpponentSeat (§3.2): mini back + count, up to 3 mini faces, 3 mini backs,
-// name (feed, truncated 10 chars), gold under-bar turn marker, offline state.
+// OpponentSeat: compact phone-first seat. Public and hidden final cards use
+// the same overlaid three-stack silhouette as the local tableau.
 // ============================================================================
 import { memo } from 'react'
 import clsx from 'clsx'
@@ -34,8 +34,10 @@ export const OpponentSeat = memo(function OpponentSeat({ seat, active }: { seat:
   return (
     <div
       className={clsx(
-        'flex flex-col items-center justify-between w-[84px] min-h-[88px] py-s1 rounded-button',
-        active && 'bg-felt-raised',
+        'opponent-seat',
+        active && 'opponent-seat--active',
+        seat.offline && 'opponent-seat--offline',
+        player.isOut && 'opponent-seat--out',
       )}
       aria-label={`${player.name}: ${seat.handCount} in hand, ${seat.faceUp.length} face up, ${seat.faceDownCount} face down${active ? ', their turn' : ''}${seat.offline ? ', offline' : ''}${player.isOut ? ', out' : ''}`}
     >
@@ -43,42 +45,45 @@ export const OpponentSeat = memo(function OpponentSeat({ seat, active }: { seat:
         className={clsx(
           'text-feed font-medium truncate max-w-full',
           active ? 'text-gold-bright' : 'text-cream-dim',
-          seat.offline && 'opacity-45',
-          player.isOut && 'opacity-45 line-through',
+          player.isOut && 'line-through',
         )}
       >
         {name}
       </span>
-      <div className="flex items-center gap-[4px]">
-        <div className="relative w-[18px] h-[26px] rounded-[2px] bg-burgundy shadow-[var(--shadow-card-rest)]" role="img" aria-label={`${seat.handCount} cards in hand`}>
+      <div className="opponent-seat__cards">
+        <div className="opponent-hand-count" role="img" aria-label={`${seat.handCount} cards in hand`}>
           <span className="absolute inset-0 flex items-center justify-center text-micro font-semibold text-cream" aria-hidden="true">
             {seat.handCount}
           </span>
         </div>
         {/* Stable public final-card rail below the username. */}
         <div className="final-mini-row" aria-label={`${player.name}'s final cards`}>
-        <div className="final-mini-row__line">
           {Array.from({ length: 3 }).map((_, index) => {
             const card = seat.faceUp[index]
-            return card ? (
-              <div
-                key={`up-${index}`}
-                className="final-mini-card final-mini-card--up"
-                role="img"
-                aria-label={`${card.rank === 'JOKER' ? 'Joker' : card.rank}, face-up final card ${index + 1} of 3`}
-              >
-                <span className={clsx((card.suit === '♥' || card.suit === '♦' || card.rank === 'JOKER') ? 'text-burgundy' : 'text-ink')} aria-hidden="true">
-                  {card.rank === 'JOKER' ? 'JK' : card.rank}
-                </span>
-              </div>
-            ) : <span key={`up-${index}`} className="final-mini-card final-mini-card--empty" aria-hidden="true" />
+            const hasHidden = index < seat.faceDownCount
+            return (
+              <span className="final-mini-stack" key={index} data-final-stack={index + 1}>
+                {hasHidden ? (
+                  <span className="final-mini-card final-mini-card--down" role="img" aria-label={`Face-down final card ${index + 1} of ${seat.faceDownCount}`} />
+                ) : (
+                  <span className="final-mini-card final-mini-card--empty final-mini-card--down" aria-hidden="true" />
+                )}
+                {card ? (
+                  <span
+                    className="final-mini-card final-mini-card--up"
+                    role="img"
+                    aria-label={`${card.rank === 'JOKER' ? 'Joker' : card.rank}, face-up final card ${index + 1} of 3`}
+                  >
+                    <span className={clsx((card.suit === '♥' || card.suit === '♦' || card.rank === 'JOKER') ? 'text-burgundy' : 'text-ink')} aria-hidden="true">
+                      {card.rank === 'JOKER' ? 'JK' : card.rank}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="final-mini-card final-mini-card--empty final-mini-card--up" aria-hidden="true" />
+                )}
+              </span>
+            )
           })}
-        </div>
-        <div className="final-mini-row__line">
-          {Array.from({ length: 3 }).map((_, index) => index < seat.faceDownCount ? (
-            <span key={`down-${index}`} className="final-mini-card final-mini-card--down" role="img" aria-label={`Face-down final card ${index + 1} of ${seat.faceDownCount}`} />
-          ) : <span key={`down-${index}`} className="final-mini-card final-mini-card--empty" aria-hidden="true" />)}
-        </div>
         </div>
       </div>
       {seat.offline ? (
@@ -101,7 +106,7 @@ export interface OpponentStripProps {
 export function OpponentStrip({ seats, activeSeatId }: OpponentStripProps) {
   return (
     <div
-      className="flex items-start justify-start sm:justify-center gap-s2 min-h-[88px] overflow-x-auto"
+      className="opponent-strip"
       role="list"
       aria-label="Opponents"
     >

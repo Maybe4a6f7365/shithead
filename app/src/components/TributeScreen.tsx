@@ -96,7 +96,7 @@ export function TributeScreen({ winner, loser, viewerId, onSwap, onSkip, error }
               type="button"
               disabled={!winnerCardId || !loserCardId || submitting}
               onClick={swap}
-              className="flex-1 min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase disabled:opacity-45"
+              className="primary-action flex-1 px-s3 text-button font-bold tracking-button uppercase disabled:opacity-45"
             >
               {submitting ? 'Exchanging…' : 'Exchange'}
             </button>

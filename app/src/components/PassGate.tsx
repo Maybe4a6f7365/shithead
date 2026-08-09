@@ -22,7 +22,7 @@ export function PassGate({ player, onReveal }: { player: Player; onReveal: () =>
       <button
         type="button"
         onClick={onReveal}
-        className="mt-s6 min-h-[48px] min-w-[88px] px-s6 rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+        className="primary-action mt-s6 min-w-[120px] px-s6 text-button font-bold tracking-button uppercase"
       >
         I'm {player.name}
       </button>

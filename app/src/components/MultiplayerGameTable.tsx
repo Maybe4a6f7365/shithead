@@ -25,7 +25,7 @@ export interface MultiplayerGameTableProps {
 export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
   const {
     status, attempt, maxAttempts, room, gameState, playerId,
-    error, notice, send, retry, tryAgain, leave,
+    error, notice, latestEmote, send, sendEmote, retry, tryAgain, leave,
   } = useMultiplayerRoom({ roomId, playerName, intent })
 
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -235,6 +235,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         onToggleSound={toggleSound}
         connectionBadge={badge}
         seatOffline={id => offlineSeats.has(id)}
+        latestEmote={latestEmote}
+        onSendEmote={sendEmote}
       />
 
       {gameState.phase === 'gameOver' && (

@@ -101,6 +101,7 @@ export function finalCardScore(card: Card): number {
   if (card.rank === 'JOKER') return 100
   if (card.rank === '10') return 90
   if (card.rank === '2') return 80
+  if (card.rank === '3') return 70
   return RANK_ORDER[card.rank]
 }
 

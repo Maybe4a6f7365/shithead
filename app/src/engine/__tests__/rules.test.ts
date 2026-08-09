@@ -2,7 +2,7 @@
 // Rules regression tests — every confirmed audit bug (B1-B15) pinned down
 // ============================================================================
 import { describe, it, expect } from 'vitest'
-import { playCards, pickUpPile, canPlay, getTopCard, pileSize, MAX_GAME_TURNS } from '../index'
+import { playCards, pickUpPile, canPlay, getTopCard, getTopRank, pileSize, MAX_GAME_TURNS } from '../index'
 import type { Card } from '../index'
 import { c, mkState } from './helpers'
 
@@ -299,6 +299,184 @@ describe('B12/D2: 10 is play-anytime', () => {
     const r = playCards(state, 'a', [ten])
     expect(r.error).toBeUndefined()
     expect(r.state.pile.length).toBe(0)
+  })
+})
+
+describe('confirmed special-card rules: reset 2, copying 3, low 7, stacking 8', () => {
+  it('2 is playable anytime and resets the active rank constraint', () => {
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('2'), c('5')] },
+        { id: 'b', hand: [c('6'), c('A')] },
+      ],
+      pile: [[c('K')]],
+    })
+    const played = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(played.error).toBeUndefined()
+    expect(getTopCard(played.state)?.rank).toBe('2')
+    expect(getTopRank(played.state)).toBeNull()
+    expect(playCards(played.state, 'b', [played.state.players[1].hand[0]]).error).toBeUndefined()
+  })
+
+  it('3 is playable anytime and copies the effective card below through a chain of 3s', () => {
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('3'), c('4')] },
+        { id: 'b', hand: [c('3'), c('9')] },
+        { id: 'c', hand: [c('6'), c('Q')] },
+      ],
+      pile: [[c('7')]],
+    })
+    const three = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(three.error).toBeUndefined()
+    expect(getTopRank(three.state)).toBe('7')
+    const nextThree = playCards(three.state, 'b', [three.state.players[1].hand[0]])
+    expect(nextThree.error).toBeUndefined()
+    expect(getTopRank(nextThree.state)).toBe('7')
+    expect(playCards(nextThree.state, 'c', [nextThree.state.players[2].hand[0]]).error).toBeUndefined()
+  })
+
+  it('3 copies a reset 2 as an unrestricted top instead of restoring older cards', () => {
+    const state = mkState({
+      players: [{ id: 'a', hand: [c('3'), c('4')] }, { id: 'b', hand: [c('9')] }],
+      pile: [[c('K')], [c('2')]],
+    })
+    const played = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(played.error).toBeUndefined()
+    expect(getTopRank(played.state)).toBeNull()
+    expect(playCards(played.state, 'b', [played.state.players[1].hand[0]]).error).toBeUndefined()
+  })
+
+  it('a reset 2 on an otherwise empty pile leaves it unrestricted', () => {
+    const state = mkState({
+      players: [{ id: 'a', hand: [c('2'), c('4')] }, { id: 'b', hand: [c('A')] }],
+    })
+    const played = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(getTopRank(played.state)).toBeNull()
+    expect(playCards(played.state, 'b', [played.state.players[1].hand[0]]).error).toBeUndefined()
+  })
+
+  it('7 forces the next ordinary play to rank 7 or lower, including through a 3', () => {
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('7'), c('K')] },
+        { id: 'b', hand: [c('3'), c('9')] },
+        { id: 'c', hand: [c('6'), c('8')] },
+      ],
+      pile: [[c('5')]],
+    })
+    const seven = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(playCards(seven.state, 'b', [seven.state.players[1].hand[1]]).error).toMatch(/cannot be played/i)
+    const three = playCards(seven.state, 'b', [seven.state.players[1].hand[0]])
+    expect(getTopRank(three.state)).toBe('7')
+    expect(playCards(three.state, 'c', [three.state.players[2].hand[1]]).error).toMatch(/cannot be played/i)
+    expect(playCards(three.state, 'c', [three.state.players[2].hand[0]]).error).toBeUndefined()
+  })
+
+  it('3 over an 8 copies its rank constraint but does not repeat its skip effect', () => {
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('3'), c('9')] },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+      ],
+      pile: [[c('8')]],
+    })
+    const result = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(result.error).toBeUndefined()
+    expect(getTopRank(result.state)).toBe('8')
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('b')
+  })
+
+  it('one 8 skips one active player', () => {
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('8'), c('9')] },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+        { id: 'd', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+    const result = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(result.error).toBeUndefined()
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('c')
+  })
+
+  it('a pair of 8s stacks and skips two active players', () => {
+    const eights = [c('8'), c('8', '♥')]
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [...eights, c('9')] },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+        { id: 'd', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+    const result = playCards(state, 'a', eights)
+    expect(result.error).toBeUndefined()
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('d')
+  })
+
+  it('skip counting ignores players who are already out', () => {
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('8'), c('9')] },
+        { id: 'b', isOut: true },
+        { id: 'c', hand: [c('9')] },
+        { id: 'd', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+    const result = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('d')
+  })
+
+  it('in a two-player round one 8 returns the turn, while a pair skips both seats', () => {
+    const one = mkState({
+      players: [{ id: 'a', hand: [c('8'), c('9')] }, { id: 'b', hand: [c('9')] }],
+      pile: [[c('5')]],
+    })
+    const oneResult = playCards(one, 'a', [one.players[0].hand[0]])
+    expect(oneResult.state.players[oneResult.state.currentPlayerIdx].id).toBe('a')
+
+    const pair = [c('8'), c('8', '♥')]
+    const two = mkState({
+      players: [{ id: 'a', hand: [...pair, c('9')] }, { id: 'b', hand: [c('9')] }],
+      pile: [[c('5')]],
+    })
+    const pairResult = playCards(two, 'a', pair)
+    expect(pairResult.state.players[pairResult.state.currentPlayerIdx].id).toBe('b')
+  })
+
+  it('an 8 played as the last card still skips the next remaining player', () => {
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [c('8')] },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+    const result = playCards(state, 'a', [state.players[0].hand[0]])
+    expect(result.state.players[0].isOut).toBe(true)
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('c')
+  })
+
+  it('four 8s burn as a quartet, so burn precedence keeps the lead', () => {
+    const eights = [c('8'), c('8', '♥'), c('8', '♦'), c('8', '♣')]
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [...eights, c('9')] },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+    const result = playCards(state, 'a', eights)
+    expect(result.state.pile).toHaveLength(0)
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('a')
   })
 })
 

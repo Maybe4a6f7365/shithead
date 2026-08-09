@@ -65,8 +65,8 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
 
   return (
     <div className="app-viewport bg-felt text-cream flex flex-col">
-      <main className="waiting-room-main flex-1 overflow-y-auto w-full max-w-[400px] mx-auto px-s4 py-s6 flex flex-col justify-start">
-        <div className="text-center mb-s5">
+      <main className="waiting-room-main screen-content flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5 flex flex-col justify-start">
+        <div className="room-code-panel text-center mb-s5">
           {heading && <h1 className="font-display text-title font-semibold mb-s3">{heading}</h1>}
           <div className="text-label font-bold tracking-label uppercase text-cream-dim">Room code</div>
           <div className="font-display text-code font-semibold tracking-code text-cream mt-s1" aria-label={`Room code ${room.code.split('').join(' ')}`}>
@@ -123,7 +123,7 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
             <button
               type="button"
               onClick={start}
-              className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+              className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase"
             >
               Start game
             </button>

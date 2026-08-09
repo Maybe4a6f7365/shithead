@@ -4,14 +4,14 @@
 // turns danger-bright at ≤5 (§4.4). Burn animation is owned by Wastepile.
 // NOTE: only stock.length is meaningful — stock cards arrive masked.
 // ============================================================================
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import clsx from 'clsx'
-import type { Card as CardT } from '../engine'
+import type { Card as CardT, Rank } from '../engine'
 import { Card } from './Card'
 
 export function StockPile({ count }: { count: number }) {
   return (
-    <div className="flex flex-col items-center gap-s1">
+    <div className="pile-column flex flex-col items-center gap-s1">
       {count > 0 ? (
         <Card faceDown />
       ) : (
@@ -32,36 +32,46 @@ export function StockPile({ count }: { count: number }) {
 export interface WastepileProps {
   top?: CardT | null
   underCount: number
+  /** Effective rule rank when the physical top is a copying 3. */
+  effectiveRank?: Rank | null
   burning?: boolean
   /** Empty-pile rule teaching (§4.2): shown only while pile empty + my turn. */
   teachHint?: boolean
 }
 
-export function Wastepile({ top, underCount, burning, teachHint }: WastepileProps) {
+export function Wastepile({ top, underCount, effectiveRank, burning, teachHint }: WastepileProps) {
+  const reduceMotion = useReducedMotion()
+  const copiesRank = top?.rank === '3'
+  const metaText = copiesRank
+    ? `= ${effectiveRank ?? 'OPEN'}${underCount > 0 ? ` · +${underCount}` : ''}`
+    : underCount > 0 ? `+${underCount}` : ''
+  const metaLabel = copiesRank
+    ? `Three copies ${effectiveRank ?? 'an open pile'}${underCount > 0 ? `; ${underCount} card${underCount === 1 ? '' : 's'} underneath` : ''}`
+    : underCount > 0 ? `${underCount} card${underCount === 1 ? '' : 's'} underneath` : undefined
   return (
-    <div className="flex flex-col items-center gap-s1">
+    <div className="pile-column flex flex-col items-center gap-s1">
       <div className="relative">
         <AnimatePresence mode="popLayout" initial={false}>
           {burning ? (
             <motion.div
               key={`burn-${top?.id ?? 'empty'}`}
-              initial={{ opacity: 1, scale: 1 }}
-              animate={{ opacity: 0, scale: 0.8 }}
-              transition={{ duration: 0.38, ease: [0.2, 0.8, 0.2, 1] }}
+              initial={{ opacity: 1 }}
+              animate={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+              transition={{ duration: reduceMotion ? 0.01 : 0.38, ease: [0.2, 0.8, 0.2, 1] }}
             >
               {top ? <Card card={top} state="in-pile" /> : <EmptySlot teachHint={teachHint} />}
             </motion.div>
           ) : top ? (
             <motion.div
               key={top.id}
-              initial={{ opacity: 0, y: 28, scale: 1.06 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.26, ease: [0.2, 0.8, 0.2, 1] }}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 28, scale: 1.06 }}
+              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: reduceMotion ? 0.01 : 0.26, ease: [0.2, 0.8, 0.2, 1] }}
             >
               <Card card={top} state="in-pile" />
             </motion.div>
           ) : (
-            <motion.div key="slot" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+            <motion.div key="slot" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduceMotion ? 0.01 : 0.15 }}>
               <EmptySlot teachHint={teachHint} />
             </motion.div>
           )}
@@ -72,13 +82,19 @@ export function Wastepile({ top, underCount, burning, teachHint }: WastepileProp
             className="absolute inset-0 rounded-button pointer-events-none"
             style={{ borderRadius: 'var(--radius-card)' }}
             initial={{ boxShadow: '0 0 0 2px var(--color-gold-bright)' }}
-            animate={{ boxShadow: ['0 0 0 2px var(--color-gold-bright)', '0 0 0 2px var(--color-burgundy)', '0 0 0 0px rgba(0,0,0,0)'] }}
-            transition={{ duration: 0.38 }}
+            animate={reduceMotion
+              ? { boxShadow: '0 0 0 0px rgba(0,0,0,0)' }
+              : { boxShadow: ['0 0 0 2px var(--color-gold-bright)', '0 0 0 2px var(--color-burgundy)', '0 0 0 0px rgba(0,0,0,0)'] }}
+            transition={{ duration: reduceMotion ? 0.01 : 0.38 }}
           />
         )}
       </div>
-      <span className="text-micro font-semibold tracking-micro text-cream-dim h-[16px]" aria-hidden={underCount === 0}>
-        {underCount > 0 ? `+${underCount}` : ''}
+      <span
+        className="text-micro font-semibold tracking-micro text-cream-dim h-[16px] whitespace-nowrap"
+        aria-hidden={!metaLabel}
+        aria-label={metaLabel}
+      >
+        {metaText}
       </span>
     </div>
   )
@@ -100,15 +116,22 @@ export interface PileAreaProps {
   stockCount: number
   top?: CardT | null
   pileCount: number
+  effectiveRank?: Rank | null
   burning?: boolean
   teachHint?: boolean
 }
 
-export function PileArea({ stockCount, top, pileCount, burning, teachHint }: PileAreaProps) {
+export function PileArea({ stockCount, top, pileCount, effectiveRank, burning, teachHint }: PileAreaProps) {
   return (
-    <div className="flex items-start justify-center gap-s4" style={{ transform: 'translateY(-4%)' }}>
+    <div className="pile-area flex items-start justify-center gap-s4">
       <StockPile count={stockCount} />
-      <Wastepile top={top} underCount={Math.max(0, pileCount - (top ? 1 : 0))} burning={burning} teachHint={teachHint} />
+      <Wastepile
+        top={top}
+        underCount={Math.max(0, pileCount - (top ? 1 : 0))}
+        effectiveRank={effectiveRank}
+        burning={burning}
+        teachHint={teachHint}
+      />
     </div>
   )
 }

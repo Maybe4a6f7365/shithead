@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Card as CardT, Player } from '../../engine'
 import { Card } from '../Card'
 import { HandFan } from '../HandFan'
 import { OpponentSeat } from '../OpponentStrip'
+import { PileArea } from '../PileArea'
+import { QuietMenu } from '../QuietMenu'
 import { TableScreen } from '../TableScreen'
+import { TableauWell } from '../TableauWell'
+import { EmoteButton } from '../EmoteButton'
 
 beforeAll(() => {
   class ResizeObserverMock {
@@ -57,6 +61,63 @@ describe('opponent final-card information', () => {
     expect(screen.getByRole('img', { name: /joker, face-up final card 1 of 3/i })).toBeTruthy()
     expect(screen.getByRole('img', { name: /17 cards in hand/i })).toBeTruthy()
     expect(container.querySelectorAll('.final-mini-card')).toHaveLength(6)
+    expect(container.querySelectorAll('[data-final-stack]')).toHaveLength(3)
+  })
+})
+
+describe('stacked final tableau', () => {
+  it('layers each face-up card over its hidden partner in three columns', () => {
+    const faceUp = [card(1, '5'), card(2, '7'), card(3, '10')]
+    const faceDown = [card(4), card(5), card(6)]
+    const { container } = render(<TableauWell faceUp={faceUp} faceDown={faceDown} fullSize />)
+    const stacks = container.querySelectorAll('[data-tableau-stack]')
+    expect(stacks).toHaveLength(3)
+    stacks.forEach(stack => {
+      expect(stack.querySelector('.tableau-stack__down')).toBeTruthy()
+      expect(stack.querySelector('.tableau-stack__up')).toBeTruthy()
+    })
+  })
+})
+
+describe('copy-card pile feedback', () => {
+  it('shows the effective rank beneath a physical 3 without hiding pile depth', () => {
+    render(<PileArea stockCount={4} top={card(1, '3')} pileCount={2} effectiveRank="7" />)
+    expect(screen.getByText('= 7 · +1')).toBeTruthy()
+    expect(screen.getByLabelText('Three copies 7; 1 card underneath')).toBeTruthy()
+  })
+})
+
+describe('emote picker', () => {
+  it('moves focus into the menu and restores it when Escape closes', async () => {
+    render(<EmoteButton onSend={vi.fn()} />)
+    const trigger = screen.getByRole('button', { name: /send an emote/i })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menuitem', { name: /nice/i })).toBe(document.activeElement)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(trigger).toBe(document.activeElement)
+  })
+})
+
+describe('quiet menu keyboard navigation', () => {
+  it('focuses menu items, supports arrows, and restores the trigger on Escape', async () => {
+    render(
+      <QuietMenu
+        onOpenRules={vi.fn()}
+        soundOn
+        onToggleSound={vi.fn()}
+        onLeave={vi.fn()}
+        matchRunning
+      />,
+    )
+    const trigger = screen.getByRole('button', { name: 'Menu' })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menuitem', { name: 'Rules' })).toBe(document.activeElement)
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'Sound: on' })).toBe(document.activeElement)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(trigger).toBe(document.activeElement)
   })
 })
 

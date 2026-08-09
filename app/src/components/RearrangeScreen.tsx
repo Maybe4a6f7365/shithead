@@ -94,7 +94,7 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
             type="button"
             onClick={onReady}
             disabled={waitingForOthers}
-            className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1 disabled:opacity-50"
+            className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase disabled:opacity-50"
           >
             {waitingForOthers ? 'Ready ✓' : 'Ready to play'}
           </button>

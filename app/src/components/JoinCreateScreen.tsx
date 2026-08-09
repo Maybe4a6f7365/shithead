@@ -63,7 +63,7 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
 
   return (
     <div className="app-viewport bg-felt text-cream flex flex-col">
-      <main className="flex-1 overflow-y-auto w-full max-w-[400px] mx-auto px-s4 py-s6 flex flex-col justify-center">
+      <main className="screen-content flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5 flex flex-col justify-center">
         <button
           type="button"
           onClick={onBack}
@@ -74,24 +74,24 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
         </button>
 
         {/* Create */}
-        <section>
+        <section className="surface-panel form-panel">
           <h1 className="font-display text-title font-semibold mb-s3">Start a room</h1>
           <NameField id="create-name" label="Your name" value={name} onChange={setName} onDark />
           <button
             type="button"
             onClick={create}
             disabled={busy}
-            className="mt-s3 w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1 disabled:opacity-50"
+            className="primary-action mt-s3 w-full px-s5 text-button font-bold tracking-button uppercase disabled:opacity-50"
           >
             {busy ? 'Creating…' : 'Create room'}
           </button>
           {createError && <p role="alert" className="mt-s2 text-small text-danger-bright">{createError}</p>}
         </section>
 
-        <div className="h-s6" aria-hidden="true" />
+        <div className="form-divider" aria-hidden="true"><span>or</span></div>
 
         {/* Join */}
-        <section>
+        <section className="surface-panel form-panel">
           <h2 className="font-display text-title font-semibold mb-s3">Join a room</h2>
           <div className="mb-s3">
             <label htmlFor="join-code" className="block text-label font-bold tracking-label uppercase text-cream-dim mb-s1">
@@ -107,7 +107,7 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
               inputMode="text"
               autoCapitalize="characters"
               autoComplete="off"
-              className="w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body tracking-[0.3em] uppercase"
+              className="modern-input w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body tracking-[0.3em] uppercase"
             />
             {joinError && <p role="alert" className="mt-s2 text-small text-danger-bright">{joinError}</p>}
           </div>
@@ -115,7 +115,7 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
             type="button"
             onClick={join}
             disabled={busy}
-            className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1 disabled:opacity-50"
+            className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase disabled:opacity-50"
           >
             Join
           </button>

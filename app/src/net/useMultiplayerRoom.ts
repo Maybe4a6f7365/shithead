@@ -12,7 +12,7 @@
 //    answers RESUME_ROOM carries the new one and is stored.
 // ============================================================================
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
+import type { ClientMsg, EmoteEvent, EmoteId, RoomSummary, ServerMsg } from '../engine/protocol'
 import type { GameState } from '../engine'
 import { RoomClient, buildRoomWSUrl, getDefaultServerURL } from './RoomClient'
 
@@ -87,6 +87,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [error, setError] = useState<RoomError | null>(null)
   const [notice, setNotice] = useState<string | null>(null) // in-game rejections → feed
+  const [latestEmote, setLatestEmote] = useState<EmoteEvent | null>(null)
   const clientRef = useRef<RoomClient | null>(null)
   const lastSeqRef = useRef<number | null>(null)
   const sessionRef = useRef<StoredSession | null>(null)
@@ -94,6 +95,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const reconnectingRef = useRef(false)
   const restoredTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const emoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!roomId) return
@@ -101,6 +103,9 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     setStatus('connecting')
     setError(null)
     setNotice(null)
+    if (emoteTimer.current) clearTimeout(emoteTimer.current)
+    emoteTimer.current = null
+    setLatestEmote(null)
     setRoom(null)
     setGameState(null)
     setPlayerId(null)
@@ -252,6 +257,22 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
             setError({ kind: 'session-expired', message: message.reason || 'Your session has expired.' })
             break
           }
+          case 'EMOTE': {
+            const received = { playerId: message.playerId, emote: message.emote, ts: message.ts }
+            if (emoteTimer.current) clearTimeout(emoteTimer.current)
+            setLatestEmote(received)
+            emoteTimer.current = setTimeout(() => {
+              emoteTimer.current = null
+              setLatestEmote(current => (
+                current?.playerId === received.playerId &&
+                current.emote === received.emote &&
+                current.ts === received.ts
+                  ? null
+                  : current
+              ))
+            }, 2500)
+            break
+          }
         }
       },
     })
@@ -260,6 +281,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     return () => {
       if (restoredTimer.current) clearTimeout(restoredTimer.current)
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
+      if (emoteTimer.current) clearTimeout(emoteTimer.current)
       client.close()
       clientRef.current = null
     }
@@ -268,6 +290,10 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const send = useCallback((message: ClientMsg) => {
     clientRef.current?.send(message)
   }, [])
+
+  const sendEmote = useCallback((emote: EmoteId) => {
+    send({ type: 'EMOTE', emote })
+  }, [send])
 
   /** Badge-as-button retry after the client gave up (§4.6). */
   const retry = useCallback(() => {
@@ -311,8 +337,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   return {
     status, attempt, maxAttempts: 5,
     room, gameState, playerId,
-    error, notice, clearNotice,
-    send, retry, tryAgain, leave,
+    error, notice, clearNotice, latestEmote,
+    send, sendEmote, retry, tryAgain, leave,
   }
 }
 

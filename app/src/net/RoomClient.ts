@@ -112,6 +112,10 @@ export class RoomClient {
 
   send(msg: ClientMsg) {
     const stamped = { ...msg, version: PROTOCOL_VERSION } as ClientMsg
+    // Reactions are presence, not gameplay intent. Never replay a stale
+    // click after reconnect/authentication the way durable game actions are.
+    if (stamped.type === 'EMOTE' &&
+      (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated)) return
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       if (this.isAuthentication(stamped) || stamped.type === 'LEAVE_ROOM' || this.authenticated) {
         this.ws.send(JSON.stringify(stamped))

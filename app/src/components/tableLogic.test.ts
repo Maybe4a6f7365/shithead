@@ -6,6 +6,7 @@ import type { GameState, Player } from '../engine'
 import { orderSeats } from './OpponentStrip'
 import { feedLine, latestActionEvents } from './feedText'
 import { pileTilt } from './Card'
+import { isMatchingSelfEmoteEcho, nextRankSelection } from './TableScreen'
 
 function player(id: string): Player {
   const name = id.charAt(0).toUpperCase() + id.slice(1)
@@ -91,5 +92,31 @@ describe('pileTilt', () => {
       expect(pileTilt(id)).toBe(pileTilt(id))
       expect(Math.abs(pileTilt(id))).toBeLessThanOrEqual(2.5)
     }
+  })
+})
+
+describe('rank selection', () => {
+  const fiveA = { id: 'five-a', rank: '5', suit: '♣' } as const
+  const fiveB = { id: 'five-b', rank: '5', suit: '♠' } as const
+  const seven = { id: 'seven', rank: '7', suit: '♦' } as const
+  const cards = [fiveA, fiveB, seven]
+
+  it('adds and removes cards of the selected rank', () => {
+    expect(nextRankSelection(['five-a'], fiveB, cards)).toEqual(['five-a', 'five-b'])
+    expect(nextRankSelection(['five-a', 'five-b'], fiveA, cards)).toEqual(['five-b'])
+  })
+
+  it('atomically replaces the highlighted rank in one tap', () => {
+    expect(nextRankSelection(['five-a', 'five-b'], seven, cards)).toEqual(['seven'])
+  })
+})
+
+describe('emote echo dedupe', () => {
+  it('suppresses only the matching short-lived server echo from this viewer', () => {
+    const pending = { emote: 'fire' as const, sentAt: 1000 }
+    expect(isMatchingSelfEmoteEcho(pending, { playerId: 'me', emote: 'fire', ts: 99_000 }, 'me', 1100)).toBe(true)
+    expect(isMatchingSelfEmoteEcho(pending, { playerId: 'other', emote: 'fire', ts: 1100 }, 'me', 1100)).toBe(false)
+    expect(isMatchingSelfEmoteEcho(pending, { playerId: 'me', emote: 'wow', ts: 1100 }, 'me', 1100)).toBe(false)
+    expect(isMatchingSelfEmoteEcho(pending, { playerId: 'me', emote: 'fire', ts: 1100 }, 'me', 4000)).toBe(false)
   })
 })

@@ -3,7 +3,7 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest'
 import { initGame, seededRng, MAX_LOG_ENTRIES } from '../index'
-import { isClientMsg, serializeGameState, toPlayerSummary, PROTOCOL_VERSION } from '../protocol'
+import { EMOTE_IDS, isClientMsg, serializeGameState, toPlayerSummary, PROTOCOL_VERSION } from '../protocol'
 import { mkState, c } from './helpers'
 
 describe('isClientMsg', () => {
@@ -13,6 +13,7 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'player-id', resumeToken: 'secret' })).toBe(true)
     expect(isClientMsg({ type: 'PING' })).toBe(true)
     expect(isClientMsg({ type: 'CHAT', text: 'hi' })).toBe(true)
+    for (const emote of EMOTE_IDS) expect(isClientMsg({ type: 'EMOTE', emote })).toBe(true)
     expect(isClientMsg({ type: 'SET_RULES', rules: { includeJokers: false } })).toBe(true)
     expect(isClientMsg({ type: 'TRIBUTE_SWAP', winnerCardId: 'a', loserCardId: 'b' })).toBe(true)
     expect(isClientMsg({ type: 'TRIBUTE_SKIP' })).toBe(true)
@@ -27,6 +28,9 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'PLAY', cards: [] })).toBe(false)
     expect(isClientMsg({ type: 'PLAY', cards: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }] })).toBe(false)
     expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(201) })).toBe(false)
+    expect(isClientMsg({ type: 'EMOTE', emote: '👍' })).toBe(false)
+    expect(isClientMsg({ type: 'EMOTE', emote: 'thumbs-up<script>' })).toBe(false)
+    expect(isClientMsg({ type: 'EMOTE' })).toBe(false)
     expect(isClientMsg({ type: 'CREATE_ROOM', playerName: '   ' })).toBe(false)
     expect(isClientMsg({ type: 'JOIN_ROOM', code: 'ABC123', playerName: '\t' })).toBe(false)
     expect(isClientMsg({ type: 'SET_RULES', rules: {} })).toBe(false)

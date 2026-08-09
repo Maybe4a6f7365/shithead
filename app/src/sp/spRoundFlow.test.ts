@@ -39,8 +39,8 @@ describe('single-player round setup', () => {
       [card('hA', 'A'), card('h10', '10'), card('hJ', 'JOKER')],
     )
     const arranged = arrangeAIPlayers(state([ai, player('human', false, [])]))
-    expect(arranged.players[0].faceUp.map(c => c.rank).sort()).toEqual(['10', 'A', 'JOKER'].sort())
-    expect(arranged.players[0].hand.map(c => c.rank).sort()).toEqual(['3', '4', '5'])
+    expect(arranged.players[0].faceUp.map(c => c.rank).sort()).toEqual(['3', '10', 'JOKER'].sort())
+    expect(arranged.players[0].hand.map(c => c.rank).sort()).toEqual(['4', '5', 'A'].sort())
   })
 
   it('starts an all-AI deal synchronously instead of leaving a blank rearrange screen', () => {
@@ -80,13 +80,13 @@ describe('AI winner exchange', () => {
     const resolved = resolveAITribute(initial)
     expect(resolved.phase).toBe('play')
     expect(resolved.players[0].faceUp.map(c => c.id)).toContain('lA')
-    expect(resolved.players[1].faceUp.map(c => c.id)).toContain('w3')
+    expect(resolved.players[1].faceUp.map(c => c.id)).toContain('w4')
   })
 
   it('skips when the last-place row offers no improvement', () => {
     const initial = state([
       player('winner', true, [card('wA', 'A'), card('w10', '10'), card('wJ', 'JOKER')]),
-      player('last', false, [card('l3', '3'), card('l4', '4'), card('l5', '5')]),
+      player('last', false, [card('l4', '4'), card('l5', '5'), card('l6', '6')]),
     ], {
       phase: 'tribute',
       pendingTribute: { winnerId: 'winner', loserId: 'last' },

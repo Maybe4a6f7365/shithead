@@ -121,13 +121,21 @@ function expectedOpenerId(state) {
 function effectiveTopRank(state) {
   for (let i = state.pile.length - 1; i >= 0; i--) {
     const entry = state.pile[i]
-    if (!entry.cleared && entry.cards.length) return entry.cards[0].rank
+    if (entry.cleared) continue
+    for (let cardIndex = entry.cards.length - 1; cardIndex >= 0; cardIndex--) {
+      const rank = entry.cards[cardIndex].rank
+      if (rank === '2') return null // reset barrier: nothing below constrains play
+      if (rank === '3') continue // transparent: copy the next effective card below
+      return rank
+    }
   }
   return null
 }
 
 function canPlayRank(rank, top) {
-  return top === null || rank === '2' || rank === '10' || rank === 'JOKER' || rankOrder.get(rank) >= rankOrder.get(top)
+  if (top === null || ['2', '3', '10', 'JOKER'].includes(rank)) return true
+  if (top === '7') return rankOrder.get(rank) <= rankOrder.get('7')
+  return rankOrder.get(rank) >= rankOrder.get(top)
 }
 
 async function finishRound(peersById, initialState) {
@@ -256,6 +264,22 @@ async function main() {
   host.send({ type: 'CHAT', text: 'authenticated-only' })
   await guest.waitType('CHAT', message => message.text === 'authenticated-only')
 
+  host.send({ type: 'EMOTE', emote: '<script>' })
+  await host.waitType('ERROR', message => /invalid message/i.test(message.message))
+  attacker.send({ type: 'EMOTE', emote: 'fire' })
+  host.send({ type: 'EMOTE', emote: 'thumbs-up' })
+  const [hostEmote, guestEmote] = await Promise.all([
+    host.waitType('EMOTE', message => message.emote === 'thumbs-up'),
+    guest.waitType('EMOTE', message => message.emote === 'thumbs-up'),
+  ])
+  for (const message of [hostEmote, guestEmote]) {
+    assert.equal(message.playerId, hostId)
+    assert.equal(message.version, 3)
+    assert.equal(typeof message.ts, 'number')
+    assert(!('state' in message), 'ephemeral EMOTE must not include room/game state')
+  }
+  ok('T7a EMOTE is strict, server-timestamped, authenticated, and contains no state')
+
   // ---- T7b: strict partial rules, host authority, rapid merge
   guest.send({ type: 'SET_RULES', rules: { includeJokers: false } })
   await guest.waitType('ERROR', isError('NOT_HOST'))
@@ -287,10 +311,10 @@ async function main() {
   await sleep(200)
   for (const peer of unauthenticated) {
     const broadcastTypes = peer.rawLog.slice(unauthLogStarts.get(peer)).map(raw => JSON.parse(raw).type)
-      .filter(type => ['ROOM_STATE', 'CHAT', 'GAME_STATE'].includes(type))
+      .filter(type => ['ROOM_STATE', 'CHAT', 'EMOTE', 'GAME_STATE'].includes(type))
     assert.deepEqual(broadcastTypes, [], `${peer.label} received authenticated room traffic`)
   }
-  ok('T8a rejected and unauthenticated sockets receive no room/chat/game broadcasts')
+  ok('T8a rejected and unauthenticated sockets receive no room/chat/emote/game broadcasts')
 
   host.send({ type: 'SET_RULES', rules: { includeJokers: true } })
   await host.waitType('ERROR', isError('GAME_IN_PROGRESS'))

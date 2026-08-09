@@ -21,6 +21,8 @@ import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
 import { feedLine, latestActionEvents, type FeedContext } from './feedText'
 import { useSoundFromLog, emitSoundDebounced } from './soundManager'
+import { EmoteButton, EmoteFeedback } from './EmoteButton'
+import type { EmoteEvent, EmoteId } from '../engine/protocol'
 
 export interface TableScreenProps {
   state: GameState
@@ -39,9 +41,39 @@ export interface TableScreenProps {
   onToggleSound: () => void
   connectionBadge?: React.ReactNode
   seatOffline?: (playerId: string) => boolean
+  /** Multiplayer supplies room events; single-player still gets local feedback. */
+  latestEmote?: EmoteEvent | null
+  onSendEmote?: (emote: EmoteId) => void
 }
 
 type Zone = 'hand' | 'faceUp' | 'faceDown'
+
+/**
+ * Same-rank cards form a multi-play. Choosing another playable rank replaces
+ * the whole set in one tap, so the interface never traps the user behind a
+ * separate "unselect" step.
+ */
+export function nextRankSelection(selection: string[], tapped: CardT, cards: CardT[]): string[] {
+  if (selection.includes(tapped.id)) return selection.filter(id => id !== tapped.id)
+  const selected = cards.find(card => selection.includes(card.id))
+  if (selected && selected.rank !== tapped.rank) return [tapped.id]
+  if (selection.length >= 4) return selection
+  return [...selection, tapped.id]
+}
+
+export function isMatchingSelfEmoteEcho(
+  pending: { emote: EmoteId; sentAt: number } | null,
+  latest: EmoteEvent,
+  viewerId: string,
+  now = Date.now(),
+): boolean {
+  return Boolean(
+    pending &&
+    latest.playerId === viewerId &&
+    latest.emote === pending.emote &&
+    now - pending.sentAt >= 0 && now - pending.sentAt < 2500,
+  )
+}
 
 function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }): Zone {
   if (p.hand.length > 0) return 'hand'
@@ -51,7 +83,7 @@ function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }):
 
 export function TableScreen({
   state, viewerId, viewerActive, error, onPlay, onPickUp, onLeave, onOpenRules,
-  soundOn, onToggleSound, connectionBadge, seatOffline,
+  soundOn, onToggleSound, connectionBadge, seatOffline, latestEmote, onSendEmote,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
   const current = state.players[state.currentPlayerIdx]
@@ -64,6 +96,8 @@ export function TableScreen({
   const [flash, setFlash] = useState<string | null>(null)     // transient feed copy (errors, guards)
   const [pickupArmed, setPickupArmed] = useState(false)
   const [burning, setBurning] = useState(false)
+  const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
+  const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
   const debounceRef = useRef(0)
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const announcer = useAnnouncer()
@@ -151,6 +185,15 @@ export function TableScreen({
 
   useSoundFromLog(state, soundOn)
 
+  useEffect(() => {
+    if (!latestEmote) return
+    const pending = pendingSelfEmote.current
+    if (isMatchingSelfEmoteEcho(pending, latestEmote, viewerId)) {
+      return
+    }
+    setDisplayedEmote(latestEmote)
+  }, [latestEmote, viewerId])
+
   // Surface external (server) errors assertively.
   useEffect(() => { if (error) announcer.sayAssertive(error) }, [error]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -200,40 +243,42 @@ export function TableScreen({
     onPickUp()
   }
 
+  const sendEmote = (emote: EmoteId) => {
+    const sentAt = Date.now()
+    const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt }
+    if (onSendEmote) pendingSelfEmote.current = { emote, sentAt }
+    setDisplayedEmote(event)
+    onSendEmote?.(emote)
+  }
+
   const tapCard = (card: CardT, cardZone: Zone) => {
     if (!viewerActive) return
     setPickupArmed(false)
     if (cardZone !== zone) return // only the active zone is live (D6)
-    const isSelected = selection.includes(card.id)
-
     if (zone === 'faceDown') {
       // Blind plays are single cards (D7): tap toggles a single selection.
+      const isSelected = selection.includes(card.id)
       setSelection(isSelected ? [] : [card.id])
       emitSoundDebounced(isSelected ? 'deselect' : 'select')
       return
     }
 
-    if (isSelected) {
-      setSelection(selection.filter(id => id !== card.id))
-      emitSoundDebounced('deselect')
-      return
-    }
     if (!playableNow(card)) {
       explain(
         topRank
-          ? `${card.rank === 'JOKER' ? 'The Joker' : `The ${card.rank}`} is lower than the ${topRank}`
+          ? `${card.rank === 'JOKER' ? 'The Joker' : `The ${card.rank}`} cannot be played on the ${topRank}`
           : 'That card cannot be played now',
         card.id,
       )
       return
     }
-    if (selectedRank && card.rank !== selectedRank) return // inert while a set is forming (§6.1)
-    if (selection.length >= 4) {
+    const next = nextRankSelection(selection, card, zoneCards)
+    if (next === selection) {
       explain('Four cards maximum per play', card.id)
       return
     }
-    setSelection([...selection, card.id])
-    emitSoundDebounced('select')
+    setSelection(next)
+    emitSoundDebounced(selection.includes(card.id) ? 'deselect' : 'select')
   }
 
   // Stable, ref-routed activators — Card's memo ignores onActivate, so these
@@ -265,7 +310,7 @@ export function TableScreen({
       if (!inZone) { states.set(c.id, 'rest'); continue }
       if (invalidId === c.id) { states.set(c.id, 'invalid'); hints.set(c.id, 'not playable'); continue }
       if (playableNow(c)) {
-        if (selectedRank && c.rank !== selectedRank) { states.set(c.id, 'disabled'); hints.set(c.id, 'not playable') }
+        if (selectedRank && c.rank !== selectedRank) { states.set(c.id, 'playable'); hints.set(c.id, 'playable, replaces selection') }
         else if (selectedRank) { states.set(c.id, 'joinable'); hints.set(c.id, 'playable') }
         else { states.set(c.id, 'playable'); hints.set(c.id, 'playable') }
       } else {
@@ -308,44 +353,50 @@ export function TableScreen({
   if (!viewer) return null
 
   const endgameZoneLive = viewerActive && (zone === 'faceUp' || zone === 'faceDown')
+  const emotePlayer = displayedEmote
+    ? state.players.find(player => player.id === displayedEmote.playerId)?.name
+    : undefined
 
   return (
-    <div className="app-viewport bg-felt text-cream flex flex-col table-select-none">
+    <div className="app-viewport game-screen bg-felt text-cream flex flex-col table-select-none">
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
+      <EmoteFeedback event={displayedEmote} playerName={emotePlayer} />
 
-      {/* Desktop (§3.5): the portrait column stretches to 720px, centered. */}
-      <div className="mx-auto w-full max-w-[720px] flex-1 flex flex-col min-h-0">
-      {/* Z1 — OpponentStrip + badge + menu */}
-      <header className="relative flex items-center px-s2">
-        <div className="shrink-0 w-[88px]">{connectionBadge}</div>
-        <div className="flex-1 min-w-0">
-          <OpponentStrip seats={seats} activeSeatId={current?.id ?? null} />
+      <div className="game-shell">
+      <header className="game-header">
+        <div className="game-topbar">
+          <div className="game-connection">{connectionBadge}</div>
+          <div className="game-turn-label" aria-live="polite">
+            <span>{isViewerTurn && viewerActive ? 'Your turn' : `${current?.name ?? 'Table'}'s turn`}</span>
+          </div>
+          <div className="game-tools">
+            <EmoteButton onSend={sendEmote} />
+            <QuietMenu
+              onOpenRules={onOpenRules}
+              soundOn={soundOn}
+              onToggleSound={onToggleSound}
+              onLeave={onLeave}
+              matchRunning
+            />
+          </div>
         </div>
-        <div className="shrink-0 w-[88px] flex justify-end">
-          <QuietMenu
-            onOpenRules={onOpenRules}
-            soundOn={soundOn}
-            onToggleSound={onToggleSound}
-            onLeave={onLeave}
-            matchRunning
-          />
-        </div>
+        <OpponentStrip seats={seats} activeSeatId={current?.id ?? null} />
       </header>
 
-      {/* Z2 — felt: pile pair + feed. Tapping felt clears the selection (§6.1). */}
       <main
-        className="flex-1 flex flex-col justify-center min-h-0"
+        className="game-center"
         onClick={() => { setSelection([]); setPickupArmed(false) }}
       >
         <PileArea
           stockCount={state.stock.length}
           top={top}
           pileCount={ps}
+          effectiveRank={topRank}
           burning={burning}
           teachHint={ps === 0 && viewerActive}
         />
-        <div className="mt-s2">
+        <div className="game-feed">
           <ActionFeed text={feed.text} feedKey={feed.key} tone={feed.tone} />
         </div>
       </main>
@@ -364,7 +415,7 @@ export function TableScreen({
       />
 
       {/* Z4 — ActionBar + hand fan, flush to safe-area bottom */}
-      <footer className="app-bottom-zone mt-s2">
+      <footer className="app-bottom-zone game-footer">
         <div onClick={e => e.stopPropagation()}>
           {viewerActive && (
             <ActionBar

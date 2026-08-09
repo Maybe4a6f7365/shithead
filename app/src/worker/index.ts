@@ -319,6 +319,9 @@ export class Room {
       case 'CHAT':
         this.chat(session, message.text)
         break
+      case 'EMOTE':
+        this.emote(session, message.emote)
+        break
       case 'PING':
         this.send(session, { type: 'PONG', ts: Date.now() })
         break
@@ -666,6 +669,17 @@ export class Room {
     this.broadcast({ type: 'CHAT', playerId: session.playerId, text, ts: Date.now() })
   }
 
+  /**
+   * Relay a validated reaction to authenticated room members only. Emotes do
+   * not touch RoomData, storage, the game log, or sequence counters: they are
+   * intentionally short-lived UI feedback. The socket-wide message limiter
+   * in onMessage also applies, so reactions cannot bypass normal rate limits.
+   */
+  private emote(session: Session, emote: Extract<ClientMsg, { type: 'EMOTE' }>['emote']): void {
+    if (!session.playerId) return
+    this.broadcast({ type: 'EMOTE', playerId: session.playerId, emote, ts: Date.now() })
+  }
+
   private async leaveRoom(session: Session): Promise<void> {
     const data = this.data
     if (!data || !session.playerId) return
@@ -757,7 +771,7 @@ export class Room {
   private broadcast(message: OutMsg): void {
     // A WebSocket is not a room member until CREATE/JOIN/RESUME succeeds.
     // Rejected late joins and idle unauthenticated sockets must not observe
-    // roster updates or chat (and sendGame independently applies this guard).
+    // roster, chat, or emote traffic (and sendGame independently applies this guard).
     for (const session of this.sessions.values()) {
       if (session.playerId) this.send(session, message)
     }

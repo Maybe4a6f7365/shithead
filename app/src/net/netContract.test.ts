@@ -178,6 +178,24 @@ describe('RoomClient authentication ordering', () => {
     client.close()
   })
 
+  it('drops stale emotes instead of replaying them after authentication', () => {
+    let client!: RoomClient
+    client = new RoomClient({
+      url: 'ws://example.test/api/room/ABC123/ws',
+      onMessage: () => {},
+      onOpen: () => client.send({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'Ada' }),
+    })
+    const socket = FakeWebSocket.instances[0]
+    client.send({ type: 'EMOTE', emote: 'laugh' })
+    socket.open()
+    client.markAuthenticated()
+    expect(socket.sent.map(message => message.type)).toEqual(['JOIN_ROOM'])
+
+    client.send({ type: 'EMOTE', emote: 'laugh' })
+    expect(socket.sent.at(-1)).toEqual({ type: 'EMOTE', emote: 'laugh', version: PROTOCOL_VERSION })
+    client.close()
+  })
+
   it('does not delete a resumable credential when explicit leave is offline', () => {
     saveSession({ roomCode: 'ABC123', playerId: 'p1', playerName: 'Ada', resumeToken: 'token' })
     const { result, unmount } = renderHook(() => useMultiplayerRoom({
@@ -216,6 +234,28 @@ describe('RoomClient authentication ordering', () => {
     act(() => socket.receive({ type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' }))
     expect(result.current.error).toBeNull()
     expect(result.current.notice).toBe('Game already in progress')
+    unmount()
+  })
+
+  it('sends typed emotes after authentication and exposes relayed emote events', () => {
+    vi.useFakeTimers()
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+
+    act(() => result.current.sendEmote('fire'))
+    expect(socket.sent.at(-1)).toEqual({ type: 'EMOTE', emote: 'fire', version: PROTOCOL_VERSION })
+
+    act(() => socket.receive({ type: 'EMOTE', version: PROTOCOL_VERSION, playerId: 'p2', emote: 'wow', ts: 1234 }))
+    expect(result.current.latestEmote).toEqual({ playerId: 'p2', emote: 'wow', ts: 1234 })
+
+    act(() => vi.advanceTimersByTime(2501))
+    expect(result.current.latestEmote).toBeNull()
     unmount()
   })
 })

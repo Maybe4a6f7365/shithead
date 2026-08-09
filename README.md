@@ -4,11 +4,11 @@ A web-first, mobile-optimized Shithead implementation with AI bots, online multi
 
 ## 🎴 Features
 
-- **Mobile-first PWA** — installable, portrait-locked, touch-optimized
+- **Mobile-first PWA** — installable, touch-optimized, and responsive in portrait or landscape
 - **Single-device hot-seat** — 2-5 players, mix humans + AI (Easy/Medium/Hard)
 - **Online multiplayer** — create a room, share the code, play with friends
 - **Strict rules engine** — 100% test coverage on game logic
-- **Hand-coded SVG cards** — public-domain woodcut-inspired style
+- **Hand-coded cards** — crisp, modern card faces with no image dependency
 - **No tracking, no analytics** — your game data is yours
 
 ## 🏗️ Architecture
@@ -39,7 +39,7 @@ Standard German Shithead variant:
 - **Deal:** 3 cards face-down, then 6 visible cards. Choose any 3 of those 6 for the face-up final row; the other 3 become your hand
 - **Goal:** Lose all your cards. Last player holding = **Shithead**.
 - **Start:** the player with the lowest-ranked face-up final card begins
-- **Play:** play a card or equal-rank set ≥ top of wastepile. Can't/won't → pick up pile
+- **Play:** normally play one card or any number of cards of the same rank that match or beat the effective pile rank; special cards modify this below. Can't/won't → pick up pile
 - **Refill:** after playing, draw back up to 3 cards while the stock still has cards
 - **Endgame phase:** when stock runs out, play from face-up, then face-down blind
 - **Next-round exchange (optional):** after everyone chooses their face-up final row, the previous winner may swap exactly one of those 3 cards with exactly one face-up final card belonging to the previous Shithead — or skip the exchange
@@ -48,7 +48,10 @@ Standard German Shithead variant:
 
 | Card | Effect |
 |------|--------|
-| **2** | Wild — can be played on anything, anything can follow |
+| **2** | Reset — play anytime; removes the active rank constraint, so anything can follow |
+| **3** | Copy — play anytime; counts exactly like the effective card below it |
+| **7** | Low — the next ordinary card must be 7 or lower |
+| **8** | Skip — skips one active player per 8 played; equal-rank 8s stack |
 | **10** | Play anytime — clears the pile, same player leads |
 | **Quartet** (4× same rank) | Same as 10 — clears pile, same player leads |
 | **Joker** | Wild + clears pile |
@@ -129,11 +132,11 @@ shithead-game/
 
 ## 🎨 Style
 
-Woodcut-inspired palette:
-- Cream `#faf8f3`
-- Burgundy `#a23a1e`
-- Forest `#2d4a2b`
-- Gold `#c8a35a`
+Modern mobile-game palette:
+- Midnight `#0b1120`
+- Coral `#d33656`
+- Teal `#4de0c4`
+- Amber `#f6b94b`
 
 ## 📜 License
 

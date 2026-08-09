@@ -38,7 +38,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="app-viewport bg-felt text-cream flex flex-col">
-      <main className="flex-1 overflow-y-auto w-full max-w-[400px] mx-auto px-s4 py-s6">
+      <main className="screen-content flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5">
         <button
           type="button"
           onClick={onBack}
@@ -56,7 +56,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
 
         <div className="flex flex-col gap-s4 mt-s5">
           {players.map((p, i) => (
-            <div key={i} className="flex flex-col gap-s2">
+            <div key={i} className="surface-panel player-config flex flex-col gap-s2">
               <div className="flex items-end gap-s2">
                 <div className="flex-1">
                   <label
@@ -72,7 +72,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
                     placeholder={`Player ${i + 1}`}
                     maxLength={12}
                     autoComplete="off"
-                    className="w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body"
+                    className="modern-input w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body"
                   />
                 </div>
                 {players.length > 2 && (
@@ -148,7 +148,7 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
         <button
           type="button"
           onClick={deal}
-          className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+          className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase"
         >
           Deal
         </button>

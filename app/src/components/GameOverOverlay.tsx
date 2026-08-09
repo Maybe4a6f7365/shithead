@@ -41,7 +41,7 @@ export function GameOverOverlay({
         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
         transition={reduceMotion ? { duration: 0.15 } : { duration: 0.2, ease: [0.2, 0.8, 0.2, 1], delay: 0.2 }}
-        className="game-over-card w-full max-w-[360px] max-h-full overflow-y-auto bg-cream text-ink rounded-button p-s5 text-center"
+        className="game-over-card w-full max-w-[370px] max-h-full overflow-y-auto bg-cream text-ink rounded-button p-s5 text-center"
       >
         {result === 'lose' && (
           <motion.div
@@ -90,7 +90,7 @@ export function GameOverOverlay({
               type="button"
               onClick={onRematch}
               disabled={rematchPending}
-              className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1 disabled:opacity-50"
+              className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase disabled:opacity-50"
             >
               {rematchPending ? 'Starting…' : 'Rematch'}
             </button>

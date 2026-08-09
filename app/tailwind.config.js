@@ -1,40 +1,38 @@
 // ============================================================================
-// Tailwind theme — 1:1 mirror of TOKENS.css (DESIGN.md §10).
-// Hardcoded hex values are banned in components after this migration;
-// they live ONLY here and in src/styles/index.css custom properties.
+// Tailwind mirror of the midnight game palette in styles/index.css.
 // ============================================================================
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        felt: '#2d4a2b',
-        'felt-raised': '#345631',
-        'felt-deep': '#1f3a1e',
-        cream: '#faf8f3',
-        'cream-dim': 'rgba(250, 248, 243, 0.62)',
-        ink: '#221c15',
-        'ink-soft': '#5a5348',
-        burgundy: '#a23a1e',
-        gold: '#c8a35a',
-        'gold-bright': '#dcb878',
-        success: '#3e6b38',
-        danger: '#b3371f',
-        'danger-bright': '#f0a08e',
-        'muted-felt': '#b8cbb2',
-        online: '#8fae7f',
-        hairline: 'rgba(250, 248, 243, 0.14)',
-        scrim: 'rgba(31, 58, 30, 0.78)',
-        'card-edge': 'rgba(34, 28, 21, 0.14)',
-        'slot-dash': 'rgba(250, 248, 243, 0.35)',
-        joinable: 'rgba(220, 184, 120, 0.55)',
+        felt: '#0b1120',
+        'felt-raised': '#17233a',
+        'felt-deep': '#070c17',
+        cream: '#f8fafc',
+        'cream-dim': 'rgba(226, 232, 240, 0.70)',
+        ink: '#0b1020',
+        'ink-soft': '#526075',
+        burgundy: '#d33656',
+        gold: '#f6b94b',
+        'gold-bright': '#4de0c4',
+        success: '#24c9ad',
+        danger: '#d33656',
+        'danger-bright': '#ff7b91',
+        'muted-felt': '#93a4ba',
+        online: '#43dfb9',
+        hairline: 'rgba(148, 163, 184, 0.18)',
+        scrim: 'rgba(3, 7, 18, 0.82)',
+        'card-edge': 'rgba(15, 23, 42, 0.13)',
+        'slot-dash': 'rgba(148, 163, 184, 0.42)',
+        joinable: 'rgba(77, 224, 196, 0.68)',
       },
       fontFamily: {
-        display: ['Fraunces', 'ui-serif', 'Georgia', 'serif'],
+        display: ['ui-sans-serif', 'system-ui', '-apple-system', '"Segoe UI"', 'sans-serif'],
         ui: ['ui-sans-serif', 'system-ui', '-apple-system', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
       },
       fontSize: {
-        display: ['34px', '40px'],
+        display: ['34px', '38px'],
         code: ['30px', '36px'],
         title: ['20px', '26px'],
         body: ['15px', '22px'],
@@ -56,7 +54,7 @@ export default {
       },
       borderRadius: {
         well: '12px',
-        button: '8px',
+        button: '14px',
       },
       transitionDuration: {
         'dur-1': '120ms',

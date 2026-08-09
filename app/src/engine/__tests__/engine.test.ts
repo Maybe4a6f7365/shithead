@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   makeDeck, shuffle, seededRng, canPlay, isQuartet, playClearsPile,
   initGame, rearrange, startPlay, playCards, pickUpPile,
-  RANK_ORDER, getCurrentPlayer, getTopCard, pileSize, MAX_LOG_ENTRIES,
+  RANK_ORDER, getCurrentPlayer, getTopCard, getTopRank, pileSize, MAX_LOG_ENTRIES,
 } from '../index'
 import type { Card } from '../index'
 import { c, mkState } from './helpers'
@@ -66,9 +66,10 @@ describe('shuffle', () => {
 })
 
 describe('canPlay', () => {
-  it('2, 10 and Joker can be played on anything (README: play anytime)', () => {
+  it('2, 3, 10 and Joker can be played on anything', () => {
     for (const top of ['A','K','3','10'] as const) {
       expect(canPlay(c('2'), top)).toBe(true)
+      expect(canPlay(c('3'), top)).toBe(true)
       expect(canPlay(c('10'), top)).toBe(true)
       expect(canPlay(c('JOKER', null), top)).toBe(true)
     }
@@ -83,12 +84,20 @@ describe('canPlay', () => {
     expect(canPlay(c('7'), '7')).toBe(true)
     expect(canPlay(c('A'), 'K')).toBe(true)
   })
-  it('lower rank cannot be played on higher', () => {
-    expect(canPlay(c('5'), '7')).toBe(false)
-    expect(canPlay(c('3'), 'A')).toBe(false)
+  it('lower ordinary ranks cannot be played on a higher non-7 rank', () => {
+    expect(canPlay(c('5'), '9')).toBe(false)
+    expect(canPlay(c('4'), 'A')).toBe(false)
   })
-  it('anything non-wild follows a 2 (wild top)', () => {
-    expect(canPlay(c('3'), '2')).toBe(true)
+  it('a 7 reverses the comparison and forces an ordinary rank of 7 or lower', () => {
+    const legal = ['2', '3', '4', '5', '6', '7', '10', 'JOKER'] as const
+    const illegal = ['8', '9', 'J', 'Q', 'K', 'A'] as const
+    for (const rank of legal) {
+      expect(canPlay(c(rank, rank === 'JOKER' ? null : '♠'), '7')).toBe(true)
+    }
+    for (const rank of illegal) expect(canPlay(c(rank), '7')).toBe(false)
+  })
+  it('treats a direct legacy top-rank 2 as unrestricted', () => {
+    expect(canPlay(c('4'), '2')).toBe(true)
     expect(canPlay(c('A'), '2')).toBe(true)
   })
 })
@@ -264,6 +273,30 @@ describe('helpers', () => {
     state.pile[1].cleared = true // legacy shape tolerance
     expect(getTopCard(state)!.rank).toBe('5')
     expect(pileSize(state)).toBe(1)
+  })
+  it('keeps the visible pile top while chained 3s copy the effective rank below', () => {
+    const state = mkState({
+      players: [{ id: 'a' }, { id: 'b' }],
+      pile: [[c('7')], [c('3')], [c('3', '♥')]],
+    })
+    expect(getTopCard(state)!.rank).toBe('3')
+    expect(getTopRank(state)).toBe('7')
+  })
+  it('treats 2 as a reset barrier, including through any 3s played above it', () => {
+    const state = mkState({
+      players: [{ id: 'a' }, { id: 'b' }],
+      pile: [[c('7')], [c('3')], [c('2')], [c('3', '♥')]],
+    })
+    expect(getTopCard(state)!.rank).toBe('3')
+    expect(getTopRank(state)).toBeNull()
+  })
+  it('returns no effective rank when the pile contains only copying 3s', () => {
+    const state = mkState({
+      players: [{ id: 'a' }, { id: 'b' }],
+      pile: [[c('3')], [c('3', '♥')]],
+    })
+    expect(getTopCard(state)!.rank).toBe('3')
+    expect(getTopRank(state)).toBeNull()
   })
   it('log is capped at MAX_LOG_ENTRIES', () => {
     const log = Array.from({ length: MAX_LOG_ENTRIES }, () => ({ type: 'PICK_UP_PILE' as const, playerId: 'a' }))

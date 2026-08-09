@@ -11,7 +11,7 @@ import { c, mkState } from './helpers'
 describe('pickAIMove move generation', () => {
   it('picks up when nothing in hand beats the pile', () => {
     const state = mkState({
-      players: [{ id: 'a' }, { id: 'b', hand: [c('3')], faceUp: [c('4')] }],
+      players: [{ id: 'a' }, { id: 'b', hand: [c('4')], faceUp: [c('5')] }],
       pile: [[c('A')]],
       currentPlayerIdx: 1,
     })
@@ -106,6 +106,30 @@ describe('pickAIMove move generation', () => {
     })
     const move = pickAIMove(state, state.players[1], 'hard', seededRng(1))
     expect(move.cards![0].rank).toBe('2')
+  })
+
+  it('obeys the reversed 7 constraint and selects a legal low card', () => {
+    const state = mkState({
+      players: [{ id: 'a' }, { id: 'b', hand: [c('6'), c('8'), c('Q')] }],
+      pile: [[c('7')]],
+      currentPlayerIdx: 1,
+    })
+    const move = pickAIMove(state, state.players[1], 'medium', seededRng(1))
+    expect(move.type).toBe('play')
+    expect(move.cards![0].rank).toBe('6')
+    expect(playCards(state, 'b', move.cards!).error).toBeUndefined()
+  })
+
+  it('can use a copying 3 on an otherwise unbeatable pile', () => {
+    const state = mkState({
+      players: [{ id: 'a' }, { id: 'b', hand: [c('3'), c('6')] }],
+      pile: [[c('A')]],
+      currentPlayerIdx: 1,
+    })
+    const move = pickAIMove(state, state.players[1], 'medium', seededRng(1))
+    expect(move.type).toBe('play')
+    expect(move.cards![0].rank).toBe('3')
+    expect(playCards(state, 'b', move.cards!).error).toBeUndefined()
   })
 
   it('is deterministic with a seeded rng', () => {

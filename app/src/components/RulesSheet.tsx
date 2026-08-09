@@ -22,7 +22,7 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
   {
     title: 'On your turn',
     lines: [
-      'Play one card — or a set of equal rank — that matches or beats the pile top.',
+      'Normally, play one card — or any number of cards of the same rank — that matches or beats the effective pile rank.',
       'Draw from the stock to refill your hand to 3.',
       "Can't play — or prefer not to? Pick up the whole pile.",
       'Hand empty: play your face-up cards. Those gone: flip a face-down card blind.',
@@ -31,7 +31,10 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
   {
     title: 'Special cards',
     lines: [
-      '2 — reset. Playable on anything; anything may follow.',
+      '2 — reset. Playable on anything; it removes the active rank constraint, so anything may follow.',
+      '3 — copy. Playable on anything; it counts exactly like the effective card beneath it.',
+      '7 — low. The next ordinary card must be 7 or lower.',
+      '8 — skip. Skips one active player per 8 played; equal-rank 8s stack.',
       '10 — burn. Removes the pile from the game; you lead again.',
       'Four of a kind in one play — burns the pile the same way.',
       'Joker (when enabled) — wild. Playable on anything and burns the pile.',

@@ -17,6 +17,7 @@
 //    TRIBUTE_SWAP {winnerCardId, loserCardId} optional public-row exchange
 //    TRIBUTE_SKIP {}                         previous winner declines the exchange
 //    CHAT {text}                             in-room chat (<=200 chars)
+//    EMOTE {emote}                           authenticated ephemeral reaction
 //    PING {}                                 keepalive
 //  Server → Client:
 //    WELCOME {playerId, room, resumeToken}   seat assigned; token is secret
@@ -26,6 +27,7 @@
 //    ERROR {code, message}                   action rejected
 //    PLAYER_JOINED / PLAYER_LEFT             lobby deltas
 //    CHAT {playerId, text, ts}               chat relay
+//    EMOTE {playerId, emote, ts}             ephemeral reaction relay
 //    PONG {ts}                               keepalive reply
 //
 // VERSIONING & SEQUENCING
@@ -49,6 +51,17 @@ import { MAX_LOG_ENTRIES } from './index'
 /** Wire protocol version. Bump on any breaking message change. */
 export const PROTOCOL_VERSION = 3
 
+/** Stable wire ids keep presentation (emoji/art/animation) out of the protocol. */
+export const EMOTE_IDS = ['thumbs-up', 'laugh', 'wow', 'fire'] as const
+export type EmoteId = typeof EMOTE_IDS[number]
+
+export interface EmoteEvent {
+  playerId: string
+  emote: EmoteId
+  /** Server timestamp; emotes are deliberately not persisted in room state. */
+  ts: number
+}
+
 // ---------- Client → Server ----------
 
 export type ClientMsg =
@@ -65,6 +78,7 @@ export type ClientMsg =
   | { type: 'TRIBUTE_SWAP'; winnerCardId: string; loserCardId: string; version?: number }
   | { type: 'TRIBUTE_SKIP'; version?: number }
   | { type: 'CHAT'; text: string; version?: number }
+  | { type: 'EMOTE'; emote: EmoteId; version?: number }
   | { type: 'PING'; version?: number }
 
 // ---------- Server → Client ----------
@@ -78,6 +92,7 @@ export type ServerMsg =
   | { type: 'PLAYER_JOINED'; player: PlayerSummary }
   | { type: 'PLAYER_LEFT'; playerId: string }
   | { type: 'CHAT'; playerId: string; text: string; ts: number }
+  | ({ type: 'EMOTE' } & EmoteEvent)
   | { type: 'PONG'; ts: number }
 
 // ---------- Types ----------
@@ -131,6 +146,9 @@ const isRulesPatch = (value: unknown): value is Partial<GameRules> => {
   return keys.every(key => allowed.has(key) && typeof value[key] === 'boolean')
 }
 
+export const isEmoteId = (value: unknown): value is EmoteId =>
+  typeof value === 'string' && (EMOTE_IDS as readonly string[]).includes(value)
+
 /** Optional version field: when present it must match PROTOCOL_VERSION. */
 const versionOk = (data: Record<string, unknown>) =>
   data.version === undefined || data.version === PROTOCOL_VERSION
@@ -160,6 +178,8 @@ export function isClientMsg(data: unknown): data is ClientMsg {
     }
     case 'CHAT':
       return typeof data.text === 'string' && data.text.length > 0 && data.text.length <= 200
+    case 'EMOTE':
+      return isEmoteId(data.emote)
     case 'SET_RULES':
       return isRulesPatch(data.rules)
     case 'TRIBUTE_SWAP':

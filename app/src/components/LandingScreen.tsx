@@ -1,6 +1,6 @@
 // ============================================================================
-// LandingScreen (§7.1) — Fraunces wordmark on felt, gold rule, two stacked
-// actions, quiet footer. No cream card floating in a void; no fake features.
+// LandingScreen — compact mobile-game welcome screen with a recognisable
+// card-stack mark and no decorative space competing with the primary action.
 // ============================================================================
 import { useState } from 'react'
 import { RulesSheet } from './RulesSheet'
@@ -12,22 +12,27 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
   const stamp = commit && commit !== 'local' ? commit.slice(0, 7) : 'v0.2.0'
 
   return (
-    <div className="app-viewport bg-felt text-cream flex flex-col">
-      <main className="flex-1 flex flex-col items-center justify-center px-s4 w-full max-w-[400px] mx-auto">
-        <h1 className="font-display text-display font-semibold tracking-[-0.01em] text-cream">SHITHEAD</h1>
-        <div className="w-12 h-[2px] bg-gold mt-s3 mb-s8" aria-hidden="true" />
-        <div className="w-full flex flex-col gap-s3">
+    <div className="app-viewport landing-screen bg-felt text-cream flex flex-col">
+      <main className="landing-content">
+        <div className="brand-mark" aria-hidden="true">
+          <span className="brand-mark__back" />
+          <span className="brand-mark__front">S</span>
+        </div>
+        <p className="text-label font-bold tracking-label uppercase text-gold-bright">The shedding card game</p>
+        <h1 className="brand-wordmark">SHITHEAD</h1>
+        <p className="landing-copy">Outplay the table. Empty your hand. Don’t be last.</p>
+        <div className="w-full flex flex-col gap-s3 mt-s7">
           <button
             type="button"
             onClick={onPlayOnline}
-            className="w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+            className="primary-action w-full px-s5 text-button font-bold tracking-button uppercase"
           >
             Play online
           </button>
           <button
             type="button"
             onClick={onPassAndPlay}
-            className="w-full min-h-[48px] rounded-button border-2 border-cream text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+            className="secondary-action w-full px-s5 text-button font-bold tracking-button uppercase"
           >
             Pass &amp; play / vs computer
           </button>
@@ -45,7 +50,7 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
       <RulesSheet open={rulesOpen} onClose={() => setRulesOpen(false)} />
       {aboutOpen && (
         <div className="fixed inset-0 z-scrim bg-scrim flex items-center justify-center p-s4" role="dialog" aria-modal="true" aria-label="About">
-          <div className="w-full max-w-[320px] bg-cream text-ink rounded-button p-s5 text-center">
+          <div className="surface-panel w-full max-w-[340px] bg-cream text-ink rounded-button p-s5 text-center">
             <h2 className="font-display text-title font-semibold mb-s2">Shithead</h2>
             <p className="text-body text-ink-soft">
               The classic shedding card game. Pass &amp; play with friends, take on the
@@ -54,7 +59,7 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
             <button
               type="button"
               onClick={() => setAboutOpen(false)}
-              className="mt-s4 w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase"
+              className="primary-action mt-s4 w-full px-s5 text-button font-bold tracking-button uppercase"
             >
               Close
             </button>

@@ -8,8 +8,10 @@
 //      and defines the face-up-3 rule for choosing the *starting player*.
 //      The old "empty pile must be opened with 3/10/Joker" restriction was an
 //      invention and disagreed with itself (canPlay vs playCards). Removed.
-//  D2. 10 is "play anytime" per the README special-cards table, in addition
-//      to 2 and Joker. (canPlay(10, anything) === true.)
+//  D2. 2, 3, 10 and Joker are playable anytime. A 2 resets the active rank
+//      constraint: the next player may play any card. A 3 copies the first
+//      effective rank beneath any chain of 3s; above a reset 2 it therefore
+//      also leaves play unrestricted.
 //  D3. Burns (10 / quartet / Joker) REMOVE the pile from the game entirely:
 //      burned cards leave play, the pile is empty, and the same player leads
 //      on the empty pile. If that player just went out, the lead passes to
@@ -43,6 +45,10 @@
 //      Object room — can loop forever. When the cap is hit the game ends and
 //      the player holding the MOST cards is the Shithead (ties: earliest in
 //      turn order). ~88% of AI games finish naturally under half the cap.
+//  D12. A 7 reverses the normal rank comparison for the next effective play:
+//      ordinary cards must be 7 or lower. An 8 skips one active player per
+//      card in the equal-rank set. Already-out players are never counted;
+//      a quartet burn takes precedence over its skip effect.
 // ============================================================================
 
 // ---------- Types ----------
@@ -142,7 +148,8 @@ export const MAX_PLAYERS = 6
 /** Hard cap on total actions per game; stalemate tiebreak (D11). */
 export const MAX_GAME_TURNS = 1000
 
-// 2 is wild (-1), 3 is the lowest legal play, A is highest.
+// 2 is a reset (-1), 3 is the lowest ordered rank, A is highest. Both 2 and
+// 3 have special play/effective-top behavior handled below.
 // 10 keeps its natural rank for pile-top comparisons (a pile topped by a 10
 // burns immediately, so this only matters for canPlay display helpers).
 export const RANK_ORDER: Record<Rank, number> = {
@@ -212,13 +219,14 @@ export function shuffle<T>(arr: T[], rng: () => number = Math.random): T[] {
 
 /**
  * Can `card` be played on a pile whose effective top rank is `topRank`
- * (null = empty pile)? See D1/D2: any card leads an empty pile;
- * 2, 10 and Joker are play-anytime. Wild top ranks (2 ⇒ -1) let anything
- * non-wild follow.
+ * (null = empty pile or a reset 2)? See D1/D2/D12: any card leads without
+ * an active constraint; 2, 3, 10 and Joker are play-anytime; a 7 requires
+ * an ordinary response of 7 or lower.
  */
 export function canPlay(card: Card, topRank: Rank | null): boolean {
   if (topRank === null) return true
-  if (card.rank === '2' || card.rank === '10' || card.rank === 'JOKER') return true
+  if (card.rank === '2' || card.rank === '3' || card.rank === '10' || card.rank === 'JOKER') return true
+  if (topRank === '7') return RANK_ORDER[card.rank] <= RANK_ORDER['7']
   return RANK_ORDER[card.rank] >= RANK_ORDER[topRank]
 }
 
@@ -241,11 +249,19 @@ export function playClearsPile(cards: Card[]): boolean {
   return false
 }
 
-/** Effective top rank of the pile, skipping any legacy cleared entries. */
+/**
+ * Effective top rank of the pile, skipping legacy cleared entries and
+ * copying 3s. A 2 is a reset boundary: cards beneath it no longer constrain
+ * play, including when one or more copying 3s sit above that 2.
+ */
 export function getTopRank(state: GameState): Rank | null {
   for (let i = state.pile.length - 1; i >= 0; i--) {
     const entry = state.pile[i]
-    if (!entry.cleared && entry.cards.length > 0) return entry.cards[0].rank
+    if (entry.cleared || entry.cards.length === 0) continue
+    const rank = entry.cards[0].rank
+    if (rank === '3') continue
+    if (rank === '2') return null
+    return rank
   }
   return null
 }
@@ -655,9 +671,17 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
 
   // Turn: burn ⇒ same player leads on the empty pile — unless they just went
   // out, in which case the lead passes to the next active player (D3).
+  // Otherwise each played 8 skips one additional active player (D12). Calling
+  // nextActiveIdx repeatedly naturally ignores out players and handles small
+  // tables: in a 2-player game one 8 returns the turn to its player, while a
+  // pair skips both active seats and lands on the opponent.
   let nextIdx = state.currentPlayerIdx
   if (!cleared || wentOut) {
     nextIdx = nextActiveIdx(nextPlayers, state.currentPlayerIdx, state.playDirection)
+    const skipCount = !cleared && realCards[0].rank === '8' ? realCards.length : 0
+    for (let skipped = 0; skipped < skipCount; skipped++) {
+      nextIdx = nextActiveIdx(nextPlayers, nextIdx, state.playDirection)
+    }
   }
 
   // Game over — only one player left = loser
@@ -746,7 +770,7 @@ export interface AIMove {
   cards?: Card[]
 }
 
-const SPECIALS: ReadonlySet<Rank> = new Set(['2', '10', 'JOKER'])
+const SPECIALS: ReadonlySet<Rank> = new Set(['2', '3', '10', 'JOKER'])
 
 /**
  * Choose a move for an AI player. Never stalls: the returned move is always
@@ -764,9 +788,8 @@ const SPECIALS: ReadonlySet<Rank> = new Set(['2', '10', 'JOKER'])
  *            permanently removes those cards from the game and denies
  *            opponents a cheap pickup, while a small pile is not worth a
  *            premium card) or when it wins the game; prefers spending a 2
- *            before a burn card when only specials are playable (2s are the
- *            least scarce resource: 4 in deck vs 4 tens / 2 jokers, and a 2
- *            does not remove cards from the game).
+ *            before a burn card when only specials are playable (2s reset
+ *            the constraint without removing cards from the game).
  *
  * Pass a seeded rng for deterministic behavior.
  */
@@ -842,7 +865,7 @@ export function getCurrentPlayer(state: GameState): Player | null {
   return state.players[state.currentPlayerIdx] ?? null
 }
 
-/** Effective top card of the pile (skips legacy cleared entries). */
+/** Physical visible top card of the pile (skips legacy cleared entries). */
 export function getTopCard(state: GameState): Card | null {
   for (let i = state.pile.length - 1; i >= 0; i--) {
     const entry = state.pile[i]

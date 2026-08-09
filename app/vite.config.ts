@@ -13,8 +13,8 @@ export default defineConfig({
         name: 'Shithead',
         short_name: 'Shithead',
         description: 'The classic shedding card game',
-        theme_color: '#2d4a2b',
-        background_color: '#faf8f3',
+        theme_color: '#0b1120',
+        background_color: '#0b1120',
         display: 'standalone',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
@@ -23,7 +23,8 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,webp,woff2}']
+        globPatterns: ['**/*.{js,css,html,svg,png,webp}'],
+        globIgnores: ['fonts/**']
       }
     })
   ],
