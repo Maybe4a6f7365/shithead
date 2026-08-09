@@ -342,6 +342,10 @@ async function main() {
   await host.waitType('PONG')
   ok('T8b active-round rules and duplicate START are nonfatal GAME_IN_PROGRESS errors')
 
+  // The preceding security checks intentionally send close to the production
+  // 20 msg/s cap. Let that rolling window expire so T8c observes BURN_IN
+  // validation rather than an unrelated RATE_LIMITED response.
+  await sleep(1_050)
   host.send({ type: 'READY' })
   guest.send({ type: 'READY' })
   const hostPlay = await host.waitType('GAME_STATE', m => m.state.phase === 'play')
