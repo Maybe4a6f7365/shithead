@@ -12,6 +12,12 @@ export interface CardProps {
   size?: 'mini' | 'full'
   onActivate?: () => void
   ariaHint?: string
+  /**
+   * When true, the interactive <button> is rendered with tabindex=0 so the
+   * hand-fan roving-tabindex loop can focus individual cards. Defaults to
+   * false to keep pile/back-card rendering as inert <div role="img">.
+   */
+  focusable?: boolean
 }
 
 const SUIT_NAME: Record<Suit, string> = {
@@ -85,7 +91,7 @@ function CardFace({ card, size }: { card: CardT; size: 'mini' | 'full' }) {
   )
 }
 
-function CardInner({ card, faceDown, state = 'rest', size = 'full', onActivate, ariaHint }: CardProps) {
+function CardInner({ card, faceDown, state = 'rest', size = 'full', onActivate, ariaHint, focusable }: CardProps) {
   const interactive = Boolean(onActivate)
   const isBack = faceDown || !card
   const label = cardAriaLabel(card, faceDown, ariaHint)
@@ -104,6 +110,7 @@ function CardInner({ card, faceDown, state = 'rest', size = 'full', onActivate, 
         onClick={onActivate}
         aria-label={label}
         aria-pressed={state === 'selected'}
+        tabIndex={focusable ? 0 : -1}
       >
         {body}
       </button>
@@ -122,5 +129,6 @@ export const Card = memo(CardInner, (previous, next) =>
   previous.faceDown === next.faceDown &&
   previous.state === next.state &&
   previous.size === next.size &&
-  previous.ariaHint === next.ariaHint
+  previous.ariaHint === next.ariaHint &&
+  previous.focusable === next.focusable
 )
