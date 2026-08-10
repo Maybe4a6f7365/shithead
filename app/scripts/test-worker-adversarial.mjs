@@ -7,7 +7,7 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '')
 const wsBase = baseUrl.replace(/^http/, 'ws')
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-const PROTOCOL_VERSION = 5
+const PROTOCOL_VERSION = 6
 
 let passed = 0
 function ok(name) {
@@ -198,7 +198,7 @@ async function main() {
   let host = await new Peer('host', wsUrl).connect()
   const guest = await new Peer('guest', wsUrl).connect()
 
-  host.send({ type: 'CREATE_ROOM', playerName: 'Host', version: PROTOCOL_VERSION })
+  host.send({ type: 'CREATE_ROOM', playerName: 'Ondřej', version: PROTOCOL_VERSION })
   const hostWelcome = await host.waitType('WELCOME')
   assert.equal(hostWelcome.version, PROTOCOL_VERSION, 'WELCOME must echo protocol version')
   assert.match(hostWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/, 'WELCOME must carry a high-entropy resumeToken')
@@ -211,6 +211,14 @@ async function main() {
   assert.notEqual(guestWelcome.resumeToken, hostToken1, 'tokens must be per-player unique')
   const guestId = guestWelcome.playerId
   ok(`T1 create/join: WELCOME carries version=${PROTOCOL_VERSION} and unique per-player resumeToken`)
+
+  await sleep(150)
+  for (const peer of [host, guest]) {
+    const lobbyOndraEvents = peer.rawLog.map(raw => JSON.parse(raw))
+      .filter(message => message.type === 'SYSTEM_EVENT' && message.event?.kind === 'ondra-mode')
+    assert.deepEqual(lobbyOndraEvents, [], 'Ondra mode fired before the round entered play')
+  }
+  ok('T1a Ondra mode does not fire during CREATE/JOIN lobby setup')
 
   // Token must never leak into broadcasts seen by the other player.
   await host.waitType('ROOM_STATE', m => m.room.players.length === 2)
@@ -252,6 +260,14 @@ async function main() {
   assert.equal(resumed.version, PROTOCOL_VERSION)
   assert.notEqual(resumed.resumeToken, hostToken1, 'resume must rotate the token')
   const hostToken2 = resumed.resumeToken
+  await sleep(100)
+  assert(
+    !host.rawLog.some(raw => {
+      const message = JSON.parse(raw)
+      return message.type === 'SYSTEM_EVENT' && message.event?.kind === 'ondra-mode'
+    }),
+    'RESUME rerolled Ondra mode before play',
+  )
   const stale = await new Peer('stale-token', wsUrl).connect()
   stale.send({
     type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId,
@@ -307,6 +323,39 @@ async function main() {
   }
   ok('T7a EMOTE is strict, server-timestamped, authenticated, and contains no state')
 
+  const cooldownLogStarts = new Map([host, guest].map(peer => [peer, peer.rawLog.length]))
+  host.send({ type: 'BROADCAST', broadcast: 'shrug' })
+  await sleep(100)
+  for (const peer of [host, guest]) {
+    assert(
+      !peer.rawLog.slice(cooldownLogStarts.get(peer)).some(raw => JSON.parse(raw).type === 'BROADCAST'),
+      'alternating EMOTE/BROADCAST bypassed the shared reaction cooldown',
+    )
+  }
+
+  host.send({ type: 'BROADCAST', broadcast: '<script>' })
+  await host.waitType('ERROR', message => /invalid message/i.test(message.message))
+  const hostLogBeforeUnauthBroadcast = host.rawLog.length
+  attacker.send({ type: 'BROADCAST', broadcast: 'shrug' })
+  await sleep(100)
+  assert(
+    !host.rawLog.slice(hostLogBeforeUnauthBroadcast).some(raw => JSON.parse(raw).type === 'BROADCAST'),
+    'unauthenticated BROADCAST was relayed',
+  )
+  await sleep(650)
+  host.send({ type: 'BROADCAST', broadcast: 'shrug' })
+  const [hostBroadcast, guestBroadcast] = await Promise.all([
+    host.waitType('BROADCAST', message => message.broadcast === 'shrug'),
+    guest.waitType('BROADCAST', message => message.broadcast === 'shrug'),
+  ])
+  for (const message of [hostBroadcast, guestBroadcast]) {
+    assert.equal(message.playerId, hostId)
+    assert.equal(message.version, PROTOCOL_VERSION)
+    assert.equal(typeof message.ts, 'number')
+    assert(!('state' in message), 'ephemeral BROADCAST must not include room/game state')
+  }
+  ok('T7aa BROADCAST is strict/authenticated/ephemeral and shares the EMOTE cooldown')
+
   // ---- T7b: strict partial rules, host authority, rapid merge
   guest.send({ type: 'SET_RULES', rules: { includeJokers: false } })
   await guest.waitType('ERROR', isError('NOT_HOST'))
@@ -346,7 +395,7 @@ async function main() {
   await sleep(200)
   for (const peer of unauthenticated) {
     const broadcastTypes = peer.rawLog.slice(unauthLogStarts.get(peer)).map(raw => JSON.parse(raw).type)
-      .filter(type => ['ROOM_STATE', 'CHAT', 'EMOTE', 'GAME_STATE'].includes(type))
+      .filter(type => ['ROOM_STATE', 'CHAT', 'EMOTE', 'BROADCAST', 'SYSTEM_EVENT', 'GAME_STATE'].includes(type))
     assert.deepEqual(broadcastTypes, [], `${peer.label} received authenticated room traffic`)
   }
   ok('T8a rejected and unauthenticated sockets receive no room/chat/emote/game broadcasts')
@@ -363,10 +412,21 @@ async function main() {
   // 20 msg/s cap. Let that rolling window expire so T8c observes BURN_IN
   // validation rather than an unrelated RATE_LIMITED response.
   await sleep(1_050)
+  const playTransitionLogStarts = new Map([host, guest].map(peer => [peer, peer.rawLog.length]))
   host.send({ type: 'READY' })
   guest.send({ type: 'READY' })
   const hostPlay = await host.waitType('GAME_STATE', m => m.state.phase === 'play')
   await guest.waitType('GAME_STATE', m => m.state.phase === 'play')
+  await sleep(100)
+  for (const peer of [host, guest]) {
+    const frames = peer.rawLog.slice(playTransitionLogStarts.get(peer)).map(raw => JSON.parse(raw))
+    const playIndex = frames.findIndex(message => message.type === 'GAME_STATE' && message.state?.phase === 'play')
+    const ondraIndexes = frames
+      .map((message, index) => message.type === 'SYSTEM_EVENT' && message.event?.kind === 'ondra-mode' ? index : -1)
+      .filter(index => index >= 0)
+    assert(playIndex >= 0, `${peer.label} did not receive the play GAME_STATE`)
+    assert.deepEqual(ondraIndexes, [], 'Ondra event must be delayed beyond the play transition')
+  }
   const playState = hostPlay.state
   const currentId = playState.players[playState.currentPlayerIdx].id
   const [current, idle] = currentId === hostId ? [host, guest] : [guest, host]
@@ -452,6 +512,26 @@ async function main() {
   const round1 = firstFinished.state
   assert.equal(round1.phase, 'gameOver')
   assert(round1.loserId, 'every terminal round must record the Shithead')
+  await sleep(100)
+  for (const peer of [host, guest]) {
+    const frames = peer.rawLog.slice(playTransitionLogStarts.get(peer)).map(raw => JSON.parse(raw))
+    const ondraIndexes = frames
+      .map((message, index) => message.type === 'SYSTEM_EVENT' && message.event?.kind === 'ondra-mode' ? index : -1)
+      .filter(index => index >= 0)
+    assert(ondraIndexes.length <= 1, `${peer.label} received a duplicate delayed Ondra event`)
+    if (ondraIndexes.length === 1) {
+      const eventIndex = ondraIndexes[0]
+      const event = frames[eventIndex].event
+      const preceding = frames[eventIndex - 1]
+      assert.equal(preceding?.type, 'GAME_STATE', 'delayed Ondra event must follow authoritative GAME_STATE')
+      assert(['play', 'endgame'].includes(preceding.state.phase), 'delayed Ondra event fired off-table')
+      assert(preceding.state.turnCount >= 3 && preceding.state.turnCount <= 7, 'delay was outside 3–7 actions')
+      assert.equal(event.playerId, hostId)
+      assert.equal(event.playerName, 'Ondřej')
+      assert.match(event.message, /^ondra-/)
+      assert.equal(typeof event.ts, 'number')
+    }
+  }
   ok('T11b authoritative autoplay reaches a terminal round and records the Shithead')
 
   // A natural first-out winner enables the optional next-round tribute. A
@@ -485,6 +565,7 @@ async function main() {
     await loserPeer.waitType('ERROR', isError('INVALID_MOVE'))
     const winnerFaceUp = hostTribute.state.players.find(p => p.id === pending.winnerId).faceUp[0]
     const loserFaceUp = hostTribute.state.players.find(p => p.id === pending.loserId).faceUp[0]
+    const tributeTransitionLogStarts = new Map([host, guest].map(peer => [peer, peer.rawLog.length]))
     winnerPeer.send({
       type: 'TRIBUTE_SWAP', winnerCardId: winnerFaceUp.id, loserCardId: loserFaceUp.id,
     })
@@ -497,6 +578,13 @@ async function main() {
         && m.state.players.find(p => p.id === pending.loserId)?.faceUp.some(c => c.id === winnerFaceUp.id)),
     ])
     assert.equal(afterSwap.state.players[afterSwap.state.currentPlayerIdx].id, expectedOpenerId(afterSwap.state))
+    await sleep(100)
+    for (const peer of [host, guest]) {
+      const immediateEvents = peer.rawLog.slice(tributeTransitionLogStarts.get(peer))
+        .map(raw => JSON.parse(raw))
+        .filter(message => message.type === 'SYSTEM_EVENT' && message.event?.kind === 'ondra-mode')
+      assert.deepEqual(immediateEvents, [], 'tribute-entry Ondra event must also be delayed')
+    }
     ok('T11c tribute is winner-only; an authorized face-up swap recomputes the opener')
   } else {
     assert.equal(round1.winnerId, null)

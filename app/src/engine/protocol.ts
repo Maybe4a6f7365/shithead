@@ -20,6 +20,7 @@
 //    TRIBUTE_SKIP {}                         previous winner declines the exchange
 //    CHAT {text}                             in-room chat (<=200 chars)
 //    EMOTE {emote}                           authenticated ephemeral reaction
+//    BROADCAST {broadcast}                   authenticated preset text reaction
 //    PING {}                                 keepalive
 //  Server → Client:
 //    WELCOME {playerId, room, resumeToken}   seat assigned; token is secret
@@ -30,6 +31,8 @@
 //    PLAYER_JOINED / PLAYER_LEFT             lobby deltas
 //    CHAT {playerId, text, ts}               chat relay
 //    EMOTE {playerId, emote, ts}             ephemeral reaction relay
+//    BROADCAST {playerId, broadcast, ts}     ephemeral preset text relay
+//    SYSTEM_EVENT {event}                    typed ephemeral room event
 //    PONG {ts}                               keepalive reply
 //
 // VERSIONING & SEQUENCING
@@ -51,7 +54,7 @@ import type { Card, GameRules, GameState, Phase } from './index'
 import { MAX_LOG_ENTRIES } from './index'
 
 /** Wire protocol version. Bump on any breaking message change. */
-export const PROTOCOL_VERSION = 5
+export const PROTOCOL_VERSION = 6
 
 /** Three decks contain at most twelve physical cards of one normal rank. */
 const MAX_CARDS_PER_ACTION = 12
@@ -66,8 +69,55 @@ export const EMOTE_IDS = [
   'cry',
   'heart',
   'clap',
+  'angry',
+  'rage',
+  'middle-finger',
+  'clown',
+  'skull',
+  'poop',
+  'eyes',
+  'peach',
+  'foot',
+  'melting',
+  'exploding-head',
+  'pleading',
+  'unamused',
+  'raised-eyebrow',
+  'thinking',
+  'shushing',
+  'zipper-mouth',
+  'partying',
+  'smiling-devil',
+  'salute',
 ] as const
 export type EmoteId = typeof EMOTE_IDS[number]
+
+/** Stable ids for the deliberately finite, server-validated text presets. */
+export const BROADCAST_IDS = [
+  'double-middle-finger',
+  'kiss-my-ass',
+  'upside-down-fuck',
+  'lenny',
+  'karma',
+  'shrug',
+  'womp-womp',
+  'kill-me',
+] as const
+export type BroadcastId = typeof BROADCAST_IDS[number]
+
+/** System copy is resolved by the client; the server never accepts free text. */
+export const PLAYER_LEFT_MESSAGE_IDS = ['bye-little-shits'] as const
+export type PlayerLeftMessageId = typeof PLAYER_LEFT_MESSAGE_IDS[number]
+
+export const ONDRA_MESSAGE_IDS = [
+  'ondra-faster',
+  'ondra-love-toes',
+  'ondra-fuck-me',
+  'ondra-farts-cutely',
+  'ondra-alpha',
+  'ondra-spank-me',
+] as const
+export type OndraMessageId = typeof ONDRA_MESSAGE_IDS[number]
 
 export interface EmoteEvent {
   playerId: string
@@ -75,6 +125,29 @@ export interface EmoteEvent {
   /** Server timestamp; emotes are deliberately not persisted in room state. */
   ts: number
 }
+
+export interface BroadcastEvent {
+  playerId: string
+  broadcast: BroadcastId
+  /** Server timestamp; broadcasts are deliberately not persisted in room state. */
+  ts: number
+}
+
+export type SystemEvent =
+  | {
+      kind: 'player-left'
+      playerId: string
+      playerName: string
+      message: PlayerLeftMessageId
+      ts: number
+    }
+  | {
+      kind: 'ondra-mode'
+      playerId: string
+      playerName: string
+      message: OndraMessageId
+      ts: number
+    }
 
 // ---------- Client → Server ----------
 
@@ -95,6 +168,7 @@ export type ClientMsg =
   | { type: 'TRIBUTE_SKIP'; version?: number }
   | { type: 'CHAT'; text: string; version?: number }
   | { type: 'EMOTE'; emote: EmoteId; version?: number }
+  | { type: 'BROADCAST'; broadcast: BroadcastId; version?: number }
   | { type: 'PING'; version?: number }
 
 // ---------- Server → Client ----------
@@ -109,6 +183,8 @@ export type ServerMsg =
   | { type: 'PLAYER_LEFT'; playerId: string }
   | { type: 'CHAT'; playerId: string; text: string; ts: number }
   | ({ type: 'EMOTE' } & EmoteEvent)
+  | ({ type: 'BROADCAST' } & BroadcastEvent)
+  | { type: 'SYSTEM_EVENT'; event: SystemEvent }
   | { type: 'PONG'; ts: number }
 
 // ---------- Types ----------
@@ -171,6 +247,9 @@ const isRulesPatch = (value: unknown): value is Partial<GameRules> => {
 export const isEmoteId = (value: unknown): value is EmoteId =>
   typeof value === 'string' && (EMOTE_IDS as readonly string[]).includes(value)
 
+export const isBroadcastId = (value: unknown): value is BroadcastId =>
+  typeof value === 'string' && (BROADCAST_IDS as readonly string[]).includes(value)
+
 /** Optional version field: when present it must match PROTOCOL_VERSION. */
 const versionOk = (data: Record<string, unknown>) =>
   data.version === undefined || data.version === PROTOCOL_VERSION
@@ -211,7 +290,9 @@ export function isClientMsg(data: unknown): data is ClientMsg {
     case 'CHAT':
       return typeof data.text === 'string' && data.text.length > 0 && data.text.length <= 200
     case 'EMOTE':
-      return isEmoteId(data.emote)
+      return hasOnlyKeys(data, ['type', 'emote', 'version']) && isEmoteId(data.emote)
+    case 'BROADCAST':
+      return hasOnlyKeys(data, ['type', 'broadcast', 'version']) && isBroadcastId(data.broadcast)
     case 'SET_RULES':
       return isRulesPatch(data.rules)
     case 'TRIBUTE_SWAP':

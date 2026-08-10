@@ -14,6 +14,8 @@ import { TableScreen } from './TableScreen'
 import { GameOverOverlay } from './GameOverOverlay'
 import { RulesSheet } from './RulesSheet'
 import { TributeScreen } from './TributeScreen'
+import { SystemEventFeedback } from './EmoteButton'
+import type { SystemEvent } from '../engine/protocol'
 
 const focusableSelector = [
   'button:not([disabled])',
@@ -23,6 +25,15 @@ const focusableSelector = [
   'textarea:not([disabled])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
+
+export function LobbySystemFeedback({ event }: { event: SystemEvent | null }) {
+  if (event?.kind !== 'player-left') return null
+  return (
+    <div className="table-reaction-feedback-stack table-reaction-feedback-stack--lobby" aria-label="Table notices">
+      <SystemEventFeedback event={event} />
+    </div>
+  )
+}
 
 export interface MultiplayerGameTableProps {
   roomId: string
@@ -34,7 +45,8 @@ export interface MultiplayerGameTableProps {
 export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
   const {
     status, attempt, maxAttempts, room, gameState, playerId,
-    error, notice, latestEmote, send, sendEmote, quickFollowUp, retry, tryAgain, leave,
+    error, notice, latestEmote, latestBroadcast, latestSystemEvent,
+    send, sendEmote, sendBroadcast, quickFollowUp, retry, tryAgain, leave,
   } = useMultiplayerRoom({ roomId, playerName, intent })
 
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -148,13 +160,16 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
   // ---- Waiting room (host branch driven by room.hostId === playerId) ----
   if (room.phase === 'waiting') {
     return (
-      <WaitingRoom
-        room={room}
-        myPlayerId={playerId}
-        onStart={() => send({ type: 'START_GAME' })}
-        onRulesChange={rules => send({ type: 'SET_RULES', rules })}
-        onLeave={quit}
-      />
+      <>
+        <LobbySystemFeedback event={latestSystemEvent} />
+        <WaitingRoom
+          room={room}
+          myPlayerId={playerId}
+          onStart={() => send({ type: 'START_GAME' })}
+          onRulesChange={rules => send({ type: 'SET_RULES', rules })}
+          onLeave={quit}
+        />
+      </>
     )
   }
 
@@ -208,14 +223,17 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
   if (!me) {
     if (gameState.phase === 'gameOver') {
       return (
-        <WaitingRoom
-          room={{ ...room, phase: 'waiting' }}
-          myPlayerId={playerId}
-          heading="Next round"
-          onStart={() => send({ type: 'START_GAME' })}
-          onRulesChange={rules => send({ type: 'SET_RULES', rules })}
-          onLeave={quit}
-        />
+        <>
+          <LobbySystemFeedback event={latestSystemEvent} />
+          <WaitingRoom
+            room={{ ...room, phase: 'waiting' }}
+            myPlayerId={playerId}
+            heading="Next round"
+            onStart={() => send({ type: 'START_GAME' })}
+            onRulesChange={rules => send({ type: 'SET_RULES', rules })}
+            onLeave={quit}
+          />
+        </>
       )
     }
     // Late joiner mid-match: state the current limitation, not a promise
@@ -249,6 +267,9 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         seatOffline={id => offlineSeats.has(id)}
         latestEmote={latestEmote}
         onSendEmote={sendEmote}
+        latestBroadcast={latestBroadcast}
+        onSendBroadcast={sendBroadcast}
+        latestSystemEvent={latestSystemEvent}
       />
 
       {gameState.phase === 'gameOver' && (

@@ -2,7 +2,7 @@
 // useMultiplayerRoom — room socket lifecycle, session resume, seq guard,
 // truthful connection states (§4.6, Appendix A.10).
 //
-// RESUME CONTRACT (protocol v5):
+// RESUME CONTRACT (protocol v6):
 //  - WELCOME carries `resumeToken` (per-player secret). We persist
 //    { roomCode, playerId, resumeToken, playerName } in localStorage.
 //  - RESUME_ROOM is sent as { type, roomCode, playerId, resumeToken }.
@@ -12,7 +12,9 @@
 //    answers RESUME_ROOM carries the new one and is stored.
 // ============================================================================
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ClientMsg, EmoteEvent, EmoteId, RoomSummary, ServerMsg } from '../engine/protocol'
+import type {
+  BroadcastEvent, BroadcastId, ClientMsg, EmoteEvent, EmoteId, RoomSummary, ServerMsg, SystemEvent,
+} from '../engine/protocol'
 import type { GameState } from '../engine'
 import { RoomClient, buildRoomWSUrl, getDefaultServerURL } from './RoomClient'
 
@@ -112,6 +114,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const [error, setError] = useState<RoomError | null>(null)
   const [notice, setNotice] = useState<string | null>(null) // in-game rejections → feed
   const [latestEmote, setLatestEmote] = useState<EmoteEvent | null>(null)
+  const [latestBroadcast, setLatestBroadcast] = useState<BroadcastEvent | null>(null)
+  const [latestSystemEvent, setLatestSystemEvent] = useState<SystemEvent | null>(null)
   const clientRef = useRef<RoomClient | null>(null)
   const lastSeqRef = useRef<number | null>(null)
   const sessionRef = useRef<StoredSession | null>(null)
@@ -120,6 +124,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const restoredTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const emoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const broadcastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const systemEventTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!roomId) return
@@ -130,6 +136,12 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     if (emoteTimer.current) clearTimeout(emoteTimer.current)
     emoteTimer.current = null
     setLatestEmote(null)
+    if (broadcastTimer.current) clearTimeout(broadcastTimer.current)
+    broadcastTimer.current = null
+    setLatestBroadcast(null)
+    if (systemEventTimer.current) clearTimeout(systemEventTimer.current)
+    systemEventTimer.current = null
+    setLatestSystemEvent(null)
     setRoom(null)
     setGameState(null)
     setPlayerId(null)
@@ -297,6 +309,43 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
             }, 2500)
             break
           }
+          case 'BROADCAST': {
+            const received: BroadcastEvent = {
+              playerId: message.playerId,
+              broadcast: message.broadcast,
+              ts: message.ts,
+            }
+            if (broadcastTimer.current) clearTimeout(broadcastTimer.current)
+            setLatestBroadcast(received)
+            broadcastTimer.current = setTimeout(() => {
+              broadcastTimer.current = null
+              setLatestBroadcast(current => (
+                current?.playerId === received.playerId &&
+                current.broadcast === received.broadcast &&
+                current.ts === received.ts
+                  ? null
+                  : current
+              ))
+            }, 3500)
+            break
+          }
+          case 'SYSTEM_EVENT': {
+            const received = message.event
+            if (systemEventTimer.current) clearTimeout(systemEventTimer.current)
+            setLatestSystemEvent(received)
+            systemEventTimer.current = setTimeout(() => {
+              systemEventTimer.current = null
+              setLatestSystemEvent(current => (
+                current?.kind === received.kind &&
+                current.playerId === received.playerId &&
+                current.message === received.message &&
+                current.ts === received.ts
+                  ? null
+                  : current
+              ))
+            }, 4500)
+            break
+          }
         }
       },
     })
@@ -306,6 +355,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
       if (restoredTimer.current) clearTimeout(restoredTimer.current)
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
       if (emoteTimer.current) clearTimeout(emoteTimer.current)
+      if (broadcastTimer.current) clearTimeout(broadcastTimer.current)
+      if (systemEventTimer.current) clearTimeout(systemEventTimer.current)
       client.close()
       clientRef.current = null
     }
@@ -317,6 +368,10 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
 
   const sendEmote = useCallback((emote: EmoteId) => {
     send({ type: 'EMOTE', emote })
+  }, [send])
+
+  const sendBroadcast = useCallback((broadcast: BroadcastId) => {
+    send({ type: 'BROADCAST', broadcast })
   }, [send])
 
   /**
@@ -374,8 +429,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   return {
     status, attempt, maxAttempts: 5,
     room, gameState, playerId,
-    error, notice, clearNotice, latestEmote,
-    send, sendEmote, quickFollowUp, retry, tryAgain, leave,
+    error, notice, clearNotice, latestEmote, latestBroadcast, latestSystemEvent,
+    send, sendEmote, sendBroadcast, quickFollowUp, retry, tryAgain, leave,
   }
 }
 

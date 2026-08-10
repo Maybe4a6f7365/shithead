@@ -1,4 +1,4 @@
-import type { Card, GameRules, GameState, Player, PreviousRoundResult } from '../engine'
+import type { Card, GameRules, GameState, Phase, Player, PreviousRoundResult } from '../engine'
 import {
   DEFAULT_GAME_RULES,
   exchangeFaceUpCards,
@@ -10,11 +10,25 @@ import {
   startPlay,
 } from '../engine'
 import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
-import { isClientMsg, PROTOCOL_VERSION, serializeGameState, toPlayerSummary } from '../engine/protocol'
+import {
+  isClientMsg,
+  PLAYER_LEFT_MESSAGE_IDS,
+  PROTOCOL_VERSION,
+  serializeGameState,
+  toPlayerSummary,
+} from '../engine/protocol'
 import { BUILD_COMMIT } from './build-meta'
 import { applyPlayerForfeit } from './forfeit'
 import { applyInterruptBurnRequest, applyQuickFollowUpRequest, canonicalCards } from './gameActions'
 import { normalizeGameRules, normalizePersistedGameState } from './migrateState'
+import {
+  acceptedReactionAt,
+  normalizeStoredPendingOndraEvent,
+  pendingOndraEventAfterLeave,
+  type PendingOndraEvent,
+  resolvePendingOndraEvent,
+  scheduleOndraEventForPlayTransition,
+} from './tableMessages'
 
 interface Env {
   ROOM: DurableObjectNamespace
@@ -27,10 +41,11 @@ interface Session {
   webSocket: WebSocket
   playerId: string | null
   recentMessages: number[]
+  lastReactionAt: number | null
 }
 
 interface RoomData {
-  version: 3
+  version: 4
   code: string
   hostId: string
   maxPlayers: number
@@ -40,17 +55,20 @@ interface RoomData {
   readyPlayerIds: string[]
   /** playerId -> SHA-256 hex hash of the current resume token (secret). */
   resumeTokens: Record<string, string>
+  /** Private delayed system event; never serialized into room/game views. */
+  pendingTableEvent: PendingOndraEvent | null
   createdAt: number
   lastActivity: number
 }
 
-type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'state'> & {
-  version?: 1 | 2 | 3
+type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'pendingTableEvent' | 'state'> & {
+  version?: 1 | 2 | 3 | 4
   state: GameState | null
   rules?: Partial<GameRules>
   readyPlayerIds?: string[]
   lastActivity?: number
   resumeTokens?: Record<string, string>
+  pendingTableEvent?: PendingOndraEvent | null
 }
 
 type OutMsg = ServerMsg
@@ -131,15 +149,24 @@ export class Room {
       if (!stored) return
 
       const rules = normalizeGameRules(stored.state?.rules, stored.rules)
+      const normalizedState = normalizePersistedGameState(stored.state, rules)
+      const restoresTableEvent = normalizedState?.phase === 'play' || normalizedState?.phase === 'endgame'
 
       this.data = {
         ...stored,
-        version: 3,
+        version: 4,
         rules,
-        state: normalizePersistedGameState(stored.state, rules),
+        state: normalizedState,
         readyPlayerIds: stored.readyPlayerIds ?? [],
         lastActivity: stored.lastActivity ?? stored.createdAt,
         resumeTokens: stored.resumeTokens ?? {},
+        pendingTableEvent: restoresTableEvent
+          ? normalizeStoredPendingOndraEvent(
+              stored.pendingTableEvent,
+              stored.players,
+              normalizedState.turnCount,
+            )
+          : null,
       }
       await this.scheduleCleanup()
     })
@@ -215,6 +242,7 @@ export class Room {
       webSocket: server,
       playerId: null,
       recentMessages: [],
+      lastReactionAt: null,
     })
 
     server.accept()
@@ -325,6 +353,9 @@ export class Room {
       case 'EMOTE':
         this.emote(session, message.emote)
         break
+      case 'BROADCAST':
+        this.broadcastPreset(session, message.broadcast)
+        break
       case 'PING':
         this.send(session, { type: 'PONG', ts: Date.now() })
         break
@@ -388,7 +419,7 @@ export class Room {
     const resumeToken = generateResumeToken()
     session.playerId = player.id
     this.data = {
-      version: 3,
+      version: 4,
       code: this.code,
       hostId: player.id,
       maxPlayers: Math.max(2, Math.min(5, requestedMaxPlayers)),
@@ -397,6 +428,7 @@ export class Room {
       rules: { ...DEFAULT_GAME_RULES },
       readyPlayerIds: [],
       resumeTokens: { [player.id]: await hashResumeToken(resumeToken) },
+      pendingTableEvent: null,
       createdAt: Date.now(),
       lastActivity: Date.now(),
     }
@@ -531,6 +563,7 @@ export class Room {
       previousRound,
     })
     data.readyPlayerIds = []
+    data.pendingTableEvent = null
 
     await this.save()
     this.broadcastRoom()
@@ -558,12 +591,14 @@ export class Room {
   private async exchangeTribute(session: Session, winnerCardId: string, loserCardId: string): Promise<void> {
     const data = this.data
     if (!data?.state || !session.playerId) return
+    const previousPhase = data.state.phase
     const result = exchangeFaceUpCards(data.state, session.playerId, winnerCardId, loserCardId)
     if (result.error) {
       this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
       return
     }
     data.state = result.state
+    this.scheduleOndraModeForPlayTransition(previousPhase, data.state.phase)
     await this.save()
     this.broadcastRoom()
     this.broadcastGame()
@@ -572,12 +607,14 @@ export class Room {
   private async declineTribute(session: Session): Promise<void> {
     const data = this.data
     if (!data?.state || !session.playerId) return
+    const previousPhase = data.state.phase
     const result = skipTribute(data.state, session.playerId)
     if (result.error) {
       this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: result.error })
       return
     }
     data.state = result.state
+    this.scheduleOndraModeForPlayTransition(previousPhase, data.state.phase)
     await this.save()
     this.broadcastRoom()
     this.broadcastGame()
@@ -586,13 +623,30 @@ export class Room {
   private async markReady(session: Session): Promise<void> {
     const data = this.data
     if (!data?.state || !session.playerId || data.state.phase !== 'rearrange') return
+    const previousPhase = data.state.phase
 
     if (!data.readyPlayerIds.includes(session.playerId)) data.readyPlayerIds.push(session.playerId)
     const everyoneReady = data.players.every(player => data.readyPlayerIds.includes(player.id))
     if (everyoneReady) data.state = startPlay(data.state)
 
+    this.scheduleOndraModeForPlayTransition(previousPhase, data.state.phase)
     await this.save()
     this.broadcastGame()
+  }
+
+  /**
+   * Roll once at the authoritative phase boundary and persist the private
+   * result. The event is deliberately not broadcast until a later due action.
+   */
+  private scheduleOndraModeForPlayTransition(previousPhase: Phase, nextPhase: Phase): void {
+    const data = this.data
+    if (!data?.state) return
+    data.pendingTableEvent = scheduleOndraEventForPlayTransition(
+      previousPhase,
+      nextPhase,
+      data.state.turnCount,
+      data.players,
+    )
   }
 
   private async swapCards(session: Session, handIdx: number, upIdx: number): Promise<void> {
@@ -632,8 +686,10 @@ export class Room {
     }
 
     data.state = result.state
+    const tableEvent = this.takePendingTableEvent()
     await this.save()
     this.broadcastGame()
+    if (tableEvent) this.broadcast(tableEvent)
   }
 
   /**
@@ -653,8 +709,10 @@ export class Room {
     }
 
     data.state = result.state
+    const tableEvent = this.takePendingTableEvent()
     await this.save()
     this.broadcastGame()
+    if (tableEvent) this.broadcast(tableEvent)
   }
 
   /**
@@ -674,8 +732,10 @@ export class Room {
     }
 
     data.state = result.state
+    const tableEvent = this.takePendingTableEvent()
     await this.save()
     this.broadcastGame()
+    if (tableEvent) this.broadcast(tableEvent)
   }
 
   private async pickUp(session: Session): Promise<void> {
@@ -689,8 +749,27 @@ export class Room {
     }
 
     data.state = result.state
+    const tableEvent = this.takePendingTableEvent()
     await this.save()
     this.broadcastGame()
+    if (tableEvent) this.broadcast(tableEvent)
+  }
+
+  /**
+   * Consume a due private event before persistence. Callers then broadcast the
+   * authoritative GAME_STATE first and this returned frame second.
+   */
+  private takePendingTableEvent(): OutMsg | null {
+    const data = this.data
+    if (!data?.state) return null
+    const resolution = resolvePendingOndraEvent(
+      data.pendingTableEvent,
+      data.state.phase,
+      data.state.turnCount,
+      data.players,
+    )
+    data.pendingTableEvent = resolution.pending
+    return resolution.frame
   }
 
   private chat(session: Session, rawText: string): void {
@@ -704,12 +783,37 @@ export class Room {
   /**
    * Relay a validated reaction to authenticated room members only. Emotes do
    * not touch RoomData, storage, the game log, or sequence counters: they are
-   * intentionally short-lived UI feedback. The socket-wide message limiter
-   * in onMessage also applies, so reactions cannot bypass normal rate limits.
+   * intentionally short-lived UI feedback. The shared reaction cooldown and
+   * socket-wide limiter both apply, so alternating reaction types cannot flood
+   * the table or bypass normal rate limits.
    */
   private emote(session: Session, emote: Extract<ClientMsg, { type: 'EMOTE' }>['emote']): void {
     if (!session.playerId) return
-    this.broadcast({ type: 'EMOTE', playerId: session.playerId, emote, ts: Date.now() })
+    const ts = this.takeReactionSlot(session)
+    if (ts === null) return
+    this.broadcast({ type: 'EMOTE', playerId: session.playerId, emote, ts })
+  }
+
+  /**
+   * Relay a server-validated preset id; free-form text never crosses this
+   * boundary. Like emotes, broadcasts are authenticated, share one reaction
+   * cooldown, remain socket-rate-limited, and are never persisted or applied
+   * to state.
+   */
+  private broadcastPreset(
+    session: Session,
+    broadcast: Extract<ClientMsg, { type: 'BROADCAST' }>['broadcast'],
+  ): void {
+    if (!session.playerId) return
+    const ts = this.takeReactionSlot(session)
+    if (ts === null) return
+    this.broadcast({ type: 'BROADCAST', playerId: session.playerId, broadcast, ts })
+  }
+
+  private takeReactionSlot(session: Session): number | null {
+    const acceptedAt = acceptedReactionAt(session.lastReactionAt, Date.now())
+    if (acceptedAt !== null) session.lastReactionAt = acceptedAt
+    return acceptedAt
   }
 
   private async leaveRoom(session: Session): Promise<void> {
@@ -717,6 +821,7 @@ export class Room {
     if (!data || !session.playerId) return
 
     const leavingId = session.playerId
+    const leavingPlayer = data.players.find(player => player.id === leavingId)
     delete data.resumeTokens[leavingId]
     data.players = data.players.filter(player => player.id !== leavingId)
     data.readyPlayerIds = data.readyPlayerIds.filter(id => id !== leavingId)
@@ -725,6 +830,11 @@ export class Room {
     if (data.state && data.state.phase !== 'gameOver') {
       data.state = applyPlayerForfeit(data.state, leavingId)
     }
+    data.pendingTableEvent = pendingOndraEventAfterLeave(
+      data.pendingTableEvent,
+      leavingId,
+      data.state?.phase ?? null,
+    )
 
     if (data.players.length === 0) {
       this.data = null
@@ -733,7 +843,18 @@ export class Room {
     }
 
     await this.save()
-    this.broadcast({ type: 'PLAYER_LEFT', playerId: leavingId })
+    if (leavingPlayer) {
+      this.broadcast({
+        type: 'SYSTEM_EVENT',
+        event: {
+          kind: 'player-left',
+          playerId: leavingPlayer.id,
+          playerName: leavingPlayer.name,
+          message: PLAYER_LEFT_MESSAGE_IDS[0],
+          ts: Date.now(),
+        },
+      })
+    }
     this.broadcastRoom()
     this.broadcastGame()
   }

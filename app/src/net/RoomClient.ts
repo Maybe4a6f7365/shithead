@@ -112,11 +112,11 @@ export class RoomClient {
 
   send(msg: ClientMsg) {
     const stamped = { ...msg, version: PROTOCOL_VERSION } as ClientMsg
-    // Reactions are presence, and QUICK_FOLLOW_UP is bound to one exact
-    // authoritative sequence. Never replay either after reconnect/auth the
+    // Reactions/broadcasts are presence, and QUICK_FOLLOW_UP is bound to one
+    // exact authoritative sequence. Never replay any after reconnect/auth the
     // way durable game actions are: the next player's move may have already
     // closed the follow-up window (and a rematch may restart seq at zero).
-    if ((stamped.type === 'EMOTE' || stamped.type === 'QUICK_FOLLOW_UP') &&
+    if ((stamped.type === 'EMOTE' || stamped.type === 'BROADCAST' || stamped.type === 'QUICK_FOLLOW_UP') &&
       (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated)) return
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       if (this.isAuthentication(stamped) || stamped.type === 'LEAVE_ROOM' || this.authenticated) {
@@ -138,7 +138,12 @@ export class RoomClient {
     this.authenticated = true
     const queued = this.queue
     this.queue = []
-    for (const msg of queued) this.ws.send(JSON.stringify({ ...msg, version: PROTOCOL_VERSION }))
+    for (const msg of queued) {
+      // Defensive filtering also protects sessions created by older code or
+      // tests that directly seeded the queue before authentication.
+      if (msg.type === 'EMOTE' || msg.type === 'BROADCAST' || msg.type === 'QUICK_FOLLOW_UP') continue
+      this.ws.send(JSON.stringify({ ...msg, version: PROTOCOL_VERSION }))
+    }
   }
 
   private isAuthentication(msg: ClientMsg): boolean {

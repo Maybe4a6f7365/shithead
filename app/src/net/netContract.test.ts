@@ -226,7 +226,7 @@ describe('RoomClient authentication ordering', () => {
     client.close()
   })
 
-  it('drops stale emotes instead of replaying them after authentication', () => {
+  it('drops stale emotes and broadcasts instead of replaying them after authentication', () => {
     let client!: RoomClient
     client = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
@@ -235,12 +235,16 @@ describe('RoomClient authentication ordering', () => {
     })
     const socket = FakeWebSocket.instances[0]
     client.send({ type: 'EMOTE', emote: 'laugh' })
+    client.send({ type: 'BROADCAST', broadcast: 'shrug' })
     socket.open()
+    client.send({ type: 'BROADCAST', broadcast: 'womp-womp' })
     client.markAuthenticated()
     expect(socket.sent.map(message => message.type)).toEqual(['JOIN_ROOM'])
 
     client.send({ type: 'EMOTE', emote: 'laugh' })
     expect(socket.sent.at(-1)).toEqual({ type: 'EMOTE', emote: 'laugh', version: PROTOCOL_VERSION })
+    client.send({ type: 'BROADCAST', broadcast: 'shrug' })
+    expect(socket.sent.at(-1)).toEqual({ type: 'BROADCAST', broadcast: 'shrug', version: PROTOCOL_VERSION })
     client.close()
   })
 
@@ -326,6 +330,70 @@ describe('RoomClient authentication ordering', () => {
 
     act(() => vi.advanceTimersByTime(2501))
     expect(result.current.latestEmote).toBeNull()
+    unmount()
+  })
+
+  it('sends preset broadcasts and expires broadcast/system events independently', () => {
+    vi.useFakeTimers()
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+
+    act(() => result.current.sendBroadcast('womp-womp'))
+    expect(socket.sent.at(-1)).toEqual({
+      type: 'BROADCAST', broadcast: 'womp-womp', version: PROTOCOL_VERSION,
+    })
+
+    act(() => socket.receive({
+      type: 'BROADCAST', version: PROTOCOL_VERSION,
+      playerId: 'p2', broadcast: 'double-middle-finger', ts: 100,
+    }))
+    expect(result.current.latestBroadcast).toEqual({
+      playerId: 'p2', broadcast: 'double-middle-finger', ts: 100,
+    })
+    act(() => vi.advanceTimersByTime(3499))
+    expect(result.current.latestBroadcast).not.toBeNull()
+    act(() => vi.advanceTimersByTime(1))
+    expect(result.current.latestBroadcast).toBeNull()
+
+    const systemEvent = {
+      kind: 'ondra-mode' as const,
+      playerId: 'p3',
+      playerName: 'Ondra',
+      message: 'ondra-farts-cutely' as const,
+      ts: 200,
+    }
+    act(() => socket.receive({ type: 'SYSTEM_EVENT', version: PROTOCOL_VERSION, event: systemEvent }))
+    expect(result.current.latestSystemEvent).toEqual(systemEvent)
+    act(() => vi.advanceTimersByTime(4499))
+    expect(result.current.latestSystemEvent).toEqual(systemEvent)
+    act(() => vi.advanceTimersByTime(1))
+    expect(result.current.latestSystemEvent).toBeNull()
+    unmount()
+  })
+
+  it('does not let an older expiry clear a newer relayed broadcast', () => {
+    vi.useFakeTimers()
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+    act(() => socket.receive({ type: 'BROADCAST', playerId: 'p2', broadcast: 'shrug', ts: 1 }))
+    act(() => vi.advanceTimersByTime(3000))
+    act(() => socket.receive({ type: 'BROADCAST', playerId: 'p3', broadcast: 'karma', ts: 2 }))
+    act(() => vi.advanceTimersByTime(501))
+    expect(result.current.latestBroadcast).toEqual({ playerId: 'p3', broadcast: 'karma', ts: 2 })
+    act(() => vi.advanceTimersByTime(2999))
+    expect(result.current.latestBroadcast).toBeNull()
     unmount()
   })
 

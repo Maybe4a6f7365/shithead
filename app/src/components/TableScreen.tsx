@@ -22,8 +22,19 @@ import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
 import { feedLine, latestActionEvents, type FeedContext } from './feedText'
 import { useSoundFromLog, emitSoundDebounced } from './soundManager'
-import { EmoteButton, EmoteFeedback } from './EmoteButton'
-import type { EmoteEvent, EmoteId } from '../engine/protocol'
+import {
+  BroadcastFeedback,
+  EmoteButton,
+  EmoteFeedback,
+  SystemEventFeedback,
+} from './EmoteButton'
+import type {
+  BroadcastEvent,
+  BroadcastId,
+  EmoteEvent,
+  EmoteId,
+  SystemEvent,
+} from '../engine/protocol'
 import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
 
 export interface TableScreenProps {
@@ -53,6 +64,10 @@ export interface TableScreenProps {
   /** Multiplayer supplies room events; single-player still gets local feedback. */
   latestEmote?: EmoteEvent | null
   onSendEmote?: (emote: EmoteId) => void
+  latestBroadcast?: BroadcastEvent | null
+  onSendBroadcast?: (broadcast: BroadcastId) => void
+  /** Server-authored table notices and the deliberately rare Ondra easter egg. */
+  latestSystemEvent?: SystemEvent | null
 }
 
 type Zone = 'hand' | 'faceUp' | 'faceDown'
@@ -94,6 +109,26 @@ export function isMatchingSelfEmoteEcho(
   )
 }
 
+export function isMatchingSelfBroadcastEcho(
+  pending: { broadcast: BroadcastId; sentAt: number } | null,
+  latest: BroadcastEvent,
+  viewerId: string,
+  now = Date.now(),
+): boolean {
+  return Boolean(
+    pending &&
+    latest.playerId === viewerId &&
+    latest.broadcast === pending.broadcast &&
+    now - pending.sentAt >= 0 && now - pending.sentAt < 2500,
+  )
+}
+
+export const REACTION_CLIENT_COOLDOWN_MS = 800
+
+export function canSendReaction(lastSentAt: number | null, now = Date.now()): boolean {
+  return lastSentAt === null || now - lastSentAt >= REACTION_CLIENT_COOLDOWN_MS
+}
+
 function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }): Zone {
   if (p.hand.length > 0) return 'hand'
   if (p.faceUp.length > 0) return 'faceUp'
@@ -104,6 +139,7 @@ export function TableScreen({
   state, viewerId, viewerActive, error, onPlay, onQuickFollowUp,
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
   soundOn, onToggleSound, connectionBadge, seatOffline, latestEmote, onSendEmote,
+  latestBroadcast, onSendBroadcast, latestSystemEvent,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
   const current = state.players[state.currentPlayerIdx]
@@ -120,7 +156,10 @@ export function TableScreen({
   const [burnSnapshot, setBurnSnapshot] = useState<BurnSnapshot | null>(null)
   const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
+  const [displayedBroadcast, setDisplayedBroadcast] = useState<BroadcastEvent | null>(null)
   const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
+  const pendingSelfBroadcast = useRef<{ broadcast: BroadcastId; sentAt: number } | null>(null)
+  const lastReactionSentAt = useRef<number | null>(null)
   const debounceRef = useRef(0)
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const burnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -254,10 +293,21 @@ export function TableScreen({
     if (!latestEmote) return
     const pending = pendingSelfEmote.current
     if (isMatchingSelfEmoteEcho(pending, latestEmote, viewerId)) {
+      pendingSelfEmote.current = null
       return
     }
     setDisplayedEmote(latestEmote)
   }, [latestEmote, viewerId])
+
+  useEffect(() => {
+    if (!latestBroadcast) return
+    const pending = pendingSelfBroadcast.current
+    if (isMatchingSelfBroadcastEcho(pending, latestBroadcast, viewerId)) {
+      pendingSelfBroadcast.current = null
+      return
+    }
+    setDisplayedBroadcast(latestBroadcast)
+  }, [latestBroadcast, viewerId])
 
   // Surface external (server) errors assertively.
   useEffect(() => { if (error) announcer.sayAssertive(error) }, [error]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -338,10 +388,22 @@ export function TableScreen({
 
   const sendEmote = (emote: EmoteId) => {
     const sentAt = Date.now()
+    if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    lastReactionSentAt.current = sentAt
     const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt }
     if (onSendEmote) pendingSelfEmote.current = { emote, sentAt }
     setDisplayedEmote(event)
     onSendEmote?.(emote)
+  }
+
+  const sendBroadcast = (broadcast: BroadcastId) => {
+    const sentAt = Date.now()
+    if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    lastReactionSentAt.current = sentAt
+    const event: BroadcastEvent = { playerId: viewerId, broadcast, ts: sentAt }
+    if (onSendBroadcast) pendingSelfBroadcast.current = { broadcast, sentAt }
+    setDisplayedBroadcast(event)
+    onSendBroadcast?.(broadcast)
   }
 
   const tapCard = (card: CardT, cardZone: Zone) => {
@@ -473,6 +535,12 @@ export function TableScreen({
   const emotePlayer = displayedEmote
     ? state.players.find(player => player.id === displayedEmote.playerId)?.name
     : undefined
+  const broadcastPlayer = displayedBroadcast
+    ? state.players.find(player => player.id === displayedBroadcast.playerId)?.name
+    : undefined
+  const visibleSystemEvent = latestSystemEvent?.kind === 'ondra-mode' && state.phase === 'gameOver'
+    ? null
+    : latestSystemEvent ?? null
 
   return (
     <div
@@ -484,7 +552,11 @@ export function TableScreen({
     >
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
-      <EmoteFeedback event={displayedEmote} playerName={emotePlayer} />
+      <div className="table-reaction-feedback-stack" aria-label="Table reactions">
+        <SystemEventFeedback event={visibleSystemEvent} />
+        <BroadcastFeedback event={displayedBroadcast} playerName={broadcastPlayer} />
+        <EmoteFeedback event={displayedEmote} playerName={emotePlayer} />
+      </div>
 
       <LayoutGroup id={`table-turn-${viewerId}`}>
       <div className="game-shell table-shell">
@@ -508,7 +580,7 @@ export function TableScreen({
             </span>
           </div>
           <div className="game-tools table-tools" aria-label="Table controls">
-            <EmoteButton onSend={sendEmote} />
+            <EmoteButton onSend={sendEmote} onSendBroadcast={sendBroadcast} />
             <QuietMenu
               onOpenRules={onOpenRules}
               soundOn={soundOn}

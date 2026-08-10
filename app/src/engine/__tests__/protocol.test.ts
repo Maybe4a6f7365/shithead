@@ -3,7 +3,18 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest'
 import { initGame, seededRng, MAX_LOG_ENTRIES } from '../index'
-import { EMOTE_IDS, isClientMsg, serializeGameState, toPlayerSummary, PROTOCOL_VERSION } from '../protocol'
+import {
+  BROADCAST_IDS,
+  EMOTE_IDS,
+  ONDRA_MESSAGE_IDS,
+  PLAYER_LEFT_MESSAGE_IDS,
+  isBroadcastId,
+  isClientMsg,
+  serializeGameState,
+  toPlayerSummary,
+  PROTOCOL_VERSION,
+  type ServerMsg,
+} from '../protocol'
 import { mkState, c } from './helpers'
 
 describe('isClientMsg', () => {
@@ -16,6 +27,10 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 7 })).toBe(true)
     expect(isClientMsg({ type: 'CHAT', text: 'hi' })).toBe(true)
     for (const emote of EMOTE_IDS) expect(isClientMsg({ type: 'EMOTE', emote })).toBe(true)
+    for (const broadcast of BROADCAST_IDS) {
+      expect(isClientMsg({ type: 'BROADCAST', broadcast })).toBe(true)
+      expect(isBroadcastId(broadcast)).toBe(true)
+    }
     expect(isClientMsg({ type: 'SET_RULES', rules: { includeJokers: false } })).toBe(true)
     expect(isClientMsg({ type: 'SET_RULES', rules: { deckCount: 3 } })).toBe(true)
     expect(isClientMsg({ type: 'SET_RULES', rules: { includeJokers: true, deckCount: 2 } })).toBe(true)
@@ -43,6 +58,16 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'EMOTE', emote: '👍' })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE', emote: 'thumbs-up<script>' })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE' })).toBe(false)
+    expect(isClientMsg({ type: 'EMOTE', emote: 'laugh', text: 'injected' })).toBe(false)
+    expect(isClientMsg({ type: 'EMOTE', emote: 'laugh', payload: {} })).toBe(false)
+    expect(isClientMsg({ type: 'BROADCAST', broadcast: 'arbitrary-user-text' })).toBe(false)
+    expect(isClientMsg({ type: 'BROADCAST' })).toBe(false)
+    expect(isClientMsg({ type: 'BROADCAST', broadcast: 'shrug', text: 'injected' })).toBe(false)
+    expect(isClientMsg({ type: 'BROADCAST', broadcast: 'shrug', payload: {} })).toBe(false)
+    expect(isClientMsg({
+      type: 'BROADCAST', broadcast: 'shrug', version: PROTOCOL_VERSION + 1,
+    })).toBe(false)
+    expect(isBroadcastId(null)).toBe(false)
     expect(isClientMsg({ type: 'CREATE_ROOM', playerName: '   ' })).toBe(false)
     expect(isClientMsg({ type: 'JOIN_ROOM', code: 'ABC123', playerName: '\t' })).toBe(false)
     expect(isClientMsg({ type: 'SET_RULES', rules: {} })).toBe(false)
@@ -58,6 +83,46 @@ describe('isClientMsg', () => {
     expect(isClientMsg(null)).toBe(false)
     expect(isClientMsg('string')).toBe(false)
     expect(isClientMsg(42)).toBe(false)
+  })
+
+  it('pins protocol v6 reaction, broadcast, and system-event wire ids', () => {
+    expect(PROTOCOL_VERSION).toBe(6)
+    expect(EMOTE_IDS).toEqual([
+      'thumbs-up', 'laugh', 'wow', 'fire', 'sad', 'cry', 'heart', 'clap',
+      'angry', 'rage', 'middle-finger', 'clown', 'skull', 'poop', 'eyes', 'peach',
+      'foot', 'melting', 'exploding-head', 'pleading', 'unamused', 'raised-eyebrow',
+      'thinking', 'shushing', 'zipper-mouth', 'partying', 'smiling-devil', 'salute',
+    ])
+    expect(new Set(EMOTE_IDS).size).toBe(28)
+    expect(BROADCAST_IDS).toEqual([
+      'double-middle-finger', 'kiss-my-ass', 'upside-down-fuck', 'lenny',
+      'karma', 'shrug', 'womp-womp', 'kill-me',
+    ])
+    expect(new Set(BROADCAST_IDS).size).toBe(8)
+    expect(PLAYER_LEFT_MESSAGE_IDS).toEqual(['bye-little-shits'])
+    expect(ONDRA_MESSAGE_IDS).toEqual([
+      'ondra-faster', 'ondra-love-toes', 'ondra-fuck-me',
+      'ondra-farts-cutely', 'ondra-alpha', 'ondra-spank-me',
+    ])
+
+    const frames = [
+      {
+        type: 'SYSTEM_EVENT',
+        event: {
+          kind: 'player-left', playerId: 'p1', playerName: 'Ada',
+          message: 'bye-little-shits', ts: 1,
+        },
+      },
+      {
+        type: 'SYSTEM_EVENT',
+        event: {
+          kind: 'ondra-mode', playerId: 'p2', playerName: 'Ondra',
+          message: 'ondra-faster', ts: 2,
+        },
+      },
+      { type: 'BROADCAST', playerId: 'p1', broadcast: 'shrug', ts: 3 },
+    ] satisfies ServerMsg[]
+    expect(frames.map(frame => frame.type)).toEqual(['SYSTEM_EVENT', 'SYSTEM_EVENT', 'BROADCAST'])
   })
 
   it('rejects duplicate card ids in PLAY (duplication exploit)', () => {

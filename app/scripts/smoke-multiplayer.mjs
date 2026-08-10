@@ -4,7 +4,7 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'https://shithead.not4a6f7365.workers.dev').replace(/\/$/, '')
 const expectedCommit = process.env.EXPECTED_COMMIT || ''
 const deploymentTimeoutMs = Number(process.env.DEPLOYMENT_TIMEOUT_MS || 10 * 60 * 1000)
-const PROTOCOL_VERSION = 5
+const PROTOCOL_VERSION = 6
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const log = message => console.log(`[multiplayer-smoke] ${message}`)
@@ -302,6 +302,13 @@ async function run() {
   const chat = await host.waitType('CHAT', message => message.playerId === guestId)
   assert.equal(chat.text, 'multiplayer smoke')
 
+  const seqBeforeBroadcast = host.latestGameState.seq
+  guest.send({ type: 'BROADCAST', broadcast: 'womp-womp' })
+  const broadcast = await host.waitType('BROADCAST', message => message.playerId === guestId)
+  assert.equal(broadcast.broadcast, 'womp-womp')
+  assert.equal(typeof broadcast.ts, 'number')
+  assert.equal(host.latestGameState.seq, seqBeforeBroadcast, 'ephemeral broadcast mutated game sequence')
+
   host.send({ type: 'PING' })
   const pong = await host.waitType('PONG')
   assert.equal(typeof pong.ts, 'number')
@@ -328,8 +335,17 @@ async function run() {
   }
   log('game mutation propagated to both players')
 
+  guest.send({ type: 'LEAVE_ROOM' })
+  const leave = await host.waitType(
+    'SYSTEM_EVENT',
+    message => message.event?.kind === 'player-left' && message.event.playerId === guestId,
+  )
+  assert.equal(leave.event.playerName, 'Smoke Guest')
+  assert.equal(leave.event.message, 'bye-little-shits')
+  assert.equal(typeof leave.event.ts, 'number')
+
   await Promise.all([host.close(), guest.close()])
-  log('PASS: production multiplayer create/join/resume/start/chat/move flow works')
+  log('PASS: production multiplayer create/join/resume/start/reaction/move/leave flow works')
 }
 
 run().catch(error => {

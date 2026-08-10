@@ -270,9 +270,9 @@ Engine reducers are pure: they return a new state and optional error without per
 
 `turnCount` counts accepted gameplay actions—normal plays, quick follow-ups, burn-ins, pickups, and failed blind attempts—not setup rearrangements or readiness. The separate event ring feeds announcements, motion, and sound cursors without allowing the state snapshot to grow indefinitely.
 
-## Multiplayer protocol v5
+## Multiplayer protocol v6
 
-Every current client frame is centrally stamped with `version: 5`. A present but different version is rejected. Missing versions are still accepted for backward compatibility, so this is a compatibility boundary rather than a strict negotiation handshake.
+Every current client frame is centrally stamped with `version: 6`. A present but different version is rejected. Missing versions are still accepted for backward compatibility, so this is a compatibility boundary rather than a strict negotiation handshake.
 
 ### Client-to-server messages
 
@@ -293,10 +293,11 @@ Every current client frame is centrally stamped with `version: 5`. A present but
 | `TRIBUTE_SWAP` | Winner and loser face-up card identifiers |
 | `TRIBUTE_SKIP` | Decline the optional exchange |
 | `CHAT` | Sanitized relay message; supported by the wire/Worker but not exposed by the current React UI |
-| `EMOTE` | `thumbs-up`, `laugh`, `wow`, `fire`, `sad`, `cry`, `heart`, or `clap` |
+| `EMOTE` | One of the finite `EMOTE_IDS` catalog (28 locally rendered reactions) |
+| `BROADCAST` | One of eight fixed text-reaction identifiers; arbitrary text is not accepted |
 | `PING` | Manual/smoke-test liveness request |
 
-The 12-card action limit is the maximum number of ordinary same-rank copies across three decks. Protocol validation also enforces unique IDs, nonblank names up to 32 characters, room-code shape, rule keys, deck range, chat length, and emote catalog. The shipped name fields deliberately limit visible names to 12 characters.
+The 12-card action limit is the maximum number of ordinary same-rank copies across three decks. Protocol validation also enforces unique IDs, nonblank names up to 32 characters, room-code shape, rule keys, deck range, chat length, and the exact reaction/broadcast catalogs. The shipped name fields deliberately limit visible names to 12 characters.
 
 ### Server-to-client messages
 
@@ -310,9 +311,11 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 | `PLAYER_LEFT` | Explicit leave notification |
 | `CHAT` | Ephemeral sanitized relay |
 | `EMOTE` | Ephemeral reaction with player ID and timestamp |
+| `BROADCAST` | Ephemeral fixed-text reaction with player ID and timestamp |
+| `SYSTEM_EVENT` | Typed, server-originated event for an explicit leave or a server-only round easter egg |
 | `PONG` | Liveness response |
 
-`PLAYER_JOINED` is reserved in the TypeScript union but is not emitted; joins synchronize via `ROOM_STATE`. The current React hook handles authoritative room/game state, errors, resume, and emotes. Chat and PONG remain transport/smoke capabilities rather than player-facing UI.
+`PLAYER_JOINED` and the legacy `PLAYER_LEFT` delta are reserved in the TypeScript union but are not emitted; roster changes synchronize via `ROOM_STATE`, while player-facing leave copy uses `SYSTEM_EVENT`. The current React hook handles authoritative room/game state, errors, resume, emotes, preset broadcasts, and typed system events. Chat and PONG remain transport/smoke capabilities rather than player-facing UI.
 
 ### Per-viewer masking
 
@@ -325,11 +328,11 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 | Pile | Real public cards | Real public cards | Revealed |
 | Pending quick follow-up | Exact entitlement and eligible IDs | `null`, including the fact that a match was drawn | `null` in terminal states |
 
-Room summaries never contain private cards; they expose identities, connected/out status, and zone counts only. Unauthenticated or rejected sockets receive no roster, chat, emote, or game broadcasts.
+Room summaries never contain private cards; they expose identities, connected/out status, and zone counts only. Unauthenticated or rejected sockets receive no roster, chat, reaction, preset-broadcast, system-event, or game broadcasts.
 
 ### Ordering and reconnect behavior
 
-On each socket connection the client sends `CREATE_ROOM`, `JOIN_ROOM`, or `RESUME_ROOM` first. Gameplay queued while unauthenticated flushes only after `WELCOME` calls `markAuthenticated()`. Authentication frames are never retained across reconnect, preventing replay of a token that may already have rotated. Offline emotes and sequence-bound quick follow-ups are dropped rather than replayed later.
+On each socket connection the client sends `CREATE_ROOM`, `JOIN_ROOM`, or `RESUME_ROOM` first. Gameplay queued while unauthenticated flushes only after `WELCOME` calls `markAuthenticated()`. Authentication frames are never retained across reconnect, preventing replay of a token that may already have rotated. Offline emotes, preset broadcasts, and sequence-bound quick follow-ups are dropped rather than replayed later.
 
 Clients accept only increasing `GAME_STATE.seq` values. The explicit rematch reset—`seq=0`, `turnCount=0`, `phase=rearrange`—is the one allowed sequence restart. Legacy states without a sequence remain accepted.
 
@@ -364,7 +367,7 @@ Online rooms default to five maximum seats. Joining is allowed before a round or
 
 ### Persistence and cleanup
 
-The persisted `RoomData.version = 3` snapshot contains roster, host, rules, ready IDs, authoritative game state, hashed resume credentials, and timestamps. It is distinct from wire protocol v5 and Cloudflare Durable Object migration tag `v1`.
+The persisted `RoomData.version = 4` snapshot contains roster, host, rules, ready IDs, authoritative game state, hashed resume credentials, timestamps, and the optional private delayed table-event schedule. The schedule is validated against the restored roster and is never serialized into `ROOM_STATE` or `GAME_STATE`. This application schema is distinct from wire protocol v6 and Cloudflare Durable Object migration tag `v1`.
 
 On restore, migration code:
 
@@ -411,6 +414,7 @@ The token is stored in browser `localStorage`, so its security inherits the brow
 |---|---|
 | Inbound WebSocket frame | Maximum 16,384 JavaScript string code units; oversize closes with code `1009` |
 | Message rate | 20 frames/second/socket sliding window |
+| Reaction cadence | One accepted `EMOTE` or `BROADCAST` per 700 ms/socket; the UI uses a shared 800 ms gate |
 | Socket cap | 12 simultaneous sockets per room, including unauthenticated/duplicate tabs |
 | Room allocation rate | 10 new rooms/minute/IP, best effort per Worker isolate |
 | Tracked room codes | 30/IP over the in-memory 24-hour window, best effort per isolate |
@@ -418,7 +422,7 @@ The token is stored in browser `localStorage`, so its security inherits the brow
 
 Room-allocation rate tracking is in-memory per Worker isolate, not a globally distributed hard limit. A Cloudflare rate-limiting rule would be required for strict global enforcement.
 
-For every play, the Worker canonicalizes IDs against authoritative ownership, ignores client-provided suit/rank, rejects duplicates or stale ownership, and delegates turn/zone validation to the engine. Chat is capped at 200 characters and sanitized to word characters, whitespace, and `!?.,-`. Chat and emotes are relayed but not persisted in room state.
+For every play, the Worker canonicalizes IDs against authoritative ownership, ignores client-provided suit/rank, rejects duplicates or stale ownership, and delegates turn/zone validation to the engine. Chat is capped at 200 characters and sanitized to word characters, whitespace, and `!?.,-`. Emotes and preset broadcasts carry catalog IDs rather than arbitrary display content. Chat, delivered reactions/broadcasts, and emitted system-event history are not persisted. The only related stored value is the private one-shot Ondra schedule described above, which is deleted before relay or when it becomes ineligible.
 
 ### Origin and HTTP policy
 
@@ -521,8 +525,8 @@ Keyboard controls:
 | `B` | Burn in |
 | `Q` | Play the currently eligible freshly drawn replacement |
 | `Escape` | Clear card selection / close supported overlay |
-| Left / Right | Navigate hand cards and emote choices |
-| Arrow keys / Home / End | Navigate menus and deck-count radio options |
+| Left / Right | Navigate hand cards |
+| Arrow keys / Home / End | Navigate reaction choices, menus, and deck-count radio options |
 
 These behaviors are regression-tested; the project does not claim formal WCAG certification.
 
@@ -530,7 +534,14 @@ These behaviors are regression-tested; the project does not claim formal WCAG ce
 
 Waiting-room invites use `/?room=CODE`. The UI attempts native Web Share, falls back to copying the full link, and finally exposes a selectable read-only URL when clipboard access is blocked. The six-character code can also be copied independently.
 
-Eight reactions are available: thumbs-up, laugh, wow, fire, sad, cry, heart, and clap. Sender feedback is immediate; the matching short-lived server echo is deduplicated. Visible feedback hides after 1.9 seconds, the hook drops the retained event after 2.5 seconds, and reactions are neither queued across reconnect nor persisted.
+The reaction sheet has two modes:
+
+- **Emoji:** 28 fixed reactions, including angry/rage, clown, skull, melting, exploding-head, peach, foot, and a medium-dark middle-finger reaction. They render from a locally bundled subset of Microsoft Fluent Emoji SVGs rather than platform-native glyphs, so Android and iOS present the same artwork.
+- **Text:** eight fixed table broadcasts: `╭∩╮( •̀_•́ )╭∩╮`, `kiss my ( ㅅ )`, `ʞɔnɟ`, `( ͠° ͟ʖ ͡°)`, `☘Karma☠`, `¯\_(ツ)_/¯`, `𝖜𝖔𝖒𝖕 𝖜𝖔𝖒𝖕`, and `𝓴𝓲𝓵𝓵 𝓶𝒆`.
+
+The client sends only a stable catalog ID. The Worker validates its exact message shape, applies both the normal socket limit and one combined emoji/text reaction slot every 700 ms, then relays the ID with player ID and server timestamp; display copy remains client-owned. The UI applies a shared 800 ms gate before optimistic feedback and reconciles the server echo so a reaction does not appear twice. These events are ephemeral, are dropped while offline or unauthenticated, and are never replayed after reconnect or written to room storage.
+
+An explicit leave emits a typed table event for the playful departure line. Separately, when a round makes its single authoritative transition into `play`, the Worker checks for a narrowly normalized Ondra/Ondřej-like player and makes one 50/50 draw. A hit privately schedules one of six server-only easter-egg lines for a random target three to seven accepted gameplay actions later; it is not shown at the start of the round. Once due, the line uses the same speech-bubble treatment as that player's normal preset broadcasts. The schedule is stored with the room, consumed once before relay, cleared if the round ends or the player leaves, and is not re-rolled by reconnect, resume, repeated state broadcasts, or later actions. The line is not client-selectable and never appears in the lobby.
 
 The sound event/debounce architecture and persisted sound toggle exist, but no audio assets or playback backend currently ship; the default sound handler is a no-op.
 
@@ -633,12 +644,12 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **318 tests across 29 Vitest files**:
+At this revision, the default suite contains **361 tests across 31 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
-| Engine | 10 | Core rules, AI, decks, cumulative/interrupt burns, exact drawn-card follow-ups, tribute, masking, migrations, forfeit boundaries |
-| Components/UI | 15 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, gameplay feedback, tribute, sound cursor |
+| Engine | 11 | Core rules, AI, decks, cumulative/interrupt burns, exact drawn-card follow-ups, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
+| Components/UI | 16 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, reaction accessibility/assets, gameplay feedback, tribute, sound cursor |
 | Network | 1 | Session validation, auth ordering, sequence guard, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
 | Root routing | 1 | Invite-link and hard-refresh resume routing |
@@ -662,7 +673,7 @@ cd app
 BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial
 ```
 
-The current script reports 31 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
+The current script reports 33 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
 
 ### Production smoke test
 
@@ -747,7 +758,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   │   ├── components/                # Screens and shared game UI
 │   │   ├── engine/
 │   │   │   ├── index.ts               # Pure rules, reducers, deck and AI policy
-│   │   │   ├── protocol.ts            # Protocol-v5 types, validation and masking
+│   │   │   ├── protocol.ts            # Protocol-v6 types, validation and masking
 │   │   │   └── __tests__/             # Engine/protocol/Worker-boundary tests
 │   │   ├── net/
 │   │   │   ├── RoomClient.ts          # WebSocket transport and reconnect queue
@@ -768,4 +779,6 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 
 ## License
 
-Apache License 2.0. See [`LICENSE`](LICENSE).
+Application code is licensed under Apache License 2.0. See [`LICENSE`](LICENSE).
+
+The selected reaction artwork comes from [Microsoft Fluent Emoji](https://github.com/microsoft/fluentui-emoji) commit `62ecdc0d7ca5c6df32148c169556bc8d3782fca4` under the MIT License. The required license text ships with the assets at [`app/public/reactions/LICENSE.txt`](app/public/reactions/LICENSE.txt).

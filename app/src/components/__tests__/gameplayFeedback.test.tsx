@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Card, GameEvent, GameState, Player } from '../../engine'
 import { ActionBar } from '../ActionBar'
 import { EmoteButton } from '../EmoteButton'
@@ -137,16 +137,16 @@ describe('quick matching draw action', () => {
 })
 
 describe('expanded table reactions', () => {
-  it('includes sad reactions and keeps every option keyboard-sized', () => {
+  it('includes 28 modern reactions with sad, angry and cry choices', () => {
     const send = vi.fn()
     render(<EmoteButton onSend={send} />)
-    fireEvent.click(screen.getByRole('button', { name: /send an emote/i }))
+    fireEvent.click(screen.getByRole('button', { name: /open reactions/i }))
 
-    expect(screen.getAllByRole('menuitem')).toHaveLength(8)
-    const sad = screen.getByRole('menuitem', { name: 'Sad' })
-    fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' })
-    expect(sad).toBe(document.activeElement)
-    const cry = screen.getByRole('menuitem', { name: 'Cry' })
+    const reactions = within(screen.getByRole('group', { name: 'Emoji reactions' }))
+    expect(reactions.getAllByRole('button')).toHaveLength(28)
+    expect(reactions.getByRole('button', { name: 'Sad' })).toBeTruthy()
+    expect(reactions.getByRole('button', { name: 'Angry' })).toBeTruthy()
+    const cry = reactions.getByRole('button', { name: 'Sobbing' })
     fireEvent.click(cry)
     expect(send).toHaveBeenCalledWith('cry')
   })

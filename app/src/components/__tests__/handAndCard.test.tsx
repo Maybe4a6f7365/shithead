@@ -89,13 +89,13 @@ describe('copy-card pile feedback', () => {
 })
 
 describe('emote picker', () => {
-  it('moves focus into the menu and restores it when Escape closes', async () => {
+  it('moves focus into the reaction dialog and restores it when Escape closes', async () => {
     render(<EmoteButton onSend={vi.fn()} />)
-    const trigger = screen.getByRole('button', { name: /send an emote/i })
+    const trigger = screen.getByRole('button', { name: /open reactions/i })
     fireEvent.click(trigger)
-    expect(screen.getByRole('menuitem', { name: /nice/i })).toBe(document.activeElement)
-    fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(screen.getByRole('tab', { name: /emoji/i })).toBe(document.activeElement)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(trigger).toBe(document.activeElement)
   })
 })
