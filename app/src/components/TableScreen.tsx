@@ -44,17 +44,26 @@ export interface TableScreenProps {
   viewerId: string
   /** True when it is the viewer's turn AND the viewer may act (not AI). */
   viewerActive: boolean
+  /** False while multiplayer is waiting for a fresh post-auth snapshot. */
+  actionsEnabled?: boolean
+  /** Synchronous transport-epoch guard for the disconnect transition before
+      the actionsEnabled render catches up. */
+  canSubmitAction?: () => boolean
+  /** Optional in-memory bridge used by the multiplayer wrapper to retain a
+      local draft while the table is temporarily unmounted by offline UI. */
+  initialSelectionDraft?: string[]
+  onSelectionDraftChange?: (selection: string[]) => void
   /** Server-side error text to surface in the feed (MP). */
   error?: string | null
-  onPlay: (cards: CardT[]) => void
+  onPlay: (cards: CardT[]) => void | boolean
   /** Race-safe one-card continuation after drawing the rank just played. */
-  onQuickFollowUp?: (card: CardT) => void
+  onQuickFollowUp?: (card: CardT) => void | boolean
   /** Local hot-seat hand-off when the previous player declines the race. */
   onDeclineQuickFollowUp?: () => void
   quickFollowUpDeclineLabel?: string
   /** Out-of-turn completion of the physical top run to four or more. */
-  onBurnIn?: (cards: CardT[]) => void
-  onPickUp: () => void
+  onBurnIn?: (cards: CardT[]) => void | boolean
+  onPickUp: () => void | boolean
   onLeave: () => void
   onOpenRules: () => void
   soundOn: boolean
@@ -63,9 +72,9 @@ export interface TableScreenProps {
   seatOffline?: (playerId: string) => boolean
   /** Multiplayer supplies room events; single-player still gets local feedback. */
   latestEmote?: EmoteEvent | null
-  onSendEmote?: (emote: EmoteId) => void
+  onSendEmote?: (emote: EmoteId) => void | boolean
   latestBroadcast?: BroadcastEvent | null
-  onSendBroadcast?: (broadcast: BroadcastId) => void
+  onSendBroadcast?: (broadcast: BroadcastId) => void | boolean
   /** Server-authored table notices and the deliberately rare Ondra easter egg. */
   latestSystemEvent?: SystemEvent | null
 }
@@ -93,6 +102,33 @@ export function nextRankSelection(selection: string[], tapped: CardT, cards: Car
   const selected = cards.find(card => selection.includes(card.id))
   if (selected && selected.rank !== tapped.rank) return [tapped.id]
   return [...selection, tapped.id]
+}
+
+/**
+ * Revalidate a local hand/face-up draft against the latest authoritative pile.
+ * A multi-card choice is atomic: ownership, rank, or legality changes clear the
+ * complete draft rather than silently playing only the surviving subset.
+ */
+export function reconcilePlayableSelection(
+  selection: string[],
+  cards: CardT[],
+  topRank: ReturnType<typeof getTopRank>,
+): string[] {
+  if (selection.length === 0) return selection
+  if (new Set(selection).size !== selection.length) return []
+  const byId = new Map(cards.map(card => [card.id, card] as const))
+  const selected = selection.flatMap(id => {
+    const card = byId.get(id)
+    return card ? [card] : []
+  })
+  if (selected.length !== selection.length) return []
+  if (selected.some(card => card.rank !== selected[0].rank)) return []
+  if (selected.some(card => !canPlay(card, topRank))) return []
+  return selection
+}
+
+function sameSelection(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
 export function isMatchingSelfEmoteEcho(
@@ -136,7 +172,9 @@ function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }):
 }
 
 export function TableScreen({
-  state, viewerId, viewerActive, error, onPlay, onQuickFollowUp,
+  state, viewerId, viewerActive, actionsEnabled = true, canSubmitAction = () => true,
+  initialSelectionDraft = [], onSelectionDraftChange,
+  error, onPlay, onQuickFollowUp,
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
   soundOn, onToggleSound, connectionBadge, seatOffline, latestEmote, onSendEmote,
   latestBroadcast, onSendBroadcast, latestSystemEvent,
@@ -147,7 +185,9 @@ export function TableScreen({
   const topRank = getTopRank(state)
   const ps = pileSize(state)
 
-  const [selection, setSelection] = useState<string[]>([])
+  const [selection, setSelectionState] = useState<string[]>(() => [...initialSelectionDraft])
+  const selectionRef = useRef(selection)
+  const selectionZoneRef = useRef<Zone | null>(null)
   const [invalidId, setInvalidId] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)     // transient feed copy (errors, guards)
   const [pickupArmed, setPickupArmed] = useState(false)
@@ -157,10 +197,13 @@ export function TableScreen({
   const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
   const [displayedBroadcast, setDisplayedBroadcast] = useState<BroadcastEvent | null>(null)
+  const selectionOwner = useRef(viewerId)
+  const invalidDraftNoticeKey = useRef('')
   const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
   const pendingSelfBroadcast = useRef<{ broadcast: BroadcastId; sentAt: number } | null>(null)
   const lastReactionSentAt = useRef<number | null>(null)
   const debounceRef = useRef(0)
+  const pickupDraftBackup = useRef<string[]>([])
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const burnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const burnGenerationRef = useRef(0)
@@ -179,25 +222,48 @@ export function TableScreen({
   // ---- Derived ----
   const zone: Zone | null = viewer ? activeZoneOf(viewer) : null
   const zoneCards: CardT[] = viewer ? viewer[zone ?? 'hand'] : []
+  selectionRef.current = selection
+  selectionZoneRef.current = zone
+  const setSelection = useCallback((next: string[] | ((current: string[]) => string[])) => {
+    const resolved = typeof next === 'function' ? next(selectionRef.current) : next
+    selectionRef.current = resolved
+    // Only stable, visible hand/tableau ids survive the multiplayer offline screen.
+    // Never persist a position-based blind choice across resynchronization.
+    onSelectionDraftChange?.(
+      selectionZoneRef.current === 'hand' || selectionZoneRef.current === 'faceUp' ? resolved : []
+    )
+    setSelectionState(resolved)
+  }, [onSelectionDraftChange])
   const playableNow = useCallback(
     (c: CardT) => canPlay(c, topRank),
     [topRank],
   )
   const anyPlayable = viewerActive && zone !== 'faceDown' && zoneCards.some(playableNow)
 
+  const ownedSelection = selectionOwner.current === viewerId ? selection : []
+  const effectiveSelection = useMemo(() => {
+    if (state.phase !== 'play' && state.phase !== 'endgame') return []
+    if (zone === 'faceDown') {
+      return viewerActive && ownedSelection.length <= 1 &&
+        ownedSelection.every(id => zoneCards.some(card => card.id === id))
+        ? ownedSelection
+        : []
+    }
+    return reconcilePlayableSelection(ownedSelection, zoneCards, topRank)
+  }, [ownedSelection, state.phase, topRank, viewerActive, zone, zoneCards])
   const selectedCards = useMemo(
-    () => zoneCards.filter(c => selection.includes(c.id)),
-    [zoneCards, selection],
+    () => zoneCards.filter(c => effectiveSelection.includes(c.id)),
+    [effectiveSelection, zoneCards],
   )
   const selectedRank = selectedCards[0]?.rank ?? null
   const interruptCards = useMemo(
-    () => (!viewerActive && onBurnIn ? getInterruptBurnCards(state, viewerId) : []),
-    [state, viewerId, viewerActive, onBurnIn],
+    () => (actionsEnabled && !viewerActive && onBurnIn ? getInterruptBurnCards(state, viewerId) : []),
+    [actionsEnabled, state, viewerId, viewerActive, onBurnIn],
   )
   const interruptIds = useMemo(() => new Set(interruptCards.map(card => card.id)), [interruptCards])
   const quickFollowUpCards = useMemo(
-    () => (onQuickFollowUp ? getQuickFollowUpCards(state, viewerId) : []),
-    [state, viewerId, onQuickFollowUp],
+    () => (actionsEnabled && onQuickFollowUp ? getQuickFollowUpCards(state, viewerId) : []),
+    [actionsEnabled, state, viewerId, onQuickFollowUp],
   )
   const quickFollowUpIds = useMemo(() => new Set(quickFollowUpCards.map(card => card.id)), [quickFollowUpCards])
   const physicalRun = getPhysicalTopRun(state)
@@ -207,6 +273,11 @@ export function TableScreen({
     ? state.pendingQuickFollowUp.sourceSeq
     : null
   const showQuickFollowUp = canQuickFollowUp && dismissedQuickSourceSeq !== quickSourceSeq
+  const quickActionVisible = showQuickFollowUp && (!viewerActive || effectiveSelection.length === 0)
+  const canPreselectVisible = Boolean(
+    viewer && !viewer.isAI && !viewer.isOut && (zone === 'hand' || zone === 'faceUp') &&
+    (state.phase === 'play' || state.phase === 'endgame') && !canQuickFollowUp && !canBurnIn,
+  )
 
   // ---- Feed: transient flash > server error > latest table event ----
   // Turn ownership has a persistent, spatial cue in the header/opponent seat.
@@ -312,11 +383,50 @@ export function TableScreen({
   // Surface external (server) errors assertively.
   useEffect(() => { if (error) announcer.sayAssertive(error) }, [error]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Selection is invalid when the zone/turn changes — reset.
+  // Keep an off-turn draft across harmless actions. Reconcile it against each
+  // authoritative hand/pile update and clear it only when it is no longer a
+  // complete legal play (or the private hot-seat viewer changes).
   useEffect(() => {
-    setSelection(sel => sel.filter(id => zoneCards.some(c => c.id === id)))
+    if (selectionOwner.current !== viewerId) {
+      selectionOwner.current = viewerId
+      setSelection([])
+      setPickupArmed(false)
+      return
+    }
+    setSelection(current => {
+      let next: string[]
+      if (state.phase !== 'play' && state.phase !== 'endgame') next = []
+      else if (zone === 'faceDown') {
+        next = viewerActive && current.length <= 1 &&
+          current.every(id => zoneCards.some(card => card.id === id))
+          ? current
+          : []
+      } else {
+        next = reconcilePlayableSelection(current, zoneCards, topRank)
+      }
+      return sameSelection(current, next) ? current : next
+    })
     setPickupArmed(false)
-  }, [zone, viewerId, state.turnCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state.phase, topRank, viewerActive, viewerId, zone, zoneCards])
+
+  const draftInvalidated = ownedSelection.length > 0 && effectiveSelection.length === 0 &&
+    zone !== 'faceDown' && (state.phase === 'play' || state.phase === 'endgame')
+  useEffect(() => {
+    if (!draftInvalidated) {
+      invalidDraftNoticeKey.current = ''
+      return
+    }
+    const key = `${viewerId}:${state.seq ?? state.turnCount}:${ownedSelection.join(',')}`
+    if (invalidDraftNoticeKey.current === key) return
+    invalidDraftNoticeKey.current = key
+    const text = 'Prepared cards no longer fit the pile — choose again'
+    setFlash(text)
+    announcer.sayPolite(text)
+    later(3000, () => setFlash(current => current === text ? null : current))
+    // The draft is cleared by the reconciliation effect above in the same
+    // commit; this effect only explains why its highlight disappeared.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftInvalidated, state.seq, state.turnCount, viewerId])
 
   // ---- Actions ----
   const explain = (text: string, cardId?: string) => {
@@ -330,53 +440,75 @@ export function TableScreen({
     later(3000, () => setFlash(f => (f === text ? null : f)))
   }
 
+  const explainReconnect = () => {
+    const text = 'Reconnecting — prepared cards kept'
+    setFlash(text)
+    announcer.sayPolite(text)
+    later(2200, () => setFlash(current => current === text ? null : current))
+  }
+
+  const maySubmitNow = () => actionsEnabled && canSubmitAction()
+
   const commitPlay = () => {
-    if (selectedCards.length === 0) return
+    if (!viewerActive || selectedCards.length === 0) return
+    if (!maySubmitNow()) { explainReconnect(); return }
     if (Date.now() - debounceRef.current < 300) return // §6.3 input debounce
+    if (onPlay(selectedCards) === false) { explainReconnect(); return }
     debounceRef.current = Date.now()
     emitSoundDebounced(selectedCards.length > 1 ? 'play_multi' : 'play')
     setSelection([])
     setPickupArmed(false)
-    onPlay(selectedCards)
   }
 
   const commitPickup = () => {
     if (!viewerActive || ps === 0) return
+    if (!maySubmitNow()) { explainReconnect(); return }
     if (Date.now() - debounceRef.current < 300) return
-    // Picking up is always a separate intent; never leave a stale play set.
-    setSelection([])
     if (anyPlayable && !pickupArmed) {
       // §6.1: guard — second confirming tap within 3s.
+      pickupDraftBackup.current = effectiveSelection
+      setSelection([])
       setPickupArmed(true)
       setFlash('Pick up anyway? — tap again')
       later(3000, () => setPickupArmed(false))
       later(3000, () => setFlash(f => (f === 'Pick up anyway? — tap again' ? null : f)))
       return
     }
+    const restoreOnFailure = pickupArmed ? pickupDraftBackup.current : effectiveSelection
+    if (onPickUp() === false) {
+      if (restoreOnFailure.length > 0) setSelection(restoreOnFailure)
+      pickupDraftBackup.current = []
+      setPickupArmed(false)
+      explainReconnect()
+      return
+    }
     debounceRef.current = Date.now()
+    pickupDraftBackup.current = []
+    setSelection([])
     setPickupArmed(false)
-    onPickUp()
   }
 
   const commitBurnIn = () => {
     if (!canBurnIn || !onBurnIn) return
+    if (!maySubmitNow()) { explainReconnect(); return }
     if (Date.now() - debounceRef.current < 300) return
+    if (onBurnIn(interruptCards) === false) { explainReconnect(); return }
     debounceRef.current = Date.now()
     emitSoundDebounced('burn')
     setSelection([])
     setPickupArmed(false)
-    onBurnIn(interruptCards)
   }
 
   const commitQuickFollowUp = () => {
     const card = quickFollowUpCards[0]
     if (!card || !onQuickFollowUp) return
+    if (!maySubmitNow()) { explainReconnect(); return }
     if (Date.now() - debounceRef.current < 300) return
+    if (onQuickFollowUp(card) === false) { explainReconnect(); return }
     debounceRef.current = Date.now()
     emitSoundDebounced('play')
     setSelection([])
     setPickupArmed(false)
-    onQuickFollowUp(card)
   }
 
   const dismissQuickFollowUp = () => {
@@ -386,33 +518,47 @@ export function TableScreen({
     later(2200, () => setFlash(value => value === 'Quick match skipped — take your turn' ? null : value))
   }
 
+  const explainReactionReconnect = () => {
+    const text = 'Reconnecting — reaction not sent'
+    setFlash(text)
+    announcer.sayPolite(text)
+    later(2200, () => setFlash(current => current === text ? null : current))
+  }
+
   const sendEmote = (emote: EmoteId) => {
     const sentAt = Date.now()
     if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    if (!actionsEnabled || onSendEmote?.(emote) === false) {
+      explainReactionReconnect()
+      return
+    }
     lastReactionSentAt.current = sentAt
     const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt }
     if (onSendEmote) pendingSelfEmote.current = { emote, sentAt }
     setDisplayedEmote(event)
-    onSendEmote?.(emote)
   }
 
   const sendBroadcast = (broadcast: BroadcastId) => {
     const sentAt = Date.now()
     if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    if (!actionsEnabled || onSendBroadcast?.(broadcast) === false) {
+      explainReactionReconnect()
+      return
+    }
     lastReactionSentAt.current = sentAt
     const event: BroadcastEvent = { playerId: viewerId, broadcast, ts: sentAt }
     if (onSendBroadcast) pendingSelfBroadcast.current = { broadcast, sentAt }
     setDisplayedBroadcast(event)
-    onSendBroadcast?.(broadcast)
   }
 
   const tapCard = (card: CardT, cardZone: Zone) => {
-    if (!viewerActive) return
+    const preparingNextTurn = !viewerActive && canPreselectVisible && cardZone === zone
+    if (!viewerActive && !preparingNextTurn) return
     setPickupArmed(false)
     if (cardZone !== zone) return // only the active zone is live (D6)
     if (zone === 'faceDown') {
       // Blind plays are single cards (D7): tap toggles a single selection.
-      const isSelected = selection.includes(card.id)
+      const isSelected = effectiveSelection.includes(card.id)
       setSelection(isSelected ? [] : [card.id])
       emitSoundDebounced(isSelected ? 'deselect' : 'select')
       return
@@ -427,17 +573,17 @@ export function TableScreen({
       )
       return
     }
-    const next = nextRankSelection(selection, card, zoneCards)
-    if (next === selection) {
+    const next = nextRankSelection(effectiveSelection, card, zoneCards)
+    if (next === effectiveSelection) {
       explain('Four cards maximum per play', card.id)
       return
     }
     setSelection(next)
-    emitSoundDebounced(selection.includes(card.id) ? 'deselect' : 'select')
+    emitSoundDebounced(effectiveSelection.includes(card.id) ? 'deselect' : 'select')
   }
 
-  // Stable, ref-routed activators — Card's memo ignores onActivate, so these
-  // must never go stale semantically (they always read the latest render).
+  // Stable, ref-routed activators — Card's memo ignores onActivate identity,
+  // so these must never go stale semantically (they read the latest render).
   const latest = useRef({ viewer, zone, tapCard })
   latest.current = { viewer, zone, tapCard }
   const onHandId = useCallback((id: string) => {
@@ -457,11 +603,22 @@ export function TableScreen({
   }, [])
   const states = new Map<string, CardVisualState>()
   const hints = new Map<string, string>()
+  const effectiveSelectionIds = new Set(effectiveSelection)
   if (viewer) {
     for (const c of [...viewer.hand, ...viewer.faceUp]) {
-      if (selection.includes(c.id)) {
+      if (quickActionVisible && quickFollowUpIds.has(c.id)) {
+        states.set(c.id, 'joinable')
+        hints.set(c.id, 'drawn match, quick follow-up available')
+        continue
+      }
+      if (canBurnIn && interruptIds.has(c.id)) {
+        states.set(c.id, 'joinable')
+        hints.set(c.id, 'can burn in now')
+        continue
+      }
+      if (effectiveSelectionIds.has(c.id)) {
         states.set(c.id, 'selected')
-        hints.set(c.id, 'selected')
+        hints.set(c.id, viewerActive ? 'selected' : 'selected for your next turn')
         continue
       }
       if (quickFollowUpIds.has(c.id)) {
@@ -469,10 +626,18 @@ export function TableScreen({
         hints.set(c.id, 'drawn match, quick follow-up available')
         continue
       }
+      if (invalidId === c.id) {
+        states.set(c.id, 'invalid')
+        hints.set(c.id, 'not playable')
+        continue
+      }
       if (!viewerActive) {
         if (interruptIds.has(c.id)) {
           states.set(c.id, 'joinable')
           hints.set(c.id, 'can burn in now')
+        } else if (canPreselectVisible && zoneCards.some(zoneCard => zoneCard.id === c.id)) {
+          states.set(c.id, 'rest')
+          hints.set(c.id, playableNow(c) ? 'available to select for your next turn' : 'not playable on the current pile')
         } else {
           states.set(c.id, 'rest')
         }
@@ -480,7 +645,6 @@ export function TableScreen({
       }
       const inZone = zone !== 'faceDown' && zoneCards.some(z => z.id === c.id)
       if (!inZone) { states.set(c.id, 'rest'); continue }
-      if (invalidId === c.id) { states.set(c.id, 'invalid'); hints.set(c.id, 'not playable'); continue }
       if (playableNow(c)) {
         if (selectedRank && c.rank !== selectedRank) { states.set(c.id, 'playable'); hints.set(c.id, 'playable, replaces selection') }
         else if (selectedRank) { states.set(c.id, 'joinable'); hints.set(c.id, 'playable') }
@@ -495,8 +659,8 @@ export function TableScreen({
   const downHints = new Map<string, string>()
   if (viewer && viewerActive && zone === 'faceDown') {
     for (const c of viewer.faceDown) {
-      downStates.set(c.id, selection.includes(c.id) ? 'selected' : 'playable')
-      downHints.set(c.id, selection.includes(c.id) ? 'selected' : 'blind play')
+      downStates.set(c.id, effectiveSelectionIds.has(c.id) ? 'selected' : 'playable')
+      downHints.set(c.id, effectiveSelectionIds.has(c.id) ? 'selected' : 'blind play')
     }
   }
 
@@ -531,7 +695,9 @@ export function TableScreen({
 
   if (!viewer) return null
 
-  const endgameZoneLive = (viewerActive || canBurnIn) && (zone === 'faceUp' || zone === 'faceDown')
+  const endgameZoneLive = (
+    viewerActive || canBurnIn || (canPreselectVisible && zone === 'faceUp')
+  ) && (zone === 'faceUp' || zone === 'faceDown')
   const emotePlayer = displayedEmote
     ? state.players.find(player => player.id === displayedEmote.playerId)?.name
     : undefined
@@ -548,7 +714,7 @@ export function TableScreen({
       data-game-phase={state.phase}
       data-viewer-active={viewerActive ? 'true' : 'false'}
       data-active-zone={zone ?? undefined}
-      data-selection-count={selection.length}
+      data-selection-count={effectiveSelection.length}
     >
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
@@ -634,7 +800,7 @@ export function TableScreen({
         faceUpHints={hints}
         faceDownStates={downStates}
         faceDownHints={downHints}
-        onActivateFaceUp={viewerActive && zone === 'faceUp' ? onFaceUpId : undefined}
+        onActivateFaceUp={(viewerActive || canPreselectVisible) && zone === 'faceUp' ? onFaceUpId : undefined}
         onActivateFaceDown={viewerActive && zone === 'faceDown' ? onFaceDownId : undefined}
       />
 
@@ -655,7 +821,7 @@ export function TableScreen({
         <div className="table-hand-zone__inner" onClick={e => e.stopPropagation()}>
           {(viewerActive || canBurnIn || canQuickFollowUp) && (
             <ActionBar
-              selectionCount={selection.length}
+              selectionCount={viewerActive ? effectiveSelection.length : 0}
               canPickUp={viewerActive && ps > 0}
               pickupArmed={pickupArmed}
               onPlay={commitPlay}
@@ -677,7 +843,9 @@ export function TableScreen({
             cards={viewer.hand}
             states={states}
             ariaHints={hints}
-            onSelect={viewerActive && zone === 'hand' ? onHandId : undefined}
+            onSelect={(viewerActive || canPreselectVisible) && zone === 'hand' ? onHandId : undefined}
+            reorderable={state.phase !== 'gameOver' && !canBurnIn && !canQuickFollowUp}
+            orderKey={viewerId}
           />
         </div>
       </footer>
