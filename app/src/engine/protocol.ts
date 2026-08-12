@@ -16,6 +16,7 @@
 //    BURN_IN {cards: Card[]}                 out-of-turn four-of-a-kind completion
 //    PICK_UP {}                              pick up the pile (play/endgame only)
 //    SET_RULES {rules}                       host updates waiting/next-round rules
+//    SET_EASTER_EGG {enabled}                host toggles the room easter egg
 //    TRIBUTE_SWAP {winnerCardId, loserCardId} optional public-row exchange
 //    TRIBUTE_SKIP {}                         previous winner declines the exchange
 //    CHAT {text}                             in-room chat (<=200 chars)
@@ -164,6 +165,7 @@ export type ClientMsg =
   | { type: 'BURN_IN'; cards: Card[]; version?: number }
   | { type: 'PICK_UP'; version?: number }
   | { type: 'SET_RULES'; rules: Partial<GameRules>; version?: number }
+  | { type: 'SET_EASTER_EGG'; enabled: boolean; version?: number }
   | { type: 'TRIBUTE_SWAP'; winnerCardId: string; loserCardId: string; version?: number }
   | { type: 'TRIBUTE_SKIP'; version?: number }
   | { type: 'CHAT'; text: string; version?: number }
@@ -203,6 +205,7 @@ export interface RoomSummary {
   phase: Phase | 'waiting'
   hostId: string
   maxPlayers: number
+  easterEggEnabled: boolean
   players: PlayerSummary[]
   createdAt: number
   rules: GameRules
@@ -295,6 +298,8 @@ export function isClientMsg(data: unknown): data is ClientMsg {
       return hasOnlyKeys(data, ['type', 'broadcast', 'version']) && isBroadcastId(data.broadcast)
     case 'SET_RULES':
       return isRulesPatch(data.rules)
+    case 'SET_EASTER_EGG':
+      return hasOnlyKeys(data, ['type', 'enabled', 'version']) && typeof data.enabled === 'boolean'
     case 'TRIBUTE_SWAP':
       return isShortString(data.winnerCardId, 128) && isShortString(data.loserCardId, 128) &&
         data.winnerCardId !== data.loserCardId

@@ -37,6 +37,11 @@ export function normalizeGameRules(
   return normalized
 }
 
+/** Old or malformed room snapshots keep the historically enabled behavior. */
+export function normalizeEasterEggEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : true
+}
+
 function validPlayerId(value: unknown, players: Player[]): value is string {
   return typeof value === 'string' && players.some(player => player.id === value)
 }

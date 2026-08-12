@@ -1,11 +1,11 @@
 // ============================================================================
 // QuietMenu — top-right "Menu" text button (44×44, label style, cream 62%)
-// with a sheet-style dropdown: Rules / Sound toggle / Leave (§3.1, §9).
+// with a sheet-style dropdown: rules, local alerts, room controls, and leave.
 // Leave asks once when a match is running (§6.3).
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
 
-function MenuIcon({ name }: { name: 'rules' | 'sound' | 'leave' }) {
+function MenuIcon({ name }: { name: 'rules' | 'sound' | 'bell' | 'attention' | 'egg' | 'leave' }) {
   if (name === 'rules') {
     return (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
@@ -22,6 +22,29 @@ function MenuIcon({ name }: { name: 'rules' | 'sound' | 'leave' }) {
       </svg>
     )
   }
+  if (name === 'bell') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        <path d="M6.5 16.5h11L16 14V10a4 4 0 0 0-8 0v4l-1.5 2.5Z" />
+        <path d="M10 19a2.3 2.3 0 0 0 4 0" />
+      </svg>
+    )
+  }
+  if (name === 'attention') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+        <circle cx="12" cy="12" r="3.5" />
+      </svg>
+    )
+  }
+  if (name === 'egg') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        <path d="M12 3c-3 0-6.5 6-6.5 11a6.5 6.5 0 0 0 13 0C18.5 9 15 3 12 3Z" />
+      </svg>
+    )
+  }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       <path d="M10 5H5v14h5M13 8l4 4-4 4M8 12h9" />
@@ -33,11 +56,29 @@ export interface QuietMenuProps {
   onOpenRules: () => void
   soundOn: boolean
   onToggleSound: () => void
+  turnAlertsEnabled?: boolean
+  onToggleTurnAlerts?: () => void
+  adhdMode?: boolean
+  onToggleAdhdMode?: () => void
+  easterEggEnabled?: boolean
+  onToggleEasterEgg?: () => void
   onLeave: () => void
   matchRunning: boolean
 }
 
-export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchRunning }: QuietMenuProps) {
+export function QuietMenu({
+  onOpenRules,
+  soundOn,
+  onToggleSound,
+  turnAlertsEnabled = true,
+  onToggleTurnAlerts,
+  adhdMode = false,
+  onToggleAdhdMode,
+  easterEggEnabled,
+  onToggleEasterEgg,
+  onLeave,
+  matchRunning,
+}: QuietMenuProps) {
   const [open, setOpen] = useState(false)
   const [confirmingLeave, setConfirmingLeave] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -77,10 +118,12 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
 
   const moveMenuFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
-    const items = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"], [role="menuitemcheckbox"]') ?? [])
+    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>(
+      '[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemcheckbox"]:not([aria-disabled="true"])',
+    ) ?? [])
     if (items.length === 0) return
     event.preventDefault()
-    const current = items.indexOf(document.activeElement as HTMLButtonElement)
+    const current = items.indexOf(document.activeElement as HTMLElement)
     const next = event.key === 'Home' ? 0
       : event.key === 'End' ? items.length - 1
         : event.key === 'ArrowDown' ? (current + 1 + items.length) % items.length
@@ -127,15 +170,71 @@ export function QuietMenu({ onOpenRules, soundOn, onToggleSound, onLeave, matchR
           <button
             type="button"
             role="menuitemcheckbox"
-            aria-checked={soundOn}
-            aria-label={`Sound: ${soundOn ? 'on' : 'off'}`}
+            aria-checked={turnAlertsEnabled}
+            aria-label={`Turn alerts: ${turnAlertsEnabled ? 'on' : 'off'}`}
+            onClick={onToggleTurnAlerts}
+            className="quiet-menu__item quiet-menu__item--turn-alerts w-full text-left px-s4 min-h-[44px] text-body text-cream"
+          >
+            <span className="quiet-menu__item-icon"><MenuIcon name="bell" /></span>
+            <span className="quiet-menu__item-label">Turn alerts</span>
+            <span className="quiet-menu__item-value" aria-hidden="true">{turnAlertsEnabled ? 'On' : 'Off'}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={!soundOn}
+            aria-label={`Mute sounds: ${soundOn ? 'off' : 'on'}`}
             onClick={onToggleSound}
             className="quiet-menu__item quiet-menu__item--sound w-full text-left px-s4 min-h-[44px] text-body text-cream"
           >
             <span className="quiet-menu__item-icon"><MenuIcon name="sound" /></span>
-            <span className="quiet-menu__item-label">Sound</span>
-            <span className="quiet-menu__item-value" aria-hidden="true">{soundOn ? 'On' : 'Off'}</span>
+            <span className="quiet-menu__item-label">Mute sounds</span>
+            <span className="quiet-menu__item-value" aria-hidden="true">{soundOn ? 'Off' : 'On'}</span>
           </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={adhdMode}
+            aria-label={`ADHD mode: ${adhdMode ? 'on' : 'off'}`}
+            onClick={onToggleAdhdMode}
+            className="quiet-menu__item quiet-menu__item--attention w-full text-left px-s4 min-h-[44px] text-body text-cream"
+          >
+            <span className="quiet-menu__item-icon"><MenuIcon name="attention" /></span>
+            <span className="quiet-menu__item-label">ADHD mode</span>
+            <span className="quiet-menu__item-value" aria-hidden="true">{adhdMode ? 'On' : 'Off'}</span>
+          </button>
+          {easterEggEnabled !== undefined && (
+            <>
+              <div className="quiet-menu__divider h-px bg-hairline mx-s4" role="separator" />
+              {onToggleEasterEgg ? (
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={easterEggEnabled}
+                  aria-label={`Easter egg: ${easterEggEnabled ? 'on' : 'off'}`}
+                  onClick={onToggleEasterEgg}
+                  className="quiet-menu__item quiet-menu__item--easter-egg w-full text-left px-s4 min-h-[44px] text-body text-cream"
+                >
+                  <span className="quiet-menu__item-icon"><MenuIcon name="egg" /></span>
+                  <span className="quiet-menu__item-label">Easter egg</span>
+                  <span className="quiet-menu__item-value" aria-hidden="true">{easterEggEnabled ? 'On' : 'Off'}</span>
+                </button>
+              ) : (
+                <div
+                  role="menuitemcheckbox"
+                  aria-checked={easterEggEnabled}
+                  aria-disabled="true"
+                  tabIndex={-1}
+                  aria-label={`Easter egg: ${easterEggEnabled ? 'on' : 'off'}; host controlled`}
+                  className="quiet-menu__item quiet-menu__item--easter-egg quiet-menu__item--locked w-full text-left px-s4 min-h-[44px] text-body text-cream"
+                >
+                  <span className="quiet-menu__item-icon"><MenuIcon name="egg" /></span>
+                  <span className="quiet-menu__item-label">Easter egg</span>
+                  <span className="quiet-menu__item-value" aria-hidden="true">{easterEggEnabled ? 'On' : 'Off'} · Host</span>
+                </div>
+              )}
+            </>
+          )}
           <div className="quiet-menu__divider h-px bg-hairline mx-s4" role="separator" />
           <button
             type="button"

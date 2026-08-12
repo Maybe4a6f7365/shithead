@@ -3380,6 +3380,11 @@
   color: var(--table-copy-muted);
   font-size: 11px;
 }
+.game-screen .quiet-menu__item--locked {
+  cursor: default;
+  opacity: 0.68;
+}
+.game-screen .quiet-menu__item--locked:hover { background: transparent; }
 .game-screen .quiet-menu__item--leave { color: var(--color-danger-bright); }
 .game-screen .quiet-menu__divider { background: var(--table-line); }
 .game-screen .emote-feedback { filter: drop-shadow(0 14px 28px rgba(6, 25, 18, 0.38)); }
@@ -3388,6 +3393,76 @@
   border-radius: 999px;
   color: var(--table-copy);
   background: #17392d;
+}
+
+/* ADHD turn cue: a slow, low-contrast perimeter pulse instead of a
+   full-screen flash. It is decorative and never intercepts the dismissing
+   pointer or key action. */
+.game-screen .turn-attention-beacon {
+  position: fixed;
+  z-index: calc(var(--z-overlay) + 2);
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  left: max(8px, env(safe-area-inset-left));
+  border: 2px solid rgba(222, 190, 96, 0.88);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 0 16px rgba(222, 190, 96, 0.12),
+    0 0 14px rgba(222, 190, 96, 0.2);
+  pointer-events: none;
+  animation: turn-attention-beacon-pulse 1.6s ease-in-out infinite;
+}
+
+.game-screen .turn-attention-beacon__label {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  min-width: 148px;
+  padding: 7px 12px 8px;
+  display: grid;
+  gap: 1px;
+  border: 1px solid rgba(222, 190, 96, 0.7);
+  border-radius: 999px;
+  color: var(--color-cream);
+  background: rgba(6, 25, 18, 0.94);
+  box-shadow: 0 5px 18px rgba(6, 25, 18, 0.35);
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.game-screen .turn-attention-beacon__label strong {
+  font-size: 14px;
+  line-height: 17px;
+  letter-spacing: 0.01em;
+}
+
+.game-screen .turn-attention-beacon__label span {
+  color: var(--table-copy-muted);
+  font-size: 10px;
+  line-height: 13px;
+}
+
+@keyframes turn-attention-beacon-pulse {
+  0%, 100% {
+    border-color: rgba(222, 190, 96, 0.46);
+    box-shadow:
+      inset 0 0 12px rgba(222, 190, 96, 0.08),
+      0 0 10px rgba(222, 190, 96, 0.12);
+  }
+  50% {
+    border-color: rgba(222, 190, 96, 0.96);
+    box-shadow:
+      inset 0 0 18px rgba(222, 190, 96, 0.16),
+      0 0 18px rgba(222, 190, 96, 0.26);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-screen .turn-attention-beacon {
+    animation: none !important;
+    opacity: 1;
+  }
 }
 
 @media (max-width: 340px) {

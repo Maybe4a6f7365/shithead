@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import { App } from './App'
+import { installBrowserAudioBackend } from './components/soundManager'
 import './styles/index.css'
 
 const UPDATE_CHECK_MS = 60 * 60 * 1000
@@ -19,6 +20,8 @@ const syncAppViewportHeight = () => {
 syncAppViewportHeight()
 window.addEventListener('resize', syncAppViewportHeight)
 window.visualViewport?.addEventListener('resize', syncAppViewportHeight)
+
+installBrowserAudioBackend()
 
 // autoUpdate reloads once when a genuinely new worker activates. Checking on
 // startup, hourly, and when the tab becomes visible makes stale installed

@@ -10,6 +10,7 @@ import { PassGate } from './PassGate'
 import { GameOverOverlay } from './GameOverOverlay'
 import { RulesSheet } from './RulesSheet'
 import { TributeScreen } from './TributeScreen'
+import { useTurnAlertController, useTurnAlertPreferences } from './turnAlerts'
 
 const AI_TICK_MS = 900
 
@@ -22,8 +23,8 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const initConfigs = useSPGame(s => s.configs)
   const nextRules = useSPGame(s => s.rules)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [soundOn, setSoundOn] = useState(() => localStorage.getItem('shithead:sound') !== 'off')
   const [declinedQuickSourceSeq, setDeclinedQuickSourceSeq] = useState<number | null>(null)
+  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode } = useTurnAlertPreferences()
 
   const {
     playCards, quickFollowUp, interruptBurn, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
@@ -34,6 +35,12 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const current = players[currentPlayerIdx]
   const loser = players.find(p => p.id === loserId)
   const meIsShithead = loserId !== null && loserId === meId
+  const attentionAlertActive = useTurnAlertController({
+    phase,
+    currentPlayerId: current?.id ?? null,
+    localHumanTurn: Boolean(current && !current.isAI && !current.isOut && !loserId),
+    ...preferences,
+  })
 
   useEffect(() => {
     if (!state.pendingQuickFollowUp) setDeclinedQuickSourceSeq(null)
@@ -65,13 +72,6 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
       if (p.isAI && !readyIds.includes(p.id)) endRearrange(p.id)
     }
   }, [phase, players, readyIds, endRearrange])
-
-  const toggleSound = () => {
-    setSoundOn(on => {
-      localStorage.setItem('shithead:sound', on ? 'off' : 'on')
-      return !on
-    })
-  }
 
   const leave = () => { reset(); onLeave() }
 
@@ -138,8 +138,13 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           onPickUp={() => pickUpPile(viewer.id)}
           onLeave={leave}
           onOpenRules={() => setRulesOpen(true)}
-          soundOn={soundOn}
+          soundOn={preferences.soundOn}
           onToggleSound={toggleSound}
+          turnAlertsEnabled={preferences.turnAlertsEnabled}
+          onToggleTurnAlerts={toggleTurnAlerts}
+          adhdMode={preferences.adhdMode}
+          onToggleAdhdMode={toggleAdhdMode}
+          attentionAlertActive={attentionAlertActive}
         />
       )}
 

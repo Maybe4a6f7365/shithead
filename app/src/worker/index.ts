@@ -20,7 +20,7 @@ import {
 import { BUILD_COMMIT } from './build-meta'
 import { applyPlayerForfeit } from './forfeit'
 import { applyInterruptBurnRequest, applyQuickFollowUpRequest, canonicalCards } from './gameActions'
-import { normalizeGameRules, normalizePersistedGameState } from './migrateState'
+import { normalizeEasterEggEnabled, normalizeGameRules, normalizePersistedGameState } from './migrateState'
 import {
   acceptedReactionAt,
   normalizeStoredPendingOndraEvent,
@@ -45,10 +45,11 @@ interface Session {
 }
 
 interface RoomData {
-  version: 4
+  version: 5
   code: string
   hostId: string
   maxPlayers: number
+  easterEggEnabled: boolean
   players: Player[]
   state: GameState | null
   rules: GameRules
@@ -61,10 +62,11 @@ interface RoomData {
   lastActivity: number
 }
 
-type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'pendingTableEvent' | 'state'> & {
-  version?: 1 | 2 | 3 | 4
+type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'easterEggEnabled' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'pendingTableEvent' | 'state'> & {
+  version?: 1 | 2 | 3 | 4 | 5
   state: GameState | null
   rules?: Partial<GameRules>
+  easterEggEnabled?: unknown
   readyPlayerIds?: string[]
   lastActivity?: number
   resumeTokens?: Record<string, string>
@@ -151,16 +153,18 @@ export class Room {
       const rules = normalizeGameRules(stored.state?.rules, stored.rules)
       const normalizedState = normalizePersistedGameState(stored.state, rules)
       const restoresTableEvent = normalizedState?.phase === 'play' || normalizedState?.phase === 'endgame'
+      const easterEggEnabled = normalizeEasterEggEnabled(stored.easterEggEnabled)
 
       this.data = {
         ...stored,
-        version: 4,
+        version: 5,
         rules,
+        easterEggEnabled,
         state: normalizedState,
         readyPlayerIds: stored.readyPlayerIds ?? [],
         lastActivity: stored.lastActivity ?? stored.createdAt,
         resumeTokens: stored.resumeTokens ?? {},
-        pendingTableEvent: restoresTableEvent
+        pendingTableEvent: easterEggEnabled && restoresTableEvent
           ? normalizeStoredPendingOndraEvent(
               stored.pendingTableEvent,
               stored.players,
@@ -341,6 +345,9 @@ export class Room {
       case 'SET_RULES':
         await this.setRules(session, message.rules)
         break
+      case 'SET_EASTER_EGG':
+        await this.setEasterEgg(session, message.enabled)
+        break
       case 'TRIBUTE_SWAP':
         await this.exchangeTribute(session, message.winnerCardId, message.loserCardId)
         break
@@ -419,10 +426,11 @@ export class Room {
     const resumeToken = generateResumeToken()
     session.playerId = player.id
     this.data = {
-      version: 4,
+      version: 5,
       code: this.code,
       hostId: player.id,
       maxPlayers: Math.max(2, Math.min(5, requestedMaxPlayers)),
+      easterEggEnabled: true,
       players: [player],
       state: null,
       rules: { ...DEFAULT_GAME_RULES },
@@ -588,6 +596,19 @@ export class Room {
     this.broadcastRoom()
   }
 
+  private async setEasterEgg(session: Session, enabled: boolean): Promise<void> {
+    const data = this.data
+    if (!data || session.playerId !== data.hostId) {
+      this.send(session, { type: 'ERROR', code: 'NOT_HOST', message: 'Only the host can change the easter egg' })
+      return
+    }
+
+    data.easterEggEnabled = enabled
+    if (!enabled) data.pendingTableEvent = null
+    await this.save()
+    this.broadcastRoom()
+  }
+
   private async exchangeTribute(session: Session, winnerCardId: string, loserCardId: string): Promise<void> {
     const data = this.data
     if (!data?.state || !session.playerId) return
@@ -641,6 +662,10 @@ export class Room {
   private scheduleOndraModeForPlayTransition(previousPhase: Phase, nextPhase: Phase): void {
     const data = this.data
     if (!data?.state) return
+    if (!data.easterEggEnabled) {
+      data.pendingTableEvent = null
+      return
+    }
     data.pendingTableEvent = scheduleOndraEventForPlayTransition(
       previousPhase,
       nextPhase,
@@ -762,6 +787,10 @@ export class Room {
   private takePendingTableEvent(): OutMsg | null {
     const data = this.data
     if (!data?.state) return null
+    if (!data.easterEggEnabled) {
+      data.pendingTableEvent = null
+      return null
+    }
     const resolution = resolvePendingOndraEvent(
       data.pendingTableEvent,
       data.state.phase,
@@ -875,6 +904,7 @@ export class Room {
       phase: data.state?.phase ?? 'waiting',
       hostId: data.hostId,
       maxPlayers: data.maxPlayers,
+      easterEggEnabled: data.easterEggEnabled,
       players: data.players.map(lobbyPlayer => {
         const currentPlayer = data.state?.players.find(player => player.id === lobbyPlayer.id) ?? lobbyPlayer
         return toPlayerSummary(currentPlayer, this.isConnected(lobbyPlayer.id))

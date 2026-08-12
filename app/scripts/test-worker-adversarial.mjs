@@ -378,6 +378,29 @@ async function main() {
     && m.room.rules.includeJokers === true && m.room.rules.winnerSwapsFaceUp === true)
   ok('T7b SET_RULES is strict, host-only, validates 1–3 decks, and rapid partial updates merge authoritatively')
 
+  // ---- T7c: the room easter egg is server-authoritative and host-controlled
+  guest.send({ type: 'SET_EASTER_EGG', enabled: false })
+  await guest.waitType('ERROR', isError('NOT_HOST'))
+
+  host.send({ type: 'SET_EASTER_EGG', enabled: false })
+  const [hostEasterOff, guestEasterOff] = await Promise.all([
+    host.waitType('ROOM_STATE', m => m.room.easterEggEnabled === false),
+    guest.waitType('ROOM_STATE', m => m.room.easterEggEnabled === false),
+  ])
+  assert.equal(hostEasterOff.room.easterEggEnabled, false)
+  assert.equal(guestEasterOff.room.easterEggEnabled, false)
+
+  // Restore the default before the first play transition so the existing
+  // delayed Ondra-event assertion still exercises an eligible round.
+  host.send({ type: 'SET_EASTER_EGG', enabled: true })
+  const [hostEasterOn, guestEasterOn] = await Promise.all([
+    host.waitType('ROOM_STATE', m => m.room.easterEggEnabled === true),
+    guest.waitType('ROOM_STATE', m => m.room.easterEggEnabled === true),
+  ])
+  assert.equal(hostEasterOn.room.easterEggEnabled, true)
+  assert.equal(guestEasterOn.room.easterEggEnabled, true)
+  ok('T7c SET_EASTER_EGG is host-only and broadcasts off/on room state')
+
   // ---- T8: start game; per-viewer masking in GAME_STATE
   host.send({ type: 'START_GAME' })
   await host.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
@@ -588,6 +611,55 @@ async function main() {
     assert.equal(round1.winnerId, null)
     ok('T11c a stalemate records the Shithead without inventing a winner')
   }
+
+  // ---- T11d: disabling after play was scheduled cancels the private event
+  // Re-enabling in the same round must not silently roll a replacement.
+  const cancelRoom = await newRoom()
+  const cancelUrl = `${wsBase}/api/room/${cancelRoom}/ws`
+  const cancelHost = await new Peer('cancel-host', cancelUrl).connect()
+  const cancelGuest = await new Peer('cancel-guest', cancelUrl).connect()
+  cancelHost.send({ type: 'CREATE_ROOM', playerName: 'Ondrej' })
+  const cancelHostWelcome = await cancelHost.waitType('WELCOME')
+  cancelGuest.send({ type: 'JOIN_ROOM', code: cancelRoom, playerName: 'Guest' })
+  const cancelGuestWelcome = await cancelGuest.waitType('WELCOME')
+  await cancelHost.waitType('ROOM_STATE', m => m.room.players.length === 2)
+  cancelHost.send({ type: 'START_GAME' })
+  await Promise.all([
+    cancelHost.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+    cancelGuest.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+  ])
+  const cancelLogStarts = new Map([cancelHost, cancelGuest].map(peer => [peer, peer.rawLog.length]))
+  cancelHost.send({ type: 'READY' })
+  cancelGuest.send({ type: 'READY' })
+  const [cancelPlay] = await Promise.all([
+    cancelHost.waitType('GAME_STATE', m => m.state.phase === 'play'),
+    cancelGuest.waitType('GAME_STATE', m => m.state.phase === 'play'),
+  ])
+
+  cancelHost.send({ type: 'SET_EASTER_EGG', enabled: false })
+  await Promise.all([
+    cancelHost.waitType('ROOM_STATE', m => m.room.easterEggEnabled === false),
+    cancelGuest.waitType('ROOM_STATE', m => m.room.easterEggEnabled === false),
+  ])
+  cancelHost.send({ type: 'SET_EASTER_EGG', enabled: true })
+  await Promise.all([
+    cancelHost.waitType('ROOM_STATE', m => m.room.easterEggEnabled === true),
+    cancelGuest.waitType('ROOM_STATE', m => m.room.easterEggEnabled === true),
+  ])
+
+  await finishRound(new Map([
+    [cancelHostWelcome.playerId, cancelHost],
+    [cancelGuestWelcome.playerId, cancelGuest],
+  ]), cancelPlay.state)
+  await sleep(100)
+  for (const peer of [cancelHost, cancelGuest]) {
+    const ondraEvents = peer.rawLog.slice(cancelLogStarts.get(peer))
+      .map(raw => JSON.parse(raw))
+      .filter(message => message.type === 'SYSTEM_EVENT' && message.event?.kind === 'ondra-mode')
+    assert.deepEqual(ondraEvents, [], 'disabled schedule was not cancelled or re-enable rerolled it')
+  }
+  await Promise.all([cancelHost.close(), cancelGuest.close()])
+  ok('T11d disabling cancels a scheduled Ondra event; same-round re-enable does not reroll it')
 
   // ---- T12: LEAVE destroys the resume token
   const room2 = await newRoom()

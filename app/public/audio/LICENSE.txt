@@ -1,0 +1,28 @@
+Audio asset licenses
+====================
+
+turn-notification.mp3
+---------------------
+Title: Sound Effect - Door Bell.ogg
+Creator: Amada44
+Source page: https://commons.wikimedia.org/wiki/File:Sound_Effect_-_Door_Bell.ogg
+Downloaded MP3: https://upload.wikimedia.org/wikipedia/commons/transcoded/3/34/Sound_Effect_-_Door_Bell.ogg/Sound_Effect_-_Door_Bell.ogg.mp3
+License: Creative Commons CC0 1.0 Universal Public Domain Dedication
+License URL: https://creativecommons.org/publicdomain/zero/1.0/
+Attribution: Not required.
+
+attention-alert.mp3
+-------------------
+Title: Alarm or siren.ogg
+Creator: stephan
+Source page: https://commons.wikimedia.org/wiki/File:Alarm_or_siren.ogg
+Downloaded MP3: https://upload.wikimedia.org/wikipedia/commons/transcoded/8/81/Alarm_or_siren.ogg/Alarm_or_siren.ogg.mp3
+License: Released into the public domain worldwide by the creator, with an
+unconditional grant to use the work for any purpose where public-domain
+dedication is not legally possible.
+License statement: https://commons.wikimedia.org/wiki/File:Alarm_or_siren.ogg#Licensing
+Public Domain Mark: https://creativecommons.org/publicdomain/mark/1.0/
+Attribution: Not required.
+
+The MP3 files are Wikimedia Commons transcodes of the source Ogg files and
+were downloaded on 2026-08-13.

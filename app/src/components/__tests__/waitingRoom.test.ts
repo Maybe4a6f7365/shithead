@@ -17,6 +17,7 @@ function room(partial: Partial<RoomSummary> = {}): RoomSummary {
     phase: 'waiting',
     hostId: 'host-1',
     maxPlayers: 5,
+    easterEggEnabled: true,
     createdAt: 0,
     rules: { ...DEFAULT_GAME_RULES },
     players: [

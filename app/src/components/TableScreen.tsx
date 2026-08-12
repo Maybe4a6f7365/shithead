@@ -36,6 +36,7 @@ import type {
   SystemEvent,
 } from '../engine/protocol'
 import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
+import { TurnAttentionBeacon } from './turnAlerts'
 
 export interface TableScreenProps {
   state: GameState
@@ -68,6 +69,14 @@ export interface TableScreenProps {
   onOpenRules: () => void
   soundOn: boolean
   onToggleSound: () => void
+  turnAlertsEnabled?: boolean
+  onToggleTurnAlerts?: () => void
+  adhdMode?: boolean
+  onToggleAdhdMode?: () => void
+  attentionAlertActive?: boolean
+  /** Authoritative multiplayer room option; only the host gets a callback. */
+  easterEggEnabled?: boolean
+  onToggleEasterEgg?: () => void
   connectionBadge?: React.ReactNode
   seatOffline?: (playerId: string) => boolean
   /** Multiplayer supplies room events; single-player still gets local feedback. */
@@ -176,7 +185,11 @@ export function TableScreen({
   initialSelectionDraft = [], onSelectionDraftChange,
   error, onPlay, onQuickFollowUp,
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
-  soundOn, onToggleSound, connectionBadge, seatOffline, latestEmote, onSendEmote,
+  soundOn, onToggleSound,
+  turnAlertsEnabled = true, onToggleTurnAlerts,
+  adhdMode = false, onToggleAdhdMode, attentionAlertActive = false,
+  easterEggEnabled, onToggleEasterEgg,
+  connectionBadge, seatOffline, latestEmote, onSendEmote,
   latestBroadcast, onSendBroadcast, latestSystemEvent,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
@@ -344,19 +357,17 @@ export function TableScreen({
 
   const lastTurnKey = useRef('')
   useEffect(() => {
-    const key = `${current?.id}-${state.turnCount}`
+    const key = `${current?.id ?? 'none'}-${viewerId}-${viewerActive ? 'active' : 'passive'}`
     if (key === lastTurnKey.current) return
     lastTurnKey.current = key
     if (!current) return
     if (current.id === viewerId && viewerActive) {
       announcer.sayPolite('Your turn')
-      emitSoundDebounced('turn_yours')
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.(12)
     } else {
       announcer.sayPolite(`${current.name}'s turn`)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, state.turnCount, viewerId, viewerActive])
+  }, [current?.id, viewerId, viewerActive])
 
   useSoundFromLog(state, soundOn)
 
@@ -718,6 +729,7 @@ export function TableScreen({
     >
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
+      <TurnAttentionBeacon active={attentionAlertActive} />
       <div className="table-reaction-feedback-stack" aria-label="Table reactions">
         <SystemEventFeedback event={visibleSystemEvent} />
         <BroadcastFeedback event={displayedBroadcast} playerName={broadcastPlayer} />
@@ -751,6 +763,12 @@ export function TableScreen({
               onOpenRules={onOpenRules}
               soundOn={soundOn}
               onToggleSound={onToggleSound}
+              turnAlertsEnabled={turnAlertsEnabled}
+              onToggleTurnAlerts={onToggleTurnAlerts}
+              adhdMode={adhdMode}
+              onToggleAdhdMode={onToggleAdhdMode}
+              easterEggEnabled={easterEggEnabled}
+              onToggleEasterEgg={onToggleEasterEgg}
               onLeave={onLeave}
               matchRunning
             />

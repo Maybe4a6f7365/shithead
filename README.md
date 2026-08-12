@@ -290,6 +290,7 @@ Every current client frame is centrally stamped with `version: 6`. A present but
 | `BURN_IN` | One to twelve unique card identifiers |
 | `PICK_UP` | Voluntary pile pickup |
 | `SET_RULES` | Nonempty patch containing only known rule keys |
+| `SET_EASTER_EGG` | Host-only strict Boolean toggle for the room easter egg; accepted during or between rounds |
 | `TRIBUTE_SWAP` | Winner and loser face-up card identifiers |
 | `TRIBUTE_SKIP` | Decline the optional exchange |
 | `CHAT` | Sanitized relay message; supported by the wire/Worker but not exposed by the current React UI |
@@ -305,7 +306,7 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 |---|---|
 | `WELCOME` | Private player ID, room summary, fresh resume token, protocol version |
 | `RESUME_FAILED` | Explicit reason; invalidates local credentials |
-| `ROOM_STATE` | Lobby-safe roster, presence, host, rules, phase, and card counts |
+| `ROOM_STATE` | Lobby-safe roster, presence, host, rules, easter-egg status, phase, and card counts |
 | `GAME_STATE` | Authoritative state serialized specifically for one viewer |
 | `ERROR` | Stable error code and contextual message |
 | `PLAYER_LEFT` | Explicit leave notification |
@@ -367,11 +368,12 @@ Online rooms default to five maximum seats. Joining is allowed before a round or
 
 ### Persistence and cleanup
 
-The persisted `RoomData.version = 4` snapshot contains roster, host, rules, ready IDs, authoritative game state, hashed resume credentials, timestamps, and the optional private delayed table-event schedule. The schedule is validated against the restored roster and is never serialized into `ROOM_STATE` or `GAME_STATE`. This application schema is distinct from wire protocol v6 and Cloudflare Durable Object migration tag `v1`.
+The persisted `RoomData.version = 5` snapshot contains roster, host, rules, the host-controlled `easterEggEnabled` flag, ready IDs, authoritative game state, hashed resume credentials, timestamps, and the optional private delayed table-event schedule. The schedule is validated against the restored roster and is never serialized into `ROOM_STATE` or `GAME_STATE`; only the public enabled/disabled flag appears in `ROOM_STATE`. This application schema is distinct from wire protocol v6 and Cloudflare Durable Object migration tag `v1`.
 
 On restore, migration code:
 
 - supplies new rule defaults and clamps deck count to 1–3;
+- preserves an explicit easter-egg setting, defaults older or malformed snapshots to enabled, and discards a restored private schedule when the setting is off;
 - supplies missing ready/activity/token fields;
 - validates loser and pending tribute references;
 - validates any pending quick-follow-up owner, rank, sequence, physical run, and exact owned card IDs, otherwise clearing it;
@@ -503,7 +505,7 @@ Cards and card backs are CSS-rendered. The shared system uses solid felt, printe
 
 Gameplay feedback is derived from the latest accepted action group, keyed by `GameState.seq` rather than log length. Reset 2, mirror 3, low 7, and skip 8 use distinct card-local landing choreography; reset/mirror/low additionally leave a persistent rule chip beside the pile, and stacked 8s attach a count badge to the played card. A burn temporarily reconstructs the card that caused the clear plus the full pre-clear pile depth, compresses the physical stack, and sweeps it from the table over 520 ms. A small 1.8-second receipt is secondary confirmation rather than the primary animation.
 
-Turn ownership uses one shared Framer Motion layout marker. It relocates between the active opponent seat and the local hand rail without changing document flow or hand geometry; the header retains only quiet orientation text. On constrained portrait and landscape viewports the marker collapses to a three-pixel inlay. Reduced-motion mode removes spatial travel and converts special-card feedback to short opacity transitions; burn cleanup is shortened to 140 ms. Every turn still triggers one polite announcement, optional 12 ms vibration, and the existing sound event hook.
+Turn ownership uses one shared Framer Motion layout marker. It relocates between the active opponent seat and the local hand rail without changing document flow or hand geometry; the header retains only quiet orientation text. On constrained portrait and landscape viewports the marker collapses to a three-pixel inlay. Reduced-motion mode removes spatial travel and converts special-card feedback to short opacity transitions; burn cleanup is shortened to 140 ms. A newly entered local human turn produces one polite announcement and, when enabled, the selected sensory alert; retained state on refresh and same-player action updates do not retrigger it.
 
 ### Accessibility
 
@@ -515,6 +517,7 @@ Turn ownership uses one shared Framer Motion layout marker. It relocates between
 - Dialogs and blocking phase overlays set initial focus, trap Tab, handle Escape where appropriate, and restore focus.
 - Gameplay shortcuts are suppressed inside editors, modifier chords, menus, and modal dialogs.
 - `prefers-reduced-motion` collapses transitions, removes card lift/shake, and stops pulsing.
+- ADHD mode uses a slow, thin perimeter-light pulse rather than rapid or full-screen flashing. Any pointer press or non-modifier key silences the attention alert without consuming the player's intended action; `prefers-reduced-motion` leaves the perimeter static.
 
 Keyboard controls:
 
@@ -543,7 +546,11 @@ The client sends only a stable catalog ID. The Worker validates its exact messag
 
 An explicit leave emits a typed table event for the playful departure line. Separately, when a round makes its single authoritative transition into `play`, the Worker checks for a narrowly normalized Ondra/Ondřej-like player. An eligible round privately schedules one of six server-only easter-egg lines for a random target three to seven accepted gameplay actions later; it is not shown at the start of the round. Once due, the line uses the same speech-bubble treatment as that player's normal preset broadcasts. The schedule is stored with the room, consumed once before relay, cleared if the round ends or the player leaves, and is not re-rolled by reconnect, resume, repeated state broadcasts, or later actions. The line is not client-selectable and never appears in the lobby.
 
-The sound event/debounce architecture and persisted sound toggle exist, but no audio assets or playback backend currently ship; the default sound handler is a no-op.
+The easter egg is enabled by default. Its current status appears in every player's menu, but only the host can change it. Turning it off at any time immediately cancels a not-yet-fired private schedule. Turning it back on during the same round does not roll a replacement mid-round; the next eligible transition into `play` schedules one normally.
+
+The menu exposes three local sensory preferences shared by online and offline tables: **Turn alerts**, **Mute sounds**, and **ADHD mode**. A normal alert plays one short doorbell when ownership enters the local human player's turn. ADHD mode replaces that one-shot cue with a persistent perimeter-light pulse and looping attention sound until the player presses the screen or another non-modifier key. Muting stops audio, including an active loop, while the visual ADHD cue can remain; disabling turn alerts suppresses both alert modes.
+
+Both bundled MP3s are redistributable without attribution requirements. The normal cue is Amada44's [Sound Effect - Door Bell](https://commons.wikimedia.org/wiki/File:Sound_Effect_-_Door_Bell.ogg), dedicated under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). The ADHD cue is stephan's [Alarm or siren](https://commons.wikimedia.org/wiki/File:Alarm_or_siren.ogg), released into the public domain by its creator. Full provenance and source-transcode URLs are recorded in `app/public/audio/LICENSE.txt`.
 
 ## Browser storage, privacy, and offline behavior
 
@@ -551,6 +558,8 @@ The sound event/debounce architecture and persisted sound toggle exist, but no a
 |---|---|---|
 | `shithead:name` | Last nonempty player name | Reused for later setup |
 | `shithead:sound` | Sound preference | Persists across modes |
+| `shithead:turn-alerts` | Turn-alert preference | Persists across modes; enabled by default |
+| `shithead:adhd-mode` | Persistent attention-alert preference | Persists across modes; disabled by default |
 | `shithead:session` | Room code, player ID, resume token, player name | Replaced on `WELCOME`; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
 | Workbox Cache Storage | Versioned static app-shell files | Managed and cleaned by the generated service worker |
 | Offline match | Zustand memory only | Lost on refresh |
@@ -565,7 +574,7 @@ The app contains no advertising, analytics, or behavioral-tracking SDK. Online p
 
 The manifest configures standalone display, theme `#173d2f`, background `#0c2b21`, and 192 px, 512 px, and maskable 512 px icons. The production build targets ES2020 and emits no source maps.
 
-Workbox precaches generated JavaScript, CSS, HTML, SVG, PNG, and WebP assets; `fonts/**` are excluded. A new service worker uses `skipWaiting`, `clientsClaim`, and old-cache cleanup. `main.tsx` registers it immediately and checks for updates at startup, hourly, and whenever the document becomes visible.
+Workbox precaches generated JavaScript, CSS, HTML, SVG, PNG, WebP, and MP3 assets; `fonts/**` are excluded. A new service worker uses `skipWaiting`, `clientsClaim`, and old-cache cleanup. `main.tsx` registers it immediately and checks for updates at startup, hourly, and whenever the document becomes visible.
 
 Build metadata is generated from `WORKERS_CI_COMMIT_SHA`, then `GITHUB_SHA`, falling back to `local`. The value is written into `src/worker/build-meta.ts` for `/api/version` and into `<meta name="build-commit">` in `index.html`. It is used by deployment smoke tests rather than displayed as normal player UI.
 
@@ -658,7 +667,7 @@ Configured V8 thresholds apply to engine source: 80% lines/functions/statements 
 
 ### Live local-Worker adversarial suite
 
-The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, state masking, token rotation/hijack rejection, rules, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
+The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, state masking, token rotation/hijack rejection, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
 
 ```bash
 cd app
@@ -673,7 +682,7 @@ cd app
 BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial
 ```
 
-The current script reports 33 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
+The current script reports 35 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
 
 ### Production smoke test
 
@@ -740,7 +749,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 - The reconnect attempt counter resets on WebSocket `open`, before `WELCOME`; repeated open-then-close failures may repeatedly report the first attempt.
 - The protocol accepts a missing version for legacy compatibility.
 - There is no generic exactly-once command/ACK layer.
-- Sound event plumbing exists, but shipped audio playback is currently silent.
+- Browser autoplay policy may suppress a cue before the page has received a user interaction; a rejected playback attempt never blocks the game UI.
 - Cloudflare observability is enabled; this is not equivalent to application analytics.
 
 ## Repository layout

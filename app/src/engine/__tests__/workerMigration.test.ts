@@ -9,7 +9,12 @@ import {
   type GameEvent,
   type GameState,
 } from '../index'
-import { deriveLegacyWinnerId, normalizeGameRules, normalizePersistedGameState } from '../../worker/migrateState'
+import {
+  deriveLegacyWinnerId,
+  normalizeEasterEggEnabled,
+  normalizeGameRules,
+  normalizePersistedGameState,
+} from '../../worker/migrateState'
 import { applyPlayerForfeit } from '../../worker/forfeit'
 
 function stateWithOutPlayers(outIds: string[], log: GameEvent[] = []): GameState {
@@ -29,6 +34,14 @@ function stateWithOutPlayers(outIds: string[], log: GameEvent[] = []): GameState
 }
 
 describe('legacy worker state migration', () => {
+  it('defaults old or malformed easter-egg settings on and preserves explicit booleans', () => {
+    expect(normalizeEasterEggEnabled(undefined)).toBe(true)
+    expect(normalizeEasterEggEnabled(null)).toBe(true)
+    expect(normalizeEasterEggEnabled('false')).toBe(true)
+    expect(normalizeEasterEggEnabled(false)).toBe(false)
+    expect(normalizeEasterEggEnabled(true)).toBe(true)
+  })
+
   it('fills rule defaults and the new nullable fields', () => {
     const legacy = stateWithOutPlayers([]) as unknown as Record<string, unknown>
     delete legacy.rules

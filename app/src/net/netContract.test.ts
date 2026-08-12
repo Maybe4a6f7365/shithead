@@ -139,6 +139,7 @@ const roomSummary = (phase: RoomSummary['phase'] = 'waiting'): RoomSummary => ({
   phase,
   hostId: 'p1',
   maxPlayers: 5,
+  easterEggEnabled: true,
   players: [],
   createdAt: 1,
   rules: { ...DEFAULT_GAME_RULES },

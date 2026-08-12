@@ -16,6 +16,7 @@ import { RulesSheet } from './RulesSheet'
 import { TributeScreen } from './TributeScreen'
 import { SystemEventFeedback } from './EmoteButton'
 import type { SystemEvent } from '../engine/protocol'
+import { useTurnAlertController, useTurnAlertPreferences } from './turnAlerts'
 
 const focusableSelector = [
   'button:not([disabled])',
@@ -50,11 +51,18 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
   } = useMultiplayerRoom({ roomId, playerName, intent })
 
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [soundOn, setSoundOn] = useState(() => localStorage.getItem('shithead:sound') !== 'off')
   const [iAmReady, setIAmReady] = useState(false)
   const [rematchPending, setRematchPending] = useState(false)
   const rematchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const phase = gameState?.phase
+  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode } = useTurnAlertPreferences()
+  const currentPlayerId = gameState?.players[gameState.currentPlayerIdx]?.id ?? null
+  const attentionAlertActive = useTurnAlertController({
+    phase: phase ?? room?.phase ?? null,
+    currentPlayerId,
+    localHumanTurn: Boolean(playerId && currentPlayerId === playerId && phase !== 'gameOver'),
+    ...preferences,
+  })
 
   // READY state resets whenever a (new) rearrange phase begins.
   useEffect(() => {
@@ -68,13 +76,6 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
   useEffect(() => () => {
     if (rematchTimer.current) clearTimeout(rematchTimer.current)
   }, [])
-
-  const toggleSound = () => {
-    setSoundOn(on => {
-      localStorage.setItem('shithead:sound', on ? 'off' : 'on')
-      return !on
-    })
-  }
 
   const quit = () => {
     // A socket that is already offline cannot confirm a leave. Returning to
@@ -261,8 +262,17 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         onPickUp={() => send({ type: 'PICK_UP' })}
         onLeave={quit}
         onOpenRules={() => setRulesOpen(true)}
-        soundOn={soundOn}
+        soundOn={preferences.soundOn}
         onToggleSound={toggleSound}
+        turnAlertsEnabled={preferences.turnAlertsEnabled}
+        onToggleTurnAlerts={toggleTurnAlerts}
+        adhdMode={preferences.adhdMode}
+        onToggleAdhdMode={toggleAdhdMode}
+        attentionAlertActive={attentionAlertActive}
+        easterEggEnabled={room.easterEggEnabled}
+        onToggleEasterEgg={isHost
+          ? () => send({ type: 'SET_EASTER_EGG', enabled: !room.easterEggEnabled })
+          : undefined}
         connectionBadge={badge}
         seatOffline={id => offlineSeats.has(id)}
         latestEmote={latestEmote}

@@ -155,10 +155,80 @@ describe('quiet menu keyboard navigation', () => {
     fireEvent.click(trigger)
     expect(screen.getByRole('menuitem', { name: 'Rules' })).toBe(document.activeElement)
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' })
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Sound: on' })).toBe(document.activeElement)
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Turn alerts: on' })).toBe(document.activeElement)
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     expect(trigger).toBe(document.activeElement)
+  })
+
+  it('exposes local alert choices and lets the host toggle the Easter egg', () => {
+    const toggleTurnAlerts = vi.fn()
+    const toggleSound = vi.fn()
+    const toggleAdhdMode = vi.fn()
+    const toggleEasterEgg = vi.fn()
+    render(
+      <QuietMenu
+        onOpenRules={vi.fn()}
+        soundOn
+        onToggleSound={toggleSound}
+        turnAlertsEnabled
+        onToggleTurnAlerts={toggleTurnAlerts}
+        adhdMode={false}
+        onToggleAdhdMode={toggleAdhdMode}
+        easterEggEnabled
+        onToggleEasterEgg={toggleEasterEgg}
+        onLeave={vi.fn()}
+        matchRunning
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+
+    const turnAlerts = screen.getByRole('menuitemcheckbox', { name: 'Turn alerts: on' })
+    const muteSounds = screen.getByRole('menuitemcheckbox', { name: 'Mute sounds: off' })
+    const adhdMode = screen.getByRole('menuitemcheckbox', { name: 'ADHD mode: off' })
+    const easterEgg = screen.getByRole('menuitemcheckbox', { name: 'Easter egg: on' })
+    expect(screen.getAllByRole('menuitemcheckbox')).toHaveLength(4)
+    expect(turnAlerts.getAttribute('aria-checked')).toBe('true')
+    expect(muteSounds.getAttribute('aria-checked')).toBe('false')
+    expect(adhdMode.getAttribute('aria-checked')).toBe('false')
+    expect(easterEgg.tagName).toBe('BUTTON')
+
+    fireEvent.click(turnAlerts)
+    fireEvent.click(muteSounds)
+    fireEvent.click(adhdMode)
+    fireEvent.click(easterEgg)
+    expect(toggleTurnAlerts).toHaveBeenCalledOnce()
+    expect(toggleSound).toHaveBeenCalledOnce()
+    expect(toggleAdhdMode).toHaveBeenCalledOnce()
+    expect(toggleEasterEgg).toHaveBeenCalledOnce()
+  })
+
+  it('shows guests the host Easter setting without making it actionable or keyboard-reachable', () => {
+    render(
+      <QuietMenu
+        onOpenRules={vi.fn()}
+        soundOn
+        onToggleSound={vi.fn()}
+        turnAlertsEnabled
+        onToggleTurnAlerts={vi.fn()}
+        adhdMode
+        onToggleAdhdMode={vi.fn()}
+        easterEggEnabled={false}
+        onLeave={vi.fn()}
+        matchRunning
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+
+    const locked = screen.getByRole('menuitemcheckbox', { name: 'Easter egg: off; host controlled' })
+    expect(locked.tagName).toBe('DIV')
+    expect(locked.getAttribute('aria-disabled')).toBe('true')
+    expect(locked.getAttribute('tabindex')).toBe('-1')
+
+    const adhdMode = screen.getByRole('menuitemcheckbox', { name: 'ADHD mode: on' })
+    adhdMode.focus()
+    fireEvent.keyDown(adhdMode, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'Leave' })).toBe(document.activeElement)
   })
 })
 

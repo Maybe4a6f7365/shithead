@@ -26,7 +26,7 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,webp}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,webp,mp3}'],
         globIgnores: ['fonts/**'],
         // A newly deployed shell takes control immediately and old hashed
         // asset caches are removed. The registration layer performs at most
