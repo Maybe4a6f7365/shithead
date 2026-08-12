@@ -49,7 +49,7 @@ describe('browser audio backend', () => {
     expect(AudioStub.instances).toHaveLength(1)
     expect(AudioStub.instances[0].src).toBe('/audio/turn-notification.mp3')
     expect(AudioStub.instances[0].preload).toBe('auto')
-    expect(AudioStub.instances[0].volume).toBe(0.85)
+    expect(AudioStub.instances[0].volume).toBe(1)
     expect(AudioStub.instances[0].loop).toBe(false)
     expect(AudioStub.instances[0].currentTime).toBe(0)
     expect(AudioStub.instances[0].play).toHaveBeenCalledOnce()
@@ -65,7 +65,7 @@ describe('browser audio backend', () => {
     const audio = AudioStub.instances[0]
     expect(audio.src).toBe('/audio/attention-alert.mp3')
     expect(audio.loop).toBe(true)
-    expect(audio.volume).toBe(0.35)
+    expect(audio.volume).toBe(0.25)
     expect(audio.play).toHaveBeenCalledOnce()
 
     stopSound('turn_attention')

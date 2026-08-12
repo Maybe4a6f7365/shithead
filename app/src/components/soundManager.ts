@@ -18,10 +18,12 @@ let handler: SoundHandler = () => {}
 let muted = false
 
 const browserAudioAssets: Partial<Record<SoundName, { src: string; volume: number }>> = {
-  turn_yours: { src: '/audio/turn-notification.mp3', volume: 0.85 },
-  // The public-domain alarm peaks at full scale, so keep the persistent cue
-  // deliberately lower than the gentle one-shot notification.
-  turn_attention: { src: '/audio/attention-alert.mp3', volume: 0.35 },
+  // The very short meme click peaks below full scale, so it can play at the
+  // browser's full media volume without clipping.
+  turn_yours: { src: '/audio/turn-notification.mp3', volume: 1 },
+  // The gabber cue is sustained and peaks at full scale. Keep the looping
+  // attention alarm well below the one-shot notification.
+  turn_attention: { src: '/audio/attention-alert.mp3', volume: 0.25 },
 }
 
 type BrowserAudioRecord = {

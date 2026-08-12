@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import {
   TurnAttentionBeacon,
@@ -18,9 +18,15 @@ const soundMocks = vi.hoisted(() => ({
 
 vi.mock('../soundManager', () => soundMocks)
 
+beforeEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+})
+
 afterEach(() => {
   cleanup()
   localStorage.clear()
+  sessionStorage.clear()
   soundMocks.emitSoundDebounced.mockClear()
   soundMocks.setSoundMuted.mockClear()
   soundMocks.startLoopingSound.mockClear()
@@ -63,17 +69,31 @@ function PreferenceHarness() {
 }
 
 describe('turn alert preferences', () => {
-  it('defaults alerts and sound on, with ADHD mode opt-in, and restores saved choices', () => {
-    expect(loadTurnAlertPreferences(localStorage)).toEqual({
+  it('starts a fresh session unmuted with turn alerts on and ADHD mode off', async () => {
+    // Stale preferences from an older app version must not leak into a new
+    // browser session now that sensory settings are session-scoped.
+    localStorage.setItem('shithead:sound', 'off')
+    localStorage.setItem('shithead:turn-alerts', 'off')
+    localStorage.setItem('shithead:adhd-mode', 'on')
+
+    expect(loadTurnAlertPreferences(sessionStorage)).toEqual({
       soundOn: true,
       turnAlertsEnabled: true,
       adhdMode: false,
     })
 
-    localStorage.setItem('shithead:sound', 'off')
-    localStorage.setItem('shithead:turn-alerts', 'off')
-    localStorage.setItem('shithead:adhd-mode', 'on')
-    expect(loadTurnAlertPreferences(localStorage)).toEqual({
+    render(<PreferenceHarness />)
+    expect(screen.getByRole('button', { name: 'Sound on' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Alerts on' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'ADHD off' })).toBeTruthy()
+    await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(false))
+  })
+
+  it('restores explicitly saved choices', () => {
+    sessionStorage.setItem('shithead:sound', 'off')
+    sessionStorage.setItem('shithead:turn-alerts', 'off')
+    sessionStorage.setItem('shithead:adhd-mode', 'on')
+    expect(loadTurnAlertPreferences(sessionStorage)).toEqual({
       soundOn: false,
       turnAlertsEnabled: false,
       adhdMode: true,
@@ -88,9 +108,9 @@ describe('turn alert preferences', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Alerts on' }))
     fireEvent.click(screen.getByRole('button', { name: 'ADHD off' }))
 
-    expect(localStorage.getItem('shithead:sound')).toBe('off')
-    expect(localStorage.getItem('shithead:turn-alerts')).toBe('off')
-    expect(localStorage.getItem('shithead:adhd-mode')).toBe('on')
+    expect(sessionStorage.getItem('shithead:sound')).toBe('off')
+    expect(sessionStorage.getItem('shithead:turn-alerts')).toBe('off')
+    expect(sessionStorage.getItem('shithead:adhd-mode')).toBe('on')
     await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(true))
   })
 })

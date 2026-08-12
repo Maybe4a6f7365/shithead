@@ -20,7 +20,7 @@ const DEFAULT_PREFERENCES: TurnAlertPreferences = {
 
 function browserStorage(): Storage | null {
   try {
-    return typeof localStorage === 'undefined' ? null : localStorage
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage
   } catch {
     return null
   }
@@ -43,7 +43,7 @@ function persistPreference(key: string, enabled: boolean): void {
   try { browserStorage()?.setItem(key, enabled ? 'on' : 'off') } catch { /* storage is optional */ }
 }
 
-/** Shared local sensory preferences for online, solo, and pass-and-play tables. */
+/** Shared sensory preferences for this browser tab's current play session. */
 export function useTurnAlertPreferences() {
   const [preferences, setPreferences] = useState(loadTurnAlertPreferences)
 

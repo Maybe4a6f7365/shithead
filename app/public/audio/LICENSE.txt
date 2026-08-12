@@ -1,28 +1,40 @@
 Audio asset licenses
 ====================
 
+These files were supplied by the project owner from Pixabay Sound Effects and
+are used in the game under the Pixabay Content License. They are royalty-free,
+but they are not represented here as Creative Commons or public-domain works.
+Pixabay permits free use, modification, and use without attribution, subject
+to its prohibited uses (including standalone redistribution).
+
+These audio files are excluded from the repository's Apache-2.0 software
+license. They may be used only under the Pixabay Content License below. A
+source-code checkout exposes the files for building this game; it does not
+grant permission to extract or redistribute either audio file on its own.
+
+License summary: https://pixabay.com/service/license-summary/
+Full license terms: https://pixabay.com/service/terms/
+
 turn-notification.mp3
 ---------------------
-Title: Sound Effect - Door Bell.ogg
-Creator: Amada44
-Source page: https://commons.wikimedia.org/wiki/File:Sound_Effect_-_Door_Bell.ogg
-Downloaded MP3: https://upload.wikimedia.org/wikipedia/commons/transcoded/3/34/Sound_Effect_-_Door_Bell.ogg/Sound_Effect_-_Door_Bell.ogg.mp3
-License: Creative Commons CC0 1.0 Universal Public Domain Dedication
-License URL: https://creativecommons.org/publicdomain/zero/1.0/
-Attribution: Not required.
+Title: memeclick
+Contributor: u_1thl5d0szy
+Source page: https://pixabay.com/sound-effects/technology-memeclick-506437/
+Supplied filename: u_1thl5d0szy-memeclick-506437.mp3
+SHA-256: 3084f38708f1fb06a93e74b97f1486dfcedd6dad1dea13eefb23b843e69a0295
+License: Pixabay Content License
+Attribution: Not required by the license.
+Source page disclosure: AI modified or generated.
 
 attention-alert.mp3
 -------------------
-Title: Alarm or siren.ogg
-Creator: stephan
-Source page: https://commons.wikimedia.org/wiki/File:Alarm_or_siren.ogg
-Downloaded MP3: https://upload.wikimedia.org/wikipedia/commons/transcoded/8/81/Alarm_or_siren.ogg/Alarm_or_siren.ogg.mp3
-License: Released into the public domain worldwide by the creator, with an
-unconditional grant to use the work for any purpose where public-domain
-dedication is not legally possible.
-License statement: https://commons.wikimedia.org/wiki/File:Alarm_or_siren.ogg#Licensing
-Public Domain Mark: https://creativecommons.org/publicdomain/mark/1.0/
-Attribution: Not required.
+Title: gabber
+Creator shown by Pixabay: f0rest15 (Freesound)
+Pixabay contributor account: freesound_community
+Source page: https://pixabay.com/sound-effects/musical-gabber-82562/
+Supplied filename: freesound_community-gabber-82562.mp3
+SHA-256: 4a0376b6d9ce29c0202a1db3bd2107c7a85ff53066e1f92e42716b45befaed70
+License: Pixabay Content License
+Attribution: Not required by the license.
 
-The MP3 files are Wikimedia Commons transcodes of the source Ogg files and
-were downloaded on 2026-08-13.
+The exact project-owner-supplied MP3 bytes were integrated on 2026-08-13.

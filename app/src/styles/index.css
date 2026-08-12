@@ -3395,8 +3395,9 @@
   background: #17392d;
 }
 
-/* ADHD turn cue: a slow, low-contrast perimeter pulse instead of a
-   full-screen flash. It is decorative and never intercepts the dismissing
+/* ADHD turn cue: two continuously moving perimeter lines make the alert easy
+   to notice without flashing the play surface. Only the decorative lines
+   move; the label stays fixed and the cue never intercepts its dismissing
    pointer or key action. */
 .game-screen .turn-attention-beacon {
   position: fixed;
@@ -3405,17 +3406,54 @@
   right: max(8px, env(safe-area-inset-right));
   bottom: max(8px, env(safe-area-inset-bottom));
   left: max(8px, env(safe-area-inset-left));
-  border: 2px solid rgba(222, 190, 96, 0.88);
-  border-radius: 18px;
+  border: 1px solid hsl(43 64% 62% / 0.55);
+  border-radius: 20px;
   box-shadow:
-    inset 0 0 16px rgba(222, 190, 96, 0.12),
-    0 0 14px rgba(222, 190, 96, 0.2);
+    inset 0 0 18px hsl(43 72% 58% / 0.11),
+    0 0 15px hsl(43 72% 58% / 0.18);
+  isolation: isolate;
   pointer-events: none;
-  animation: turn-attention-beacon-pulse 1.6s ease-in-out infinite;
+}
+
+.game-screen .turn-attention-beacon::before,
+.game-screen .turn-attention-beacon::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  will-change: transform, border-radius, filter;
+}
+
+.game-screen .turn-attention-beacon::before {
+  inset: -2px;
+  border-width: 4px;
+  border-style: solid;
+  border-color:
+    hsl(43 84% 68% / 0.98)
+    hsl(54 82% 61% / 0.96)
+    hsl(35 88% 63% / 0.97)
+    hsl(48 84% 65% / 0.96);
+  border-radius: 22px 17px 24px 18px / 19px 23px 17px 22px;
+  box-shadow:
+    inset 0 0 12px hsl(46 86% 62% / 0.12),
+    0 0 10px hsl(46 86% 62% / 0.42);
+  animation:
+    turn-attention-line-wiggle 3.4s cubic-bezier(0.45, 0, 0.55, 1) infinite,
+    turn-attention-line-hue 8s ease-in-out infinite alternate;
+}
+
+.game-screen .turn-attention-beacon::after {
+  inset: 5px;
+  border: 1px solid hsl(56 78% 66% / 0.62);
+  border-radius: 15px 20px 16px 21px / 20px 14px 21px 15px;
+  box-shadow: inset 0 0 9px hsl(56 80% 62% / 0.15);
+  animation:
+    turn-attention-line-wiggle 4.6s ease-in-out infinite reverse,
+    turn-attention-line-hue 9.5s ease-in-out infinite alternate-reverse;
 }
 
 .game-screen .turn-attention-beacon__label {
   position: absolute;
+  z-index: 1;
   top: 14px;
   left: 50%;
   min-width: 148px;
@@ -3443,25 +3481,37 @@
   line-height: 13px;
 }
 
-@keyframes turn-attention-beacon-pulse {
+@keyframes turn-attention-line-wiggle {
   0%, 100% {
-    border-color: rgba(222, 190, 96, 0.46);
-    box-shadow:
-      inset 0 0 12px rgba(222, 190, 96, 0.08),
-      0 0 10px rgba(222, 190, 96, 0.12);
+    border-radius: 22px 17px 24px 18px / 19px 23px 17px 22px;
+    transform: translate3d(0, 0, 0) skew(0deg, 0deg) scale(1);
   }
-  50% {
-    border-color: rgba(222, 190, 96, 0.96);
-    box-shadow:
-      inset 0 0 18px rgba(222, 190, 96, 0.16),
-      0 0 18px rgba(222, 190, 96, 0.26);
+  23% {
+    border-radius: 18px 24px 17px 22px / 23px 18px 24px 17px;
+    transform: translate3d(1.5px, -0.8px, 0) skew(0.12deg, -0.08deg) scale(0.999, 1.001);
+  }
+  49% {
+    border-radius: 24px 18px 22px 16px / 17px 22px 18px 24px;
+    transform: translate3d(-0.8px, 1px, 0) skew(-0.1deg, 0.12deg) scale(1.001, 0.999);
+  }
+  76% {
+    border-radius: 17px 22px 19px 24px / 22px 17px 23px 19px;
+    transform: translate3d(0.7px, 0.5px, 0) skew(0.08deg, 0.1deg) scale(1.0005, 1.001);
   }
 }
 
+@keyframes turn-attention-line-hue {
+  from { filter: hue-rotate(-7deg) saturate(0.94); }
+  to { filter: hue-rotate(16deg) saturate(1.08); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .game-screen .turn-attention-beacon {
+  .game-screen .turn-attention-beacon,
+  .game-screen .turn-attention-beacon::before,
+  .game-screen .turn-attention-beacon::after {
     animation: none !important;
-    opacity: 1;
+    filter: none !important;
+    transform: none !important;
   }
 }
 
