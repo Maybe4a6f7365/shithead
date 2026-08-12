@@ -93,8 +93,9 @@ export interface PendingOndraEvent {
 
 /**
  * Make the single round-scoped decision at an authoritative transition into
- * play. On a 50% hit, persist a private event due 3–7 accepted actions later.
- * No wire frame is created here, so the easter egg cannot appear immediately.
+ * play. An eligible player gets one private event due 3–7 accepted actions
+ * later. No wire frame is created here, so the easter egg cannot appear
+ * immediately.
  */
 export function scheduleOndraEventForPlayTransition(
   previousPhase: Phase,
@@ -105,7 +106,7 @@ export function scheduleOndraEventForPlayTransition(
 ): PendingOndraEvent | null {
   if ((previousPhase !== 'rearrange' && previousPhase !== 'tribute') || nextPhase !== 'play') return null
   const player = players.find(candidate => isOndraLikeName(candidate.name))
-  if (!player || random() >= 0.5) return null
+  if (!player) return null
 
   const delayDraw = random()
   const delayIndex = Number.isFinite(delayDraw)

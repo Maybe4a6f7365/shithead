@@ -22,6 +22,7 @@ describe('table message easter eggs', () => {
   it.each([
     'Ondra',
     'ONDRE',
+    'Ondrej',
     'Ondřej',
     'Ondrey',
     '0ndr3j',
@@ -65,14 +66,19 @@ describe('table message easter eggs', () => {
     )).toBeNull()
   })
 
-  it('makes a deterministic 50% miss without scheduling anything', () => {
-    const players = [{ id: 'ondra-id', name: 'Ondřej' }]
-    expect(scheduleOndraEventForPlayTransition('rearrange', 'play', 0, players, () => 0.5)).toBeNull()
+  it('always schedules an exact Ondrej match, even at the upper random boundary', () => {
+    const players = [{ id: 'ondra-id', name: 'Ondrej' }]
+    expect(scheduleOndraEventForPlayTransition('rearrange', 'play', 10, players, () => 0.999999)).toEqual({
+      playerId: 'ondra-id',
+      playerName: 'Ondrej',
+      message: ONDRA_MESSAGE_IDS.at(-1),
+      triggerTurnCount: 17,
+    })
   })
 
   it('schedules deterministic lower and upper action-delay boundaries', () => {
     const players = [{ id: 'ondra-id', name: 'Ondřej' }]
-    const lowerDraws = [0.49, 0, 0]
+    const lowerDraws = [0, 0]
     expect(scheduleOndraEventForPlayTransition(
       'rearrange', 'play', 12, players, () => lowerDraws.shift()!,
     )).toEqual({
@@ -82,7 +88,7 @@ describe('table message easter eggs', () => {
       triggerTurnCount: 15,
     })
 
-    const upperDraws = [0.49, 0.999999, 0.999999]
+    const upperDraws = [0.999999, 0.999999]
     expect(scheduleOndraEventForPlayTransition(
       'tribute', 'play', 20, players, () => upperDraws.shift()!,
     )).toEqual({
@@ -211,6 +217,36 @@ describe('table message easter eggs', () => {
     expect(normalizeStoredPendingOndraEvent({ ...valid, triggerTurnCount: 2 }, players, 2)).toBeNull()
     expect(normalizeStoredPendingOndraEvent({ ...valid, triggerTurnCount: 10 }, players, 2)).toBeNull()
     expect(normalizeStoredPendingOndraEvent(null, players, 2)).toBeNull()
+  })
+
+  it('survives restore and emits exactly once when its delayed action is due', () => {
+    const players = [{ id: 'ondra-id', name: 'Ondrej' }]
+    const draws = [0.2, 0.2]
+    const scheduled = scheduleOndraEventForPlayTransition(
+      'rearrange', 'play', 1, players, () => draws.shift()!,
+    )
+    expect(scheduled).not.toBeNull()
+
+    const restored = normalizeStoredPendingOndraEvent(scheduled, players, 2)
+    expect(restored).toEqual(scheduled)
+    const due = resolvePendingOndraEvent(restored, 'play', 5, players, () => 123)
+    expect(due).toEqual({
+      pending: null,
+      frame: {
+        type: 'SYSTEM_EVENT',
+        event: {
+          kind: 'ondra-mode',
+          playerId: 'ondra-id',
+          playerName: 'Ondrej',
+          message: ONDRA_MESSAGE_IDS[1],
+          ts: 123,
+        },
+      },
+    })
+    expect(resolvePendingOndraEvent(due.pending, 'play', 6, players, () => 456)).toEqual({
+      pending: null,
+      frame: null,
+    })
   })
 
   it('pins the shared reaction cooldown boundary without extending on a drop', () => {

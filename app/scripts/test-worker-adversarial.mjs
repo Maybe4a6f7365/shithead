@@ -518,19 +518,17 @@ async function main() {
     const ondraIndexes = frames
       .map((message, index) => message.type === 'SYSTEM_EVENT' && message.event?.kind === 'ondra-mode' ? index : -1)
       .filter(index => index >= 0)
-    assert(ondraIndexes.length <= 1, `${peer.label} received a duplicate delayed Ondra event`)
-    if (ondraIndexes.length === 1) {
-      const eventIndex = ondraIndexes[0]
-      const event = frames[eventIndex].event
-      const preceding = frames[eventIndex - 1]
-      assert.equal(preceding?.type, 'GAME_STATE', 'delayed Ondra event must follow authoritative GAME_STATE')
-      assert(['play', 'endgame'].includes(preceding.state.phase), 'delayed Ondra event fired off-table')
-      assert(preceding.state.turnCount >= 3 && preceding.state.turnCount <= 7, 'delay was outside 3–7 actions')
-      assert.equal(event.playerId, hostId)
-      assert.equal(event.playerName, 'Ondřej')
-      assert.match(event.message, /^ondra-/)
-      assert.equal(typeof event.ts, 'number')
-    }
+    assert.equal(ondraIndexes.length, 1, `${peer.label} did not receive exactly one delayed Ondra event`)
+    const eventIndex = ondraIndexes[0]
+    const event = frames[eventIndex].event
+    const preceding = frames[eventIndex - 1]
+    assert.equal(preceding?.type, 'GAME_STATE', 'delayed Ondra event must follow authoritative GAME_STATE')
+    assert(['play', 'endgame'].includes(preceding.state.phase), 'delayed Ondra event fired off-table')
+    assert(preceding.state.turnCount >= 3 && preceding.state.turnCount <= 7, 'delay was outside 3–7 actions')
+    assert.equal(event.playerId, hostId)
+    assert.equal(event.playerName, 'Ondřej')
+    assert.match(event.message, /^ondra-/)
+    assert.equal(typeof event.ts, 'number')
   }
   ok('T11b authoritative autoplay reaches a terminal round and records the Shithead')
 
