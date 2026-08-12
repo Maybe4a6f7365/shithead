@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Card as CardT, Player } from '../../engine'
 import { Card } from '../Card'
-import { HandFan } from '../HandFan'
+import { HandFan, sortHandByDisplay } from '../HandFan'
 import { OpponentSeat } from '../OpponentStrip'
 import { PileArea } from '../PileArea'
 import { QuietMenu } from '../QuietMenu'
@@ -24,6 +24,35 @@ afterEach(cleanup)
 function card(index: number, rank: CardT['rank'] = '5'): CardT {
   return { id: `opaque-secret-${index}`, rank, suit: rank === 'JOKER' ? null : '♣' }
 }
+
+describe('hand display ordering', () => {
+  it('uses canonical rank order, preserves ties, and places Joker last', () => {
+    const cards = [
+      card(1, 'JOKER'), card(2, '10'), card(3, '4'), card(4, 'J'),
+      card(5, '3'), card(6, '2'), card(7, '4'), card(8, 'A'),
+    ]
+
+    expect(sortHandByDisplay(cards)).toEqual([
+      'opaque-secret-3', 'opaque-secret-7', 'opaque-secret-4', 'opaque-secret-8',
+      'opaque-secret-6', 'opaque-secret-5', 'opaque-secret-2', 'opaque-secret-1',
+    ])
+  })
+
+  it('restores canonical order when a pickup adds a card', async () => {
+    const initial = [card(1, '6'), card(2, '4')]
+    const { rerender } = render(
+      <HandFan cards={initial} states={new Map()} reorderable />,
+    )
+    rerender(<HandFan cards={[...initial, card(3, '5'), card(4, 'JOKER')]} states={new Map()} reorderable />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('img', { name: /4 of clubs, 1 of 4/i })).toBeTruthy()
+      expect(screen.getByRole('img', { name: /5 of clubs, 2 of 4/i })).toBeTruthy()
+      expect(screen.getByRole('img', { name: /6 of clubs, 3 of 4/i })).toBeTruthy()
+      expect(screen.getByRole('img', { name: /joker, 4 of 4/i })).toBeTruthy()
+    })
+  })
+})
 
 describe('hidden-card accessibility', () => {
   it('announces position without putting an opaque id in the DOM', () => {
