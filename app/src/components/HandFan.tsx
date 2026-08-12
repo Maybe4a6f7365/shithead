@@ -6,7 +6,7 @@
 // Roving tabindex + ←/→ keyboard navigation (§6.5).
 // ============================================================================
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RANK_ORDER, SUITS, type Card as CardT } from '../engine'
+import { HAND_DISPLAY_ORDER, type Card as CardT } from '../engine'
 import { Card, type CardVisualState } from './Card'
 
 const TOUCH_REORDER_DELAY_MS = 420
@@ -52,23 +52,13 @@ export function moveHandCard(order: string[], cardId: string, targetId: string):
   return next
 }
 
-export type HandSortMode = 'rank' | 'suit' | 'deal'
-
 /** Stable local sort; opaque ids are never sent to the server as an ordering action. */
-export function sortHand(cards: CardT[], mode: HandSortMode): string[] {
-  if (mode === 'deal') return cards.map(card => card.id)
-  const suitIndex = (card: CardT) => card.suit ? SUITS.indexOf(card.suit) : SUITS.length
+export function sortHandByDisplay(cards: CardT[]): string[] {
   return cards
     .map((card, index) => ({ card, index }))
     .sort((left, right) => {
-      const primary = mode === 'rank'
-        ? RANK_ORDER[left.card.rank] - RANK_ORDER[right.card.rank]
-        : suitIndex(left.card) - suitIndex(right.card)
-      if (primary !== 0) return primary
-      const secondary = mode === 'rank'
-        ? suitIndex(left.card) - suitIndex(right.card)
-        : RANK_ORDER[left.card.rank] - RANK_ORDER[right.card.rank]
-      return secondary || left.index - right.index
+      const rankDifference = HAND_DISPLAY_ORDER[left.card.rank] - HAND_DISPLAY_ORDER[right.card.rank]
+      return rankDifference || left.index - right.index
     })
     .map(({ card }) => card.id)
 }
@@ -99,9 +89,6 @@ export function HandFan({
   const dragSession = useRef<DragSession | null>(null)
   const visibleOrderRef = useRef<string[]>([])
   const focusAfterMove = useRef<string | null>(null)
-  const sortTriggerRef = useRef<HTMLButtonElement>(null)
-  const sortMenuRef = useRef<HTMLDivElement>(null)
-  const sortReturnFocusRef = useRef<HTMLElement | null>(null)
   const suppressNextClickFor = useRef<string | null>(null)
   const suppressClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const edgeScrollFrame = useRef<number | null>(null)
@@ -109,9 +96,8 @@ export function HandFan({
   const ordersByKey = useRef(new Map<string, string[]>())
   const activeOrderKey = useRef(orderKey)
   const [metrics, setMetrics] = useState({ avail: 0, cardW: 0 })
-  const [order, setOrder] = useState(() => cards.map(card => card.id))
+  const [order, setOrder] = useState(() => sortHandByDisplay(cards))
   const [draggingId, setDraggingId] = useState<string | null>(null)
-  const [sortMenuOpen, setSortMenuOpen] = useState(false)
   const [reorderMessage, setReorderMessage] = useState('')
 
   useLayoutEffect(() => {
@@ -132,41 +118,15 @@ export function HandFan({
         ordersByKey.current.set(activeOrderKey.current, current)
         activeOrderKey.current = orderKey
       }
-      const stored = ordersByKey.current.get(orderKey) ?? current
-      const next = reconcileHandOrder(stored, cards)
+      const stored = ordersByKey.current.get(orderKey)
+      const reconciled = reconcileHandOrder(stored ?? [], cards)
+      const pickedUp = stored === undefined || reconciled.some(id => !stored.includes(id))
+      const canonical = sortHandByDisplay(cards)
+      const next = pickedUp && !sameOrder(reconciled, canonical) ? canonical : reconciled
       ordersByKey.current.set(orderKey, next)
       return sameOrder(current, next) ? current : next
     })
-    if (cards.length < 2) {
-      const restoreCardFocus = Boolean(sortMenuRef.current?.contains(document.activeElement))
-      setSortMenuOpen(false)
-      if (restoreCardFocus) {
-        queueMicrotask(() => {
-          const firstCard = cardRefs.current.values().next().value as HTMLDivElement | undefined
-          firstCard?.querySelector<HTMLElement>('button, [tabindex="0"]')?.focus()
-        })
-      }
-    }
   }, [cards, orderKey])
-
-  useEffect(() => {
-    const menuHadFocus = Boolean(sortMenuRef.current?.contains(document.activeElement))
-    setSortMenuOpen(false)
-    if (menuHadFocus) {
-      queueMicrotask(() => {
-        const action = !reorderable
-          ? containerRef.current?.closest('.game-footer')
-            ?.querySelector<HTMLElement>('.action-bar button:not([disabled])')
-          : null
-        const prior = sortReturnFocusRef.current
-        const priorStillFocusable = prior?.isConnected && (
-          prior.matches('button:not([disabled])') || prior.matches('[tabindex="0"]')
-        ) ? prior : null
-        const firstCard = cardRefs.current.values().next().value as HTMLDivElement | undefined
-        ;(action ?? priorStillFocusable ?? firstCard?.querySelector<HTMLElement>('button, [tabindex="0"]'))?.focus()
-      })
-    }
-  }, [orderKey, reorderable])
 
   useEffect(() => () => {
     if (dragSession.current?.timer) clearTimeout(dragSession.current.timer)
@@ -175,22 +135,6 @@ export function HandFan({
       cancelAnimationFrame(edgeScrollFrame.current)
     }
   }, [])
-
-  useEffect(() => {
-    if (!sortMenuOpen) return
-    const closeOutside = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!sortMenuRef.current?.contains(target) && !sortTriggerRef.current?.contains(target)) {
-        setSortMenuOpen(false)
-      }
-    }
-    document.addEventListener('pointerdown', closeOutside)
-    return () => document.removeEventListener('pointerdown', closeOutside)
-  }, [sortMenuOpen])
-
-  useLayoutEffect(() => {
-    if (sortMenuOpen) sortMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
-  }, [sortMenuOpen])
 
   useLayoutEffect(() => {
     const id = focusAfterMove.current
@@ -219,28 +163,6 @@ export function HandFan({
   const overlap = cardW > 0 ? Math.max(0, cardW - step) : 0
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && sortMenuOpen) {
-      e.preventDefault()
-      setSortMenuOpen(false)
-      queueMicrotask(() => (sortReturnFocusRef.current ?? sortTriggerRef.current)?.focus())
-      return
-    }
-    if (canReorder && (e.key === 's' || e.key === 'S') && !e.altKey && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault()
-      if (sortMenuOpen) return
-      sortReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      setSortMenuOpen(true)
-      return
-    }
-    if (canReorder && !onSelect && (e.key === 'Enter' || e.key === ' ')) {
-      const cardControl = (e.target as Element).closest('.hand-fan__card > [role="button"]')
-      if (cardControl) {
-        e.preventDefault()
-        sortReturnFocusRef.current = cardControl as HTMLElement
-        setSortMenuOpen(true)
-        return
-      }
-    }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
     const buttons = Array.from(containerRef.current?.querySelectorAll<HTMLElement>(
       '.hand-fan__card > button, .hand-fan__card > [tabindex="0"]',
@@ -406,37 +328,15 @@ export function HandFan({
       ordersByKey.current.set(session.orderKey, session.initialOrder)
       dragSession.current = null
       setDraggingId(null)
-      setSortMenuOpen(false)
       return
     }
     if (!reorderable || cards.length < 2 || !cards.some(card => card.id === session.cardId)) {
       finishDrag(session.pointerId, true)
-      setSortMenuOpen(false)
     }
   }, [cards, orderKey, reorderable])
 
   const onCardPointerDown = (event: React.PointerEvent<HTMLDivElement>, cardId: string) => {
     if (!canReorder || (event.pointerType === 'mouse' && event.button !== 0)) return
-    if (sortMenuOpen) {
-      setSortMenuOpen(false)
-      const session: DragSession = {
-        cardId,
-        orderKey,
-        pointerId: event.pointerId,
-        pointerType: event.pointerType,
-        startX: event.clientX,
-        startY: event.clientY,
-        currentX: event.clientX,
-        dragging: false,
-        longPressed: true,
-        lastTargetId: cardId,
-        initialOrder: [...visibleOrderRef.current],
-        timer: null,
-      }
-      dragSession.current = session
-      if (event.pointerType !== 'touch') event.currentTarget.setPointerCapture?.(event.pointerId)
-      return
-    }
     if (dragSession.current) {
       finishDrag(dragSession.current.pointerId, true)
     }
@@ -458,11 +358,7 @@ export function HandFan({
       session.timer = setTimeout(() => {
         if (dragSession.current !== session) return
         session.timer = null
-        session.longPressed = true
-        sortReturnFocusRef.current = cardRefs.current.get(session.cardId)
-          ?.querySelector<HTMLElement>('button, [tabindex="0"]') ?? null
-        setSortMenuOpen(true)
-        setReorderMessage('Sort options opened.')
+        beginDrag(session)
       }, TOUCH_REORDER_DELAY_MS)
     } else {
       // Capture before the movement threshold so a release just outside an
@@ -506,17 +402,6 @@ export function HandFan({
     moveDraggedCardToward(session, event.clientX)
   }
 
-  const applySort = (mode: HandSortMode) => {
-    updateOrder(() => sortHand(cards, mode))
-    setSortMenuOpen(false)
-    setReorderMessage(
-      mode === 'rank' ? 'Hand sorted by rank.'
-        : mode === 'suit' ? 'Hand sorted by suit.'
-          : 'Original deal order restored.',
-    )
-    queueMicrotask(() => (sortReturnFocusRef.current ?? sortTriggerRef.current)?.focus())
-  }
-
   const renderCard = (c: CardT, i: number) => (
     <div
       key={c.id}
@@ -548,16 +433,12 @@ export function HandFan({
           event.stopPropagation()
           return
         }
-        if (canReorder && !onSelect) {
-          sortReturnFocusRef.current = event.currentTarget.querySelector<HTMLElement>('button, [tabindex="0"]')
-          setSortMenuOpen(true)
-        }
       }}
     >
       <Card
         card={c}
         state={states.get(c.id) ?? 'rest'}
-        ariaHint={`${ariaHints?.get(c.id) ? `${ariaHints.get(c.id)}, ` : ''}${i + 1} of ${n}${canReorder && !onSelect ? ', sortable; press Enter for sort options' : ''}`}
+        ariaHint={`${ariaHints?.get(c.id) ? `${ariaHints.get(c.id)}, ` : ''}${i + 1} of ${n}`}
         onActivate={onSelect ? () => onSelect(c.id) : undefined}
         focusable={canReorder && !onSelect}
       />
@@ -568,57 +449,12 @@ export function HandFan({
     <div
       className="hand-fan-shell w-full"
       role="group"
-      aria-label={`Your hand, ${n} ${n === 1 ? 'card' : 'cards'}; scroll horizontally${canReorder ? '; drag with mouse or pen to reorder; hold on touch or press S for sort options; Alt plus arrow keys also reorder' : ''}`}
+      aria-label={`Your hand, ${n} ${n === 1 ? 'card' : 'cards'}; scroll horizontally${canReorder ? '; drag or hold then drag to reorder; Alt plus arrow keys also reorder' : ''}`}
       aria-labelledby={labelledBy}
       data-reorderable={canReorder ? 'true' : undefined}
       data-reordering={draggingId ? 'true' : undefined}
       onKeyDown={onKeyDown}
     >
-      {canReorder && (
-        <button
-          ref={sortTriggerRef}
-          type="button"
-          className="hand-fan__sort-trigger"
-          aria-label="Sort hand"
-          aria-haspopup="menu"
-          aria-expanded={sortMenuOpen}
-          onClick={() => {
-            sortReturnFocusRef.current = sortTriggerRef.current
-            setSortMenuOpen(open => !open)
-          }}
-        >
-          Sort
-        </button>
-      )}
-      {sortMenuOpen && (
-        <div
-          ref={sortMenuRef}
-          className="hand-fan__sort-menu"
-          role="menu"
-          aria-label="Sort hand options"
-          onKeyDown={event => {
-            if (event.key === 'Tab') {
-              setSortMenuOpen(false)
-              return
-            }
-            if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
-            const items = Array.from(sortMenuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])
-            const current = items.indexOf(document.activeElement as HTMLButtonElement)
-            if (items.length === 0) return
-            event.preventDefault()
-            const next = event.key === 'Home' ? 0
-              : event.key === 'End' ? items.length - 1
-                : event.key === 'ArrowDown' || event.key === 'ArrowRight'
-                  ? (current + 1 + items.length) % items.length
-                  : (current - 1 + items.length) % items.length
-            items[next]?.focus()
-          }}
-        >
-          <button type="button" role="menuitem" onClick={() => applySort('rank')}>By rank</button>
-          <button type="button" role="menuitem" onClick={() => applySort('suit')}>By suit</button>
-          <button type="button" role="menuitem" onClick={() => applySort('deal')}>Deal order</button>
-        </div>
-      )}
       <div
         ref={containerRef}
         className="hand-fan w-full"

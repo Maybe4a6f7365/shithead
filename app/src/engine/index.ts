@@ -183,6 +183,14 @@ export const RANK_ORDER: Record<Rank, number> = {
   '2': -1, 'JOKER': -2,
 }
 
+/** Display-only ordering for the hand fan. Lowest → highest.
+ *  Distinct from RANK_ORDER (which is for pile-top comparisons). */
+export const HAND_DISPLAY_ORDER: Record<Rank, number> = {
+  '4': 0, '5': 1, '6': 2, '7': 3, '8': 4, '9': 5,
+  'J': 6, 'Q': 7, 'K': 8, 'A': 9, '2': 10, '3': 11, '10': 12,
+  'JOKER': 13,
+}
+
 // ---------- RNG ----------
 
 /**
