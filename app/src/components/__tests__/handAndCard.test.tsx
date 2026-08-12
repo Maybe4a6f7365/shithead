@@ -38,19 +38,30 @@ describe('hand display ordering', () => {
     ])
   })
 
-  it('restores canonical order when a pickup adds a card', async () => {
+  it('stays canonically sorted after a simulated pickup and exposes no reorder hooks', async () => {
     const initial = [card(1, '6'), card(2, '4')]
-    const { rerender } = render(
-      <HandFan cards={initial} states={new Map()} reorderable />,
-    )
-    rerender(<HandFan cards={[...initial, card(3, '5'), card(4, 'JOKER')]} states={new Map()} reorderable />)
+    const { container, rerender } = render(<HandFan cards={initial} states={new Map()} onSelect={vi.fn()} />)
+    rerender(<HandFan cards={[...initial, card(3, '5'), card(4, 'JOKER')]} states={new Map()} onSelect={vi.fn()} />)
 
     await waitFor(() => {
-      expect(screen.getByRole('img', { name: /4 of clubs, 1 of 4/i })).toBeTruthy()
-      expect(screen.getByRole('img', { name: /5 of clubs, 2 of 4/i })).toBeTruthy()
-      expect(screen.getByRole('img', { name: /6 of clubs, 3 of 4/i })).toBeTruthy()
-      expect(screen.getByRole('img', { name: /joker, 4 of 4/i })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /4 of clubs, 1 of 4/i })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /5 of clubs, 2 of 4/i })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /6 of clubs, 3 of 4/i })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /joker, 4 of 4/i })).toBeTruthy()
     })
+
+    const firstCard = container.querySelector('.hand-fan__card') as HTMLElement
+    fireEvent.pointerDown(firstCard, { pointerId: 1, pointerType: 'mouse', clientX: 10 })
+    fireEvent.pointerMove(firstCard, { pointerId: 1, pointerType: 'mouse', clientX: 200 })
+    fireEvent.pointerUp(firstCard, { pointerId: 1, pointerType: 'mouse', clientX: 200 })
+    fireEvent.keyDown(screen.getByRole('group', { name: /your hand/i }), { key: 'ArrowRight', altKey: true })
+
+    expect(container.querySelector('[data-reorderable], [data-reordering], [data-dragging]')).toBeNull()
+    expect(screen.getByRole('group', { name: /your hand/i }).getAttribute('aria-label')).not.toMatch(/reorder|drag|alt/i)
+    expect(screen.getByRole('button', { name: /4 of clubs, 1 of 4/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /5 of clubs, 2 of 4/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /6 of clubs, 3 of 4/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /joker, 4 of 4/i })).toBeTruthy()
   })
 })
 

@@ -844,7 +844,6 @@ export function TableScreen({
             states={states}
             ariaHints={hints}
             onSelect={(viewerActive || canPreselectVisible) && zone === 'hand' ? onHandId : undefined}
-            reorderable={state.phase !== 'gameOver' && !canBurnIn && !canQuickFollowUp}
             orderKey={viewerId}
           />
         </div>
