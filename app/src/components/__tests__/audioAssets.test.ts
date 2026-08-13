@@ -14,18 +14,22 @@ function sha256(file: string): string {
 describe('turn alert audio assets', () => {
   it('ships the exact project-owner-supplied Pixabay files', () => {
     expect(sha256('turn-notification.mp3')).toBe(
-      '3084f38708f1fb06a93e74b97f1486dfcedd6dad1dea13eefb23b843e69a0295',
+      'adf8d86bc6e18b80a166e84de3b2ce03f5874f7d302a34eb157e9e735f3752d4',
     )
     expect(sha256('attention-alert.mp3')).toBe(
       '4a0376b6d9ce29c0202a1db3bd2107c7a85ff53066e1f92e42716b45befaed70',
+    )
+    expect(sha256('attention-blast.mp3')).toBe(
+      'adf8d86bc6e18b80a166e84de3b2ce03f5874f7d302a34eb157e9e735f3752d4',
     )
   })
 
   it('keeps the asset-specific license and provenance beside the files', () => {
     const notice = readFileSync(new URL('LICENSE.txt', audioRoot), 'utf8')
     expect(notice).toContain('Pixabay Content License')
-    expect(notice).toContain('technology-memeclick-506437')
+    expect(notice).toContain('musical-explosion-sfx-43814')
     expect(notice).toContain('musical-gabber-82562')
+    expect(notice).toContain('Abacagi (Freesound)')
     expect(notice).toContain('excluded from the repository\'s Apache-2.0')
   })
 })

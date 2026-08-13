@@ -21,7 +21,7 @@ import { ActionBar } from './ActionBar'
 import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
 import { feedLine, latestActionEvents, type FeedContext } from './feedText'
-import { useSoundFromLog, emitSoundDebounced } from './soundManager'
+import { useSoundFromLog, emitSoundDebounced, type AdhdAlertSound } from './soundManager'
 import {
   BroadcastFeedback,
   EmoteButton,
@@ -73,6 +73,8 @@ export interface TableScreenProps {
   onToggleTurnAlerts?: () => void
   adhdMode?: boolean
   onToggleAdhdMode?: () => void
+  adhdSound?: AdhdAlertSound
+  onSelectAdhdSound?: (sound: AdhdAlertSound) => void
   attentionAlertActive?: boolean
   /** Authoritative multiplayer room option; only the host gets a callback. */
   easterEggEnabled?: boolean
@@ -187,7 +189,7 @@ export function TableScreen({
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
   soundOn, onToggleSound,
   turnAlertsEnabled = true, onToggleTurnAlerts,
-  adhdMode = false, onToggleAdhdMode, attentionAlertActive = false,
+  adhdMode = false, onToggleAdhdMode, adhdSound = 'beat', onSelectAdhdSound, attentionAlertActive = false,
   easterEggEnabled, onToggleEasterEgg,
   connectionBadge, seatOffline, latestEmote, onSendEmote,
   latestBroadcast, onSendBroadcast, latestSystemEvent,
@@ -767,6 +769,8 @@ export function TableScreen({
               onToggleTurnAlerts={onToggleTurnAlerts}
               adhdMode={adhdMode}
               onToggleAdhdMode={onToggleAdhdMode}
+              adhdSound={adhdSound}
+              onSelectAdhdSound={onSelectAdhdSound}
               easterEggEnabled={easterEggEnabled}
               onToggleEasterEgg={onToggleEasterEgg}
               onLeave={onLeave}

@@ -517,7 +517,7 @@ Turn ownership uses one shared Framer Motion layout marker. It relocates between
 - Dialogs and blocking phase overlays set initial focus, trap Tab, handle Escape where appropriate, and restore focus.
 - Gameplay shortcuts are suppressed inside editors, modifier chords, menus, and modal dialogs.
 - `prefers-reduced-motion` collapses transitions, removes card lift/shake, and stops pulsing.
-- ADHD mode uses a slow, thin perimeter-light pulse rather than rapid or full-screen flashing. Any pointer press or non-modifier key silences the attention alert without consuming the player's intended action; `prefers-reduced-motion` leaves the perimeter static.
+- ADHD mode uses layered, slowly orbiting perimeter highlights and restrained corner glow rather than rapid or full-screen flashing. Any pointer press or non-modifier key silences the attention alert without consuming the player's intended action; `prefers-reduced-motion` leaves the perimeter static.
 
 Keyboard controls:
 
@@ -548,9 +548,9 @@ An explicit leave emits a typed table event for the playful departure line. Sepa
 
 The easter egg is enabled by default. Its current status appears in every player's menu, but only the host can change it. Turning it off at any time immediately cancels a not-yet-fired private schedule. Turning it back on during the same round does not roll a replacement mid-round; the next eligible transition into `play` schedules one normally.
 
-The menu exposes three session-scoped sensory preferences shared by online and offline tables: **Turn alerts**, **Mute sounds**, and **ADHD mode**. A normal alert plays one short meme-click cue when ownership enters the local human player's turn. ADHD mode replaces that one-shot cue with a persistent perimeter-light pulse and looping gabber cue until the player presses the screen or another non-modifier key. Muting stops audio, including an active loop, while the visual ADHD cue can remain; disabling turn alerts suppresses both alert modes. Every new browser session starts unmuted with turn alerts enabled and ADHD mode disabled; changes last only for the current tab session.
+The menu exposes session-scoped sensory preferences shared by online and offline tables: **Turn alerts**, **Mute sounds**, **ADHD mode**, and an **ADHD sound** choice. A normal alert plays one short blast cue and a stronger two-pulse vibration when ownership enters the local human player's turn. ADHD mode replaces the one-shot sound with a persistent perimeter-light visualization and lets the player choose the looping **Beat** or **Blast** cue; it stops when the player presses the screen or another non-modifier key. Muting stops audio, including an active loop, without disabling supported phone vibration; the visual ADHD cue can remain. Disabling turn alerts suppresses audio, visuals, and haptics. Every new browser session starts unmuted with turn alerts enabled, ADHD mode disabled, and **Beat** selected; changes last only for the current tab session. Web vibration is best-effort: it requires browser/device support and prior interaction with the page, and unsupported browsers simply omit the haptic cue.
 
-Both bundled MP3s were supplied by the project owner from Pixabay and are used in the game under the [Pixabay Content License](https://pixabay.com/service/license-summary/), which does not require attribution but prohibits standalone redistribution. The normal cue is [memeclick by u_1thl5d0szy](https://pixabay.com/sound-effects/technology-memeclick-506437/), and the ADHD cue is [gabber by f0rest15 (Freesound)](https://pixabay.com/sound-effects/musical-gabber-82562/). The MP3s are excluded from the repository's Apache-2.0 software license; full provenance, checksums, and asset terms are recorded in `app/public/audio/LICENSE.txt`.
+The bundled MP3s were supplied by the project owner from Pixabay and are used in the game under the [Pixabay Content License](https://pixabay.com/service/license-summary/), which does not require attribution but prohibits standalone redistribution. **Blast** and the normal cue use [explosion SFX by Abacagi (Freesound)](https://pixabay.com/sound-effects/musical-explosion-sfx-43814/); **Beat** uses [gabber by f0rest15 (Freesound)](https://pixabay.com/sound-effects/musical-gabber-82562/). The MP3s are excluded from the repository's Apache-2.0 software license; full provenance, checksums, and asset terms are recorded in `app/public/audio/LICENSE.txt`.
 
 ## Browser storage, privacy, and offline behavior
 
@@ -560,6 +560,7 @@ Both bundled MP3s were supplied by the project owner from Pixabay and are used i
 | Session Storage: `shithead:sound` | Sound preference | Current tab session; unmuted by default |
 | Session Storage: `shithead:turn-alerts` | Turn-alert preference | Current tab session; enabled by default |
 | Session Storage: `shithead:adhd-mode` | Attention-mode preference | Current tab session; disabled by default |
+| Session Storage: `shithead:adhd-sound` | Attention-mode sound (`Beat` or `Blast`) | Current tab session; `Beat` by default |
 | `shithead:session` | Room code, player ID, resume token, player name | Replaced on `WELCOME`; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
 | Workbox Cache Storage | Versioned static app-shell files | Managed and cleaned by the generated service worker |
 | Offline match | Zustand memory only | Lost on refresh |

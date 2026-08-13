@@ -3308,6 +3308,12 @@
   box-shadow: 0 18px 42px rgba(6, 25, 18, 0.42);
   backdrop-filter: none;
 }
+.game-screen .quiet-menu__popover {
+  max-height: calc(100dvh - 64px - env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .game-screen .quiet-menu__glyph,
 .game-screen .emote-control__glyph {
   width: 21px;
@@ -3380,6 +3386,18 @@
   color: var(--table-copy-muted);
   font-size: 11px;
 }
+.game-screen .quiet-menu__subhead {
+  padding: 8px 16px 4px 45px;
+  color: var(--table-copy-faint);
+  font-size: 9px;
+  line-height: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.game-screen .quiet-menu__item--attention-sound[aria-checked="true"] {
+  background: hsl(43 62% 66% / 0.08);
+}
 .game-screen .quiet-menu__item--locked {
   cursor: default;
   opacity: 0.68;
@@ -3395,22 +3413,35 @@
   background: #17392d;
 }
 
-/* ADHD turn cue: two continuously moving perimeter lines make the alert easy
-   to notice without flashing the play surface. Only the decorative lines
-   move; the label stays fixed and the cue never intercepts its dismissing
-   pointer or key action. */
+/* ADHD turn cue: a quiet base rail, travelling highlights and restrained
+   corner light create a clear "your turn" frame without flashing the play
+   surface. Only the decorative perimeter moves; the label stays fixed and
+   the cue never intercepts its dismissing pointer or key action. */
+@property --turn-attention-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 24deg;
+}
+
 .game-screen .turn-attention-beacon {
+  --turn-attention-radius: clamp(18px, 2.4vw, 26px);
   position: fixed;
   z-index: calc(var(--z-overlay) + 2);
-  top: max(8px, env(safe-area-inset-top));
-  right: max(8px, env(safe-area-inset-right));
-  bottom: max(8px, env(safe-area-inset-bottom));
-  left: max(8px, env(safe-area-inset-left));
-  border: 1px solid hsl(43 64% 62% / 0.55);
-  border-radius: 20px;
+  top: max(8px, calc(env(safe-area-inset-top) + 4px));
+  right: max(8px, calc(env(safe-area-inset-right) + 4px));
+  bottom: max(8px, calc(env(safe-area-inset-bottom) + 4px));
+  left: max(8px, calc(env(safe-area-inset-left) + 4px));
+  border: 1px solid hsl(43 55% 66% / 0.32);
+  border-radius: var(--turn-attention-radius);
+  background:
+    radial-gradient(ellipse 240px 170px at 0 0, hsl(43 76% 61% / 0.13), transparent 70%),
+    radial-gradient(ellipse 220px 150px at 100% 0, hsl(52 72% 64% / 0.09), transparent 72%),
+    radial-gradient(ellipse 220px 150px at 0 100%, hsl(35 78% 58% / 0.08), transparent 72%),
+    radial-gradient(ellipse 240px 170px at 100% 100%, hsl(46 72% 60% / 0.12), transparent 70%);
   box-shadow:
-    inset 0 0 18px hsl(43 72% 58% / 0.11),
-    0 0 15px hsl(43 72% 58% / 0.18);
+    inset 0 0 0 1px hsl(43 60% 68% / 0.06),
+    inset 0 0 38px hsl(43 70% 54% / 0.06),
+    0 0 22px hsl(43 72% 56% / 0.1);
   isolation: isolate;
   pointer-events: none;
 }
@@ -3418,61 +3449,108 @@
 .game-screen .turn-attention-beacon::before,
 .game-screen .turn-attention-beacon::after {
   content: '';
+  display: none;
   position: absolute;
+  border-radius: inherit;
   pointer-events: none;
-  will-change: transform, border-radius, filter;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  will-change: filter;
+}
+
+@supports ((-webkit-mask-composite: xor) or (mask-composite: exclude)) {
+  .game-screen .turn-attention-beacon::before,
+  .game-screen .turn-attention-beacon::after {
+    display: block;
+  }
 }
 
 .game-screen .turn-attention-beacon::before {
   inset: -2px;
-  border-width: 4px;
-  border-style: solid;
-  border-color:
-    hsl(43 84% 68% / 0.98)
-    hsl(54 82% 61% / 0.96)
-    hsl(35 88% 63% / 0.97)
-    hsl(48 84% 65% / 0.96);
-  border-radius: 22px 17px 24px 18px / 19px 23px 17px 22px;
-  box-shadow:
-    inset 0 0 12px hsl(46 86% 62% / 0.12),
-    0 0 10px hsl(46 86% 62% / 0.42);
+  padding: 3px;
+  background: conic-gradient(
+    from var(--turn-attention-angle),
+    hsl(40 64% 58% / 0.36) 0deg,
+    hsl(48 88% 75% / 0.96) 24deg,
+    hsl(43 77% 61% / 0.42) 58deg,
+    hsl(42 55% 52% / 0.22) 126deg,
+    hsl(35 75% 58% / 0.5) 170deg,
+    hsl(51 92% 78% / 0.98) 198deg,
+    hsl(44 70% 58% / 0.35) 232deg,
+    hsl(40 55% 50% / 0.22) 310deg,
+    hsl(40 64% 58% / 0.36) 360deg
+  );
   animation:
-    turn-attention-line-wiggle 3.4s cubic-bezier(0.45, 0, 0.55, 1) infinite,
-    turn-attention-line-hue 8s ease-in-out infinite alternate;
+    turn-attention-rail-orbit 5.8s linear infinite,
+    turn-attention-rail-chroma 11s ease-in-out infinite alternate;
 }
 
 .game-screen .turn-attention-beacon::after {
-  inset: 5px;
-  border: 1px solid hsl(56 78% 66% / 0.62);
-  border-radius: 15px 20px 16px 21px / 20px 14px 21px 15px;
-  box-shadow: inset 0 0 9px hsl(56 80% 62% / 0.15);
+  inset: -9px;
+  padding: 9px;
+  background: conic-gradient(
+    from var(--turn-attention-angle),
+    transparent 0deg 38deg,
+    hsl(48 88% 70% / 0.38) 64deg,
+    hsl(43 91% 76% / 0.62) 82deg,
+    transparent 112deg 216deg,
+    hsl(35 82% 62% / 0.32) 242deg,
+    hsl(50 92% 76% / 0.56) 262deg,
+    transparent 294deg 360deg
+  );
+  filter: blur(9px) hue-rotate(-3deg);
   animation:
-    turn-attention-line-wiggle 4.6s ease-in-out infinite reverse,
-    turn-attention-line-hue 9.5s ease-in-out infinite alternate-reverse;
+    turn-attention-rail-orbit 8.6s linear infinite reverse,
+    turn-attention-glow-chroma 13s ease-in-out infinite alternate;
 }
 
 .game-screen .turn-attention-beacon__label {
   position: absolute;
   z-index: 1;
-  top: 14px;
+  top: 13px;
   left: 50%;
-  min-width: 148px;
-  padding: 7px 12px 8px;
+  min-width: 156px;
+  padding: 8px 14px 9px;
   display: grid;
-  gap: 1px;
-  border: 1px solid rgba(222, 190, 96, 0.7);
+  gap: 2px;
+  border: 1px solid hsl(43 62% 66% / 0.5);
   border-radius: 999px;
   color: var(--color-cream);
-  background: rgba(6, 25, 18, 0.94);
-  box-shadow: 0 5px 18px rgba(6, 25, 18, 0.35);
+  background: linear-gradient(180deg, rgba(20, 58, 44, 0.97), rgba(6, 25, 18, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(241, 229, 199, 0.08),
+    0 8px 24px rgba(6, 25, 18, 0.42),
+    0 0 18px hsl(43 72% 58% / 0.1);
   text-align: center;
   transform: translateX(-50%);
 }
 
 .game-screen .turn-attention-beacon__label strong {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   font-size: 14px;
   line-height: 17px;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.game-screen .turn-attention-beacon__label strong::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: hsl(47 88% 72%);
+  box-shadow: 0 0 9px hsl(47 88% 68% / 0.72);
+  transform: rotate(45deg);
 }
 
 .game-screen .turn-attention-beacon__label span {
@@ -3481,28 +3559,18 @@
   line-height: 13px;
 }
 
-@keyframes turn-attention-line-wiggle {
-  0%, 100% {
-    border-radius: 22px 17px 24px 18px / 19px 23px 17px 22px;
-    transform: translate3d(0, 0, 0) skew(0deg, 0deg) scale(1);
-  }
-  23% {
-    border-radius: 18px 24px 17px 22px / 23px 18px 24px 17px;
-    transform: translate3d(1.5px, -0.8px, 0) skew(0.12deg, -0.08deg) scale(0.999, 1.001);
-  }
-  49% {
-    border-radius: 24px 18px 22px 16px / 17px 22px 18px 24px;
-    transform: translate3d(-0.8px, 1px, 0) skew(-0.1deg, 0.12deg) scale(1.001, 0.999);
-  }
-  76% {
-    border-radius: 17px 22px 19px 24px / 22px 17px 23px 19px;
-    transform: translate3d(0.7px, 0.5px, 0) skew(0.08deg, 0.1deg) scale(1.0005, 1.001);
-  }
+@keyframes turn-attention-rail-orbit {
+  to { --turn-attention-angle: 384deg; }
 }
 
-@keyframes turn-attention-line-hue {
-  from { filter: hue-rotate(-7deg) saturate(0.94); }
-  to { filter: hue-rotate(16deg) saturate(1.08); }
+@keyframes turn-attention-rail-chroma {
+  from { filter: hue-rotate(-4deg) saturate(0.96); }
+  to { filter: hue-rotate(8deg) saturate(1.06); }
+}
+
+@keyframes turn-attention-glow-chroma {
+  from { filter: blur(9px) hue-rotate(-4deg) saturate(0.94); }
+  to { filter: blur(10px) hue-rotate(7deg) saturate(1.04); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3510,8 +3578,14 @@
   .game-screen .turn-attention-beacon::before,
   .game-screen .turn-attention-beacon::after {
     animation: none !important;
+  }
+  .game-screen .turn-attention-beacon::before {
+    --turn-attention-angle: 34deg;
     filter: none !important;
-    transform: none !important;
+  }
+  .game-screen .turn-attention-beacon::after {
+    --turn-attention-angle: 214deg;
+    filter: blur(9px) !important;
   }
 }
 

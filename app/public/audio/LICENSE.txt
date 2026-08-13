@@ -10,21 +10,30 @@ to its prohibited uses (including standalone redistribution).
 These audio files are excluded from the repository's Apache-2.0 software
 license. They may be used only under the Pixabay Content License below. A
 source-code checkout exposes the files for building this game; it does not
-grant permission to extract or redistribute either audio file on its own.
+grant permission to extract or redistribute any audio file on its own.
 
 License summary: https://pixabay.com/service/license-summary/
 Full license terms: https://pixabay.com/service/terms/
 
 turn-notification.mp3
 ---------------------
-Title: memeclick
-Contributor: u_1thl5d0szy
-Source page: https://pixabay.com/sound-effects/technology-memeclick-506437/
-Supplied filename: u_1thl5d0szy-memeclick-506437.mp3
-SHA-256: 3084f38708f1fb06a93e74b97f1486dfcedd6dad1dea13eefb23b843e69a0295
+Title: explosion SFX
+Creator shown by Pixabay: Abacagi (Freesound)
+Pixabay contributor account: freesound_community
+Source page: https://pixabay.com/sound-effects/musical-explosion-sfx-43814/
+Published on Pixabay: 2022-06-17
+Supplied filename: freesound_community-explosion-sfx-43814.mp3
+SHA-256: adf8d86bc6e18b80a166e84de3b2ce03f5874f7d302a34eb157e9e735f3752d4
 License: Pixabay Content License
 Attribution: Not required by the license.
-Source page disclosure: AI modified or generated.
+
+attention-blast.mp3
+-------------------
+This is the same owner-supplied "explosion SFX" file and provenance recorded
+above, exposed separately as the selectable "Blast" ADHD cue.
+SHA-256: adf8d86bc6e18b80a166e84de3b2ce03f5874f7d302a34eb157e9e735f3752d4
+License: Pixabay Content License
+Attribution: Not required by the license.
 
 attention-alert.mp3
 -------------------

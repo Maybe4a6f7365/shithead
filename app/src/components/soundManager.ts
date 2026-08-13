@@ -9,8 +9,15 @@ import { latestActionEvents } from './feedText'
 
 export type SoundName =
   | 'deal' | 'select' | 'deselect' | 'play' | 'play_multi' | 'draw' | 'pickup'
-  | 'burn' | 'turn_yours' | 'turn_attention' | 'invalid' | 'round_end' | 'reconnect_restored'
+  | 'burn' | 'turn_yours' | 'turn_attention_beat' | 'turn_attention_blast'
+  | 'invalid' | 'round_end' | 'reconnect_restored'
   | 'player_joined' | 'player_left'
+
+export type AdhdAlertSound = 'beat' | 'blast'
+
+export function soundNameForAdhdAlert(sound: AdhdAlertSound): SoundName {
+  return sound === 'blast' ? 'turn_attention_blast' : 'turn_attention_beat'
+}
 
 export type SoundHandler = (name: SoundName) => void
 
@@ -18,12 +25,14 @@ let handler: SoundHandler = () => {}
 let muted = false
 
 const browserAudioAssets: Partial<Record<SoundName, { src: string; volume: number }>> = {
-  // The very short meme click peaks below full scale, so it can play at the
-  // browser's full media volume without clipping.
-  turn_yours: { src: '/audio/turn-notification.mp3', volume: 1 },
+  // The short explosion cue is already mastered close to full scale.
+  turn_yours: { src: '/audio/turn-notification.mp3', volume: 0.55 },
   // The gabber cue is sustained and peaks at full scale. Keep the looping
   // attention alarm well below the one-shot notification.
-  turn_attention: { src: '/audio/attention-alert.mp3', volume: 0.25 },
+  turn_attention_beat: { src: '/audio/attention-alert.mp3', volume: 0.25 },
+  // The compact blast repeats much more frequently than the beat when looped,
+  // so keep this deliberately restrained as an attention-mode alternative.
+  turn_attention_blast: { src: '/audio/attention-blast.mp3', volume: 0.22 },
 }
 
 type BrowserAudioRecord = {

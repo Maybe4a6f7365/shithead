@@ -49,7 +49,7 @@ describe('browser audio backend', () => {
     expect(AudioStub.instances).toHaveLength(1)
     expect(AudioStub.instances[0].src).toBe('/audio/turn-notification.mp3')
     expect(AudioStub.instances[0].preload).toBe('auto')
-    expect(AudioStub.instances[0].volume).toBe(1)
+    expect(AudioStub.instances[0].volume).toBe(0.55)
     expect(AudioStub.instances[0].loop).toBe(false)
     expect(AudioStub.instances[0].currentTime).toBe(0)
     expect(AudioStub.instances[0].play).toHaveBeenCalledOnce()
@@ -58,21 +58,26 @@ describe('browser audio backend', () => {
     expect(AudioStub.instances).toHaveLength(1)
   })
 
-  it('loops the attention cue and stops it idempotently', async () => {
+  it('maps both selectable ADHD sounds and stops a loop idempotently', async () => {
     const { startLoopingSound, stopSound } = await import('../soundManager')
 
-    startLoopingSound('turn_attention')
+    startLoopingSound('turn_attention_beat')
     const audio = AudioStub.instances[0]
     expect(audio.src).toBe('/audio/attention-alert.mp3')
     expect(audio.loop).toBe(true)
     expect(audio.volume).toBe(0.25)
     expect(audio.play).toHaveBeenCalledOnce()
 
-    stopSound('turn_attention')
-    stopSound('turn_attention')
+    stopSound('turn_attention_beat')
+    stopSound('turn_attention_beat')
     expect(audio.pause).toHaveBeenCalledOnce()
     expect(audio.loop).toBe(false)
     expect(audio.currentTime).toBe(0)
+
+    startLoopingSound('turn_attention_blast')
+    expect(AudioStub.instances[1].src).toBe('/audio/attention-blast.mp3')
+    expect(AudioStub.instances[1].volume).toBe(0.22)
+    expect(AudioStub.instances[1].loop).toBe(true)
   })
 
   it('swallows rejected and synchronous play failures', async () => {
@@ -85,7 +90,7 @@ describe('browser audio backend', () => {
     expect(AudioStub.instances[0].loop).toBe(false)
 
     AudioStub.throwOnPlay = true
-    expect(() => startLoopingSound('turn_attention')).not.toThrow()
+    expect(() => startLoopingSound('turn_attention_beat')).not.toThrow()
     expect(AudioStub.instances[1].loop).toBe(false)
   })
 
@@ -98,14 +103,14 @@ describe('browser audio backend', () => {
     } = await import('../soundManager')
     installBrowserAudioBackend()
 
-    startLoopingSound('turn_attention')
+    startLoopingSound('turn_attention_beat')
     const alarm = AudioStub.instances[0]
     setSoundMuted(true)
     expect(alarm.pause).toHaveBeenCalledOnce()
     expect(alarm.loop).toBe(false)
 
     emitSound('turn_yours')
-    startLoopingSound('turn_attention')
+    startLoopingSound('turn_attention_beat')
     expect(AudioStub.instances).toHaveLength(1)
     expect(alarm.play).toHaveBeenCalledOnce()
 

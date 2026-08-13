@@ -1,21 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Phase } from '../engine'
-import { emitSoundDebounced, setSoundMuted, startLoopingSound, stopSound } from './soundManager'
+import {
+  emitSoundDebounced,
+  setSoundMuted,
+  soundNameForAdhdAlert,
+  startLoopingSound,
+  stopSound,
+  type AdhdAlertSound,
+  type SoundName,
+} from './soundManager'
 
 const SOUND_KEY = 'shithead:sound'
 const TURN_ALERTS_KEY = 'shithead:turn-alerts'
 const ADHD_MODE_KEY = 'shithead:adhd-mode'
+const ADHD_SOUND_KEY = 'shithead:adhd-sound'
 
 export interface TurnAlertPreferences {
   soundOn: boolean
   turnAlertsEnabled: boolean
   adhdMode: boolean
+  adhdSound: AdhdAlertSound
 }
 
 const DEFAULT_PREFERENCES: TurnAlertPreferences = {
   soundOn: true,
   turnAlertsEnabled: true,
   adhdMode: false,
+  adhdSound: 'beat',
 }
 
 function browserStorage(): Storage | null {
@@ -33,6 +44,7 @@ export function loadTurnAlertPreferences(storage: Pick<Storage, 'getItem'> | nul
       soundOn: storage.getItem(SOUND_KEY) !== 'off',
       turnAlertsEnabled: storage.getItem(TURN_ALERTS_KEY) !== 'off',
       adhdMode: storage.getItem(ADHD_MODE_KEY) === 'on',
+      adhdSound: storage.getItem(ADHD_SOUND_KEY) === 'blast' ? 'blast' : 'beat',
     }
   } catch {
     return { ...DEFAULT_PREFERENCES }
@@ -41,6 +53,10 @@ export function loadTurnAlertPreferences(storage: Pick<Storage, 'getItem'> | nul
 
 function persistPreference(key: string, enabled: boolean): void {
   try { browserStorage()?.setItem(key, enabled ? 'on' : 'off') } catch { /* storage is optional */ }
+}
+
+function persistValue(key: string, value: string): void {
+  try { browserStorage()?.setItem(key, value) } catch { /* storage is optional */ }
 }
 
 /** Shared sensory preferences for this browser tab's current play session. */
@@ -75,7 +91,12 @@ export function useTurnAlertPreferences() {
     })
   }, [])
 
-  return { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode }
+  const selectAdhdSound = useCallback((adhdSound: AdhdAlertSound) => {
+    persistValue(ADHD_SOUND_KEY, adhdSound)
+    setPreferences(current => ({ ...current, adhdSound }))
+  }, [])
+
+  return { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound }
 }
 
 interface TurnSnapshot {
@@ -93,6 +114,16 @@ export interface TurnAlertControllerOptions extends TurnAlertPreferences {
 
 function isGameplayPhase(phase: TurnSnapshot['phase']): boolean {
   return phase === 'play' || phase === 'endgame'
+}
+
+/** Best-effort haptics: unsupported or policy-blocked vibration stays silent. */
+function vibrate(pattern: VibratePattern): void {
+  try {
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
+    navigator.vibrate(pattern)
+  } catch {
+    // Some browsers expose the API while denying it in the current context.
+  }
 }
 
 /**
@@ -114,14 +145,17 @@ export function useTurnAlertController({
   soundOn,
   turnAlertsEnabled,
   adhdMode,
+  adhdSound,
 }: TurnAlertControllerOptions): boolean {
   const [attentionActive, setAttentionActive] = useState(false)
   const previous = useRef<TurnSnapshot | null>(null)
+  const activeAttentionSound = useRef<SoundName | null>(null)
 
   const dismissAttention = useCallback(() => {
     setAttentionActive(false)
-    stopSound('turn_attention')
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.(0)
+    if (activeAttentionSound.current) stopSound(activeAttentionSound.current)
+    activeAttentionSound.current = null
+    vibrate(0)
   }, [])
 
   useEffect(() => {
@@ -142,10 +176,12 @@ export function useTurnAlertController({
 
     if (adhdMode) {
       setAttentionActive(true)
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.([120, 80, 120])
-    } else if (soundOn) {
-      emitSoundDebounced('turn_yours')
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.(45)
+      vibrate([120, 80, 120])
+    } else {
+      // Haptics are a turn alert, not audio: muting sound must not suppress
+      // vibration on browsers that support the Vibration API.
+      if (soundOn) emitSoundDebounced('turn_yours')
+      vibrate([80, 45, 80])
     }
   }, [adhdMode, currentPlayerId, dismissAttention, localHumanTurn, phase, soundOn, turnAlertsEnabled])
 
@@ -156,11 +192,17 @@ export function useTurnAlertController({
   useEffect(() => {
     if (!soundOn) {
       stopSound('turn_yours')
-      stopSound('turn_attention')
+      if (activeAttentionSound.current) stopSound(activeAttentionSound.current)
+      activeAttentionSound.current = null
     } else if (attentionActive && turnAlertsEnabled && adhdMode) {
-      startLoopingSound('turn_attention')
+      const nextSound = soundNameForAdhdAlert(adhdSound)
+      if (activeAttentionSound.current && activeAttentionSound.current !== nextSound) {
+        stopSound(activeAttentionSound.current)
+      }
+      activeAttentionSound.current = nextSound
+      startLoopingSound(nextSound)
     }
-  }, [adhdMode, attentionActive, soundOn, turnAlertsEnabled])
+  }, [adhdMode, adhdSound, attentionActive, soundOn, turnAlertsEnabled])
 
   useEffect(() => {
     if (!attentionActive) return
@@ -178,9 +220,10 @@ export function useTurnAlertController({
   }, [attentionActive, dismissAttention])
 
   useEffect(() => () => {
-    stopSound('turn_attention')
+    if (activeAttentionSound.current) stopSound(activeAttentionSound.current)
+    activeAttentionSound.current = null
     stopSound('turn_yours')
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.(0)
+    vibrate(0)
   }, [])
 
   return attentionActive

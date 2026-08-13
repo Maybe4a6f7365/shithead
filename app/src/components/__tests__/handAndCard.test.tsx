@@ -165,6 +165,7 @@ describe('quiet menu keyboard navigation', () => {
     const toggleTurnAlerts = vi.fn()
     const toggleSound = vi.fn()
     const toggleAdhdMode = vi.fn()
+    const selectAdhdSound = vi.fn()
     const toggleEasterEgg = vi.fn()
     render(
       <QuietMenu
@@ -175,6 +176,8 @@ describe('quiet menu keyboard navigation', () => {
         onToggleTurnAlerts={toggleTurnAlerts}
         adhdMode={false}
         onToggleAdhdMode={toggleAdhdMode}
+        adhdSound="beat"
+        onSelectAdhdSound={selectAdhdSound}
         easterEggEnabled
         onToggleEasterEgg={toggleEasterEgg}
         onLeave={vi.fn()}
@@ -186,20 +189,31 @@ describe('quiet menu keyboard navigation', () => {
     const turnAlerts = screen.getByRole('menuitemcheckbox', { name: 'Turn alerts: on' })
     const muteSounds = screen.getByRole('menuitemcheckbox', { name: 'Mute sounds: off' })
     const adhdMode = screen.getByRole('menuitemcheckbox', { name: 'ADHD mode: off' })
+    const beatSound = screen.getByRole('menuitemradio', { name: 'ADHD sound: Beat' })
+    const blastSound = screen.getByRole('menuitemradio', { name: 'ADHD sound: Blast' })
     const easterEgg = screen.getByRole('menuitemcheckbox', { name: 'Easter egg: on' })
     expect(screen.getAllByRole('menuitemcheckbox')).toHaveLength(4)
     expect(turnAlerts.getAttribute('aria-checked')).toBe('true')
     expect(muteSounds.getAttribute('aria-checked')).toBe('false')
     expect(adhdMode.getAttribute('aria-checked')).toBe('false')
     expect(easterEgg.tagName).toBe('BUTTON')
+    adhdMode.focus()
+    fireEvent.keyDown(adhdMode, { key: 'ArrowDown' })
+    expect(beatSound).toBe(document.activeElement)
+    fireEvent.keyDown(beatSound, { key: 'ArrowDown' })
+    expect(blastSound).toBe(document.activeElement)
 
     fireEvent.click(turnAlerts)
     fireEvent.click(muteSounds)
     fireEvent.click(adhdMode)
+    expect(beatSound.getAttribute('aria-checked')).toBe('true')
+    expect(blastSound.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(blastSound)
     fireEvent.click(easterEgg)
     expect(toggleTurnAlerts).toHaveBeenCalledOnce()
     expect(toggleSound).toHaveBeenCalledOnce()
     expect(toggleAdhdMode).toHaveBeenCalledOnce()
+    expect(selectAdhdSound).toHaveBeenCalledWith('blast')
     expect(toggleEasterEgg).toHaveBeenCalledOnce()
   })
 

@@ -4,6 +4,7 @@
 // Leave asks once when a match is running (§6.3).
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
+import type { AdhdAlertSound } from './soundManager'
 
 function MenuIcon({ name }: { name: 'rules' | 'sound' | 'bell' | 'attention' | 'egg' | 'leave' }) {
   if (name === 'rules') {
@@ -60,6 +61,8 @@ export interface QuietMenuProps {
   onToggleTurnAlerts?: () => void
   adhdMode?: boolean
   onToggleAdhdMode?: () => void
+  adhdSound?: AdhdAlertSound
+  onSelectAdhdSound?: (sound: AdhdAlertSound) => void
   easterEggEnabled?: boolean
   onToggleEasterEgg?: () => void
   onLeave: () => void
@@ -74,6 +77,8 @@ export function QuietMenu({
   onToggleTurnAlerts,
   adhdMode = false,
   onToggleAdhdMode,
+  adhdSound = 'beat',
+  onSelectAdhdSound,
   easterEggEnabled,
   onToggleEasterEgg,
   onLeave,
@@ -113,13 +118,15 @@ export function QuietMenu({
 
   useEffect(() => {
     if (!open) return
-    ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"], [role="menuitemcheckbox"]')?.focus()
+    ref.current?.querySelector<HTMLButtonElement>(
+      '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
+    )?.focus()
   }, [open])
 
   const moveMenuFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
     const items = Array.from(ref.current?.querySelectorAll<HTMLElement>(
-      '[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemcheckbox"]:not([aria-disabled="true"])',
+      '[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemcheckbox"]:not([aria-disabled="true"]), [role="menuitemradio"]:not([aria-disabled="true"])',
     ) ?? [])
     if (items.length === 0) return
     event.preventDefault()
@@ -203,6 +210,31 @@ export function QuietMenu({
             <span className="quiet-menu__item-label">ADHD mode</span>
             <span className="quiet-menu__item-value" aria-hidden="true">{adhdMode ? 'On' : 'Off'}</span>
           </button>
+          {onSelectAdhdSound && (
+            <div role="group" aria-label="ADHD sound">
+              <div className="quiet-menu__subhead" aria-hidden="true">ADHD sound</div>
+              {(['beat', 'blast'] as const).map((sound) => {
+                const label = sound === 'beat' ? 'Beat' : 'Blast'
+                return (
+                  <button
+                    key={sound}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={adhdSound === sound}
+                    aria-label={`ADHD sound: ${label}`}
+                    onClick={() => onSelectAdhdSound(sound)}
+                    className="quiet-menu__item quiet-menu__item--attention-sound w-full text-left px-s4 min-h-[44px] text-body text-cream"
+                  >
+                    <span className="quiet-menu__item-icon"><MenuIcon name="sound" /></span>
+                    <span className="quiet-menu__item-label">{label}</span>
+                    <span className="quiet-menu__item-value" aria-hidden="true">
+                      {adhdSound === sound ? 'Selected' : ''}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
           {easterEggEnabled !== undefined && (
             <>
               <div className="quiet-menu__divider h-px bg-hairline mx-s4" role="separator" />

@@ -24,7 +24,7 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const nextRules = useSPGame(s => s.rules)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [declinedQuickSourceSeq, setDeclinedQuickSourceSeq] = useState<number | null>(null)
-  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode } = useTurnAlertPreferences()
+  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
 
   const {
     playCards, quickFollowUp, interruptBurn, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
@@ -144,6 +144,8 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           onToggleTurnAlerts={toggleTurnAlerts}
           adhdMode={preferences.adhdMode}
           onToggleAdhdMode={toggleAdhdMode}
+          adhdSound={preferences.adhdSound}
+          onSelectAdhdSound={selectAdhdSound}
           attentionAlertActive={attentionAlertActive}
         />
       )}

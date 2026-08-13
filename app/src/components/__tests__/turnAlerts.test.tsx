@@ -12,15 +12,24 @@ import {
 const soundMocks = vi.hoisted(() => ({
   emitSoundDebounced: vi.fn(),
   setSoundMuted: vi.fn(),
+  soundNameForAdhdAlert: (sound: 'beat' | 'blast') => (
+    sound === 'blast' ? 'turn_attention_blast' : 'turn_attention_beat'
+  ),
   startLoopingSound: vi.fn(),
   stopSound: vi.fn(),
 }))
+
+const vibrateMock = vi.fn()
 
 vi.mock('../soundManager', () => soundMocks)
 
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
+  Object.defineProperty(navigator, 'vibrate', {
+    configurable: true,
+    value: vibrateMock,
+  })
 })
 
 afterEach(() => {
@@ -31,6 +40,7 @@ afterEach(() => {
   soundMocks.setSoundMuted.mockClear()
   soundMocks.startLoopingSound.mockClear()
   soundMocks.stopSound.mockClear()
+  vibrateMock.mockReset()
 })
 
 interface AlertHarnessProps extends TurnAlertControllerOptions {
@@ -55,15 +65,19 @@ const waiting: TurnAlertControllerOptions = {
   soundOn: true,
   turnAlertsEnabled: true,
   adhdMode: false,
+  adhdSound: 'beat',
 }
 
 function PreferenceHarness() {
-  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode } = useTurnAlertPreferences()
+  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
   return (
     <>
       <button type="button" onClick={toggleSound}>Sound {preferences.soundOn ? 'on' : 'off'}</button>
       <button type="button" onClick={toggleTurnAlerts}>Alerts {preferences.turnAlertsEnabled ? 'on' : 'off'}</button>
       <button type="button" onClick={toggleAdhdMode}>ADHD {preferences.adhdMode ? 'on' : 'off'}</button>
+      <button type="button" onClick={() => selectAdhdSound(preferences.adhdSound === 'beat' ? 'blast' : 'beat')}>
+        ADHD sound {preferences.adhdSound}
+      </button>
     </>
   )
 }
@@ -80,12 +94,14 @@ describe('turn alert preferences', () => {
       soundOn: true,
       turnAlertsEnabled: true,
       adhdMode: false,
+      adhdSound: 'beat',
     })
 
     render(<PreferenceHarness />)
     expect(screen.getByRole('button', { name: 'Sound on' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Alerts on' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'ADHD off' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'ADHD sound beat' })).toBeTruthy()
     await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(false))
   })
 
@@ -93,10 +109,12 @@ describe('turn alert preferences', () => {
     sessionStorage.setItem('shithead:sound', 'off')
     sessionStorage.setItem('shithead:turn-alerts', 'off')
     sessionStorage.setItem('shithead:adhd-mode', 'on')
+    sessionStorage.setItem('shithead:adhd-sound', 'blast')
     expect(loadTurnAlertPreferences(sessionStorage)).toEqual({
       soundOn: false,
       turnAlertsEnabled: false,
       adhdMode: true,
+      adhdSound: 'blast',
     })
   })
 
@@ -107,10 +125,12 @@ describe('turn alert preferences', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sound on' }))
     fireEvent.click(screen.getByRole('button', { name: 'Alerts on' }))
     fireEvent.click(screen.getByRole('button', { name: 'ADHD off' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ADHD sound beat' }))
 
     expect(sessionStorage.getItem('shithead:sound')).toBe('off')
     expect(sessionStorage.getItem('shithead:turn-alerts')).toBe('off')
     expect(sessionStorage.getItem('shithead:adhd-mode')).toBe('on')
+    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('blast')
     await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(true))
   })
 })
@@ -119,6 +139,7 @@ describe('turn alert transitions', () => {
   it('plays one normal cue when a local turn begins and never replays for the same actor', () => {
     const { rerender } = render(<AlertHarness {...waiting} />)
     soundMocks.emitSoundDebounced.mockClear()
+    vibrateMock.mockClear()
 
     rerender(
       <AlertHarness
@@ -130,6 +151,8 @@ describe('turn alert transitions', () => {
     )
     expect(soundMocks.emitSoundDebounced).toHaveBeenCalledTimes(1)
     expect(soundMocks.emitSoundDebounced).toHaveBeenCalledWith('turn_yours')
+    expect(vibrateMock).toHaveBeenCalledTimes(1)
+    expect(vibrateMock).toHaveBeenCalledWith([80, 45, 80])
 
     // A phase/state update during the same person's turn is not a new turn.
     rerender(
@@ -141,9 +164,10 @@ describe('turn alert transitions', () => {
       />,
     )
     expect(soundMocks.emitSoundDebounced).toHaveBeenCalledTimes(1)
+    expect(vibrateMock).toHaveBeenCalledTimes(1)
   })
 
-  it('does not alert for the first already-live snapshot or when sound is muted', () => {
+  it('keeps haptic turn alerts active when sound is muted', () => {
     const { rerender } = render(
       <AlertHarness
         {...waiting}
@@ -153,6 +177,7 @@ describe('turn alert transitions', () => {
       />,
     )
     expect(soundMocks.emitSoundDebounced).not.toHaveBeenCalled()
+    vibrateMock.mockClear()
 
     rerender(
       <AlertHarness
@@ -163,6 +188,7 @@ describe('turn alert transitions', () => {
         soundOn={false}
       />,
     )
+    vibrateMock.mockClear()
     rerender(
       <AlertHarness
         {...waiting}
@@ -174,6 +200,29 @@ describe('turn alert transitions', () => {
     )
     expect(soundMocks.emitSoundDebounced).not.toHaveBeenCalled()
     expect(soundMocks.startLoopingSound).not.toHaveBeenCalled()
+    expect(vibrateMock).toHaveBeenCalledTimes(1)
+    expect(vibrateMock).toHaveBeenCalledWith([80, 45, 80])
+  })
+
+  it('degrades safely when vibration is unavailable or rejected', () => {
+    Object.defineProperty(navigator, 'vibrate', {
+      configurable: true,
+      value: undefined,
+    })
+    const { rerender } = render(<AlertHarness {...waiting} />)
+    expect(() => rerender(
+      <AlertHarness {...waiting} phase="play" currentPlayerId="me" localHumanTurn />,
+    )).not.toThrow()
+
+    cleanup()
+    Object.defineProperty(navigator, 'vibrate', {
+      configurable: true,
+      value: vi.fn(() => { throw new Error('policy blocked') }),
+    })
+    const second = render(<AlertHarness {...waiting} />)
+    expect(() => second.rerender(
+      <AlertHarness {...waiting} phase="play" currentPlayerId="me" localHumanTurn />,
+    )).not.toThrow()
   })
 
   it('keeps the muted ADHD beacon visual while leaving audio stopped', async () => {
@@ -220,12 +269,12 @@ describe('turn alert transitions', () => {
     )
     await waitFor(() => expect(screen.getByTestId('turn-attention-beacon')).toBeTruthy())
     expect(soundMocks.startLoopingSound).toHaveBeenCalledTimes(1)
-    expect(soundMocks.startLoopingSound).toHaveBeenCalledWith('turn_attention')
+    expect(soundMocks.startLoopingSound).toHaveBeenCalledWith('turn_attention_beat')
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Table action' }))
     expect(pointerAction).toHaveBeenCalledOnce()
     await waitFor(() => expect(screen.queryByTestId('turn-attention-beacon')).toBeNull())
-    expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_attention')
+    expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_attention_beat')
 
     // Let another player take a turn, then return to the local player.
     rerender(
@@ -258,6 +307,57 @@ describe('turn alert transitions', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Table action' }), { key: 'Enter' })
     expect(keyAction).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(screen.queryByTestId('turn-attention-beacon')).toBeNull())
-    expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_attention')
+    expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_attention_beat')
+  })
+
+  it('uses the selected Blast sound for ADHD mode', async () => {
+    const { rerender } = render(<AlertHarness {...waiting} adhdMode adhdSound="blast" />)
+    soundMocks.startLoopingSound.mockClear()
+
+    rerender(
+      <AlertHarness
+        {...waiting}
+        adhdMode
+        adhdSound="blast"
+        phase="play"
+        currentPlayerId="me"
+        localHumanTurn
+      />,
+    )
+
+    await waitFor(() => expect(soundMocks.startLoopingSound).toHaveBeenCalledWith('turn_attention_blast'))
+  })
+
+  it('stops the old loop before switching an active ADHD alert sound', async () => {
+    const { rerender } = render(<AlertHarness {...waiting} adhdMode />)
+    rerender(
+      <AlertHarness
+        {...waiting}
+        adhdMode
+        phase="play"
+        currentPlayerId="me"
+        localHumanTurn
+      />,
+    )
+    await waitFor(() => expect(soundMocks.startLoopingSound).toHaveBeenCalledWith('turn_attention_beat'))
+
+    soundMocks.stopSound.mockClear()
+    soundMocks.startLoopingSound.mockClear()
+    rerender(
+      <AlertHarness
+        {...waiting}
+        adhdMode
+        adhdSound="blast"
+        phase="play"
+        currentPlayerId="me"
+        localHumanTurn
+      />,
+    )
+
+    await waitFor(() => expect(soundMocks.startLoopingSound).toHaveBeenCalledWith('turn_attention_blast'))
+    expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_attention_beat')
+    expect(soundMocks.stopSound.mock.invocationCallOrder[0]).toBeLessThan(
+      soundMocks.startLoopingSound.mock.invocationCallOrder[0],
+    )
   })
 })

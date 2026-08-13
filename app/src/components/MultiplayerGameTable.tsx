@@ -55,7 +55,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
   const [rematchPending, setRematchPending] = useState(false)
   const rematchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const phase = gameState?.phase
-  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode } = useTurnAlertPreferences()
+  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
   const currentPlayerId = gameState?.players[gameState.currentPlayerIdx]?.id ?? null
   const attentionAlertActive = useTurnAlertController({
     phase: phase ?? room?.phase ?? null,
@@ -268,6 +268,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         onToggleTurnAlerts={toggleTurnAlerts}
         adhdMode={preferences.adhdMode}
         onToggleAdhdMode={toggleAdhdMode}
+        adhdSound={preferences.adhdSound}
+        onSelectAdhdSound={selectAdhdSound}
         attentionAlertActive={attentionAlertActive}
         easterEggEnabled={room.easterEggEnabled}
         onToggleEasterEgg={isHost
