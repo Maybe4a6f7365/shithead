@@ -1,39 +1,22 @@
-Audio asset licenses
-====================
-
-These files were supplied by the project owner from Pixabay Sound Effects and
-are used in the game under the Pixabay Content License. They are royalty-free,
-but they are not represented here as Creative Commons or public-domain works.
-Pixabay permits free use, modification, and use without attribution, subject
-to its prohibited uses (including standalone redistribution).
+Audio asset notices
+===================
 
 These audio files are excluded from the repository's Apache-2.0 software
-license. They may be used only under the Pixabay Content License below. A
-source-code checkout exposes the files for building this game; it does not
-grant permission to extract or redistribute any audio file on its own.
-
-License summary: https://pixabay.com/service/license-summary/
-Full license terms: https://pixabay.com/service/terms/
+license. Each recording is governed by its own notice below. A source-code
+checkout exposes the files for building this game; it does not grant permission
+to extract or redistribute an audio file on its own.
 
 turn-notification.mp3
 ---------------------
-Title: explosion SFX
-Creator shown by Pixabay: Abacagi (Freesound)
-Pixabay contributor account: freesound_community
-Source page: https://pixabay.com/sound-effects/musical-explosion-sfx-43814/
-Published on Pixabay: 2022-06-17
-Supplied filename: freesound_community-explosion-sfx-43814.mp3
-SHA-256: adf8d86bc6e18b80a166e84de3b2ce03f5874f7d302a34eb157e9e735f3752d4
-License: Pixabay Content License
-Attribution: Not required by the license.
-
-attention-blast.mp3
--------------------
-This is the same owner-supplied "explosion SFX" file and provenance recorded
-above, exposed separately as the selectable "Blast" ADHD cue.
-SHA-256: adf8d86bc6e18b80a166e84de3b2ce03f5874f7d302a34eb157e9e735f3752d4
-License: Pixabay Content License
-Attribution: Not required by the license.
+This metadata-stripped, project-owner-supplied chime recording is used for the
+normal turn cue and selectable "Chime" ADHD cue. The project owner states that
+its original is free to use. No standardized license identifier, original
+creator, or primary source was supplied, so this notice records that permission
+without making a broader rights representation.
+SHA-256: 8415fa3399513ad8563102e83d18386782359904b5646b605da38320a0a6dece
+Integration: ID3 and encoder-info metadata were removed without re-encoding;
+the retained compressed MPEG audio packets are byte-for-byte identical to the
+supplied recording.
 
 attention-alert.mp3
 -------------------
@@ -45,5 +28,9 @@ Supplied filename: freesound_community-gabber-82562.mp3
 SHA-256: 4a0376b6d9ce29c0202a1db3bd2107c7a85ff53066e1f92e42716b45befaed70
 License: Pixabay Content License
 Attribution: Not required by the license.
+License summary: https://pixabay.com/service/license-summary/
+Full license terms: https://pixabay.com/service/terms/
 
-The exact project-owner-supplied MP3 bytes were integrated on 2026-08-13.
+The gabber MP3 was integrated exactly as supplied. The chime's compressed MPEG
+audio packets were integrated exactly as supplied after its metadata headers
+were removed. Assets last updated on 2026-08-13.

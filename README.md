@@ -548,19 +548,19 @@ An explicit leave emits a typed table event for the playful departure line. Sepa
 
 The easter egg is enabled by default. Its current status appears in every player's menu, but only the host can change it. Turning it off at any time immediately cancels a not-yet-fired private schedule. Turning it back on during the same round does not roll a replacement mid-round; the next eligible transition into `play` schedules one normally.
 
-The menu exposes session-scoped sensory preferences shared by online and offline tables: **Turn alerts**, **Mute sounds**, **ADHD mode**, and an **ADHD sound** choice. A normal alert plays one short blast cue and a stronger two-pulse vibration when ownership enters the local human player's turn. ADHD mode replaces the one-shot sound with a persistent perimeter-light visualization and lets the player choose the looping **Beat** or **Blast** cue; it stops when the player presses the screen or another non-modifier key. Muting stops audio, including an active loop, without disabling supported phone vibration; the visual ADHD cue can remain. Disabling turn alerts suppresses audio, visuals, and haptics. Every new browser session starts unmuted with turn alerts enabled, ADHD mode disabled, and **Beat** selected; changes last only for the current tab session. Web vibration is best-effort: it requires browser/device support and prior interaction with the page, and unsupported browsers simply omit the haptic cue.
+The menu exposes session-scoped sensory preferences shared by online and offline tables: **Turn alerts**, **Mute sounds**, **ADHD mode**, and an **ADHD sound** choice. A normal alert plays one short chime and a stronger two-pulse vibration when ownership enters the local human player's turn. ADHD mode adds a persistent perimeter-light visualization and lets the player choose a single-play **Beat** or **Chime** cue; neither sound loops, and the visual stops when the player presses the screen or another non-modifier key. Muting suppresses audio without disabling supported phone vibration; the visual ADHD cue can remain. Disabling turn alerts suppresses audio, visuals, and haptics. Every new browser session starts muted with turn alerts enabled, ADHD mode disabled, and **Beat** selected; changes last only for the current tab session. Web vibration is best-effort: it requires browser/device support and prior interaction with the page, and unsupported browsers simply omit the haptic cue.
 
-The bundled MP3s were supplied by the project owner from Pixabay and are used in the game under the [Pixabay Content License](https://pixabay.com/service/license-summary/), which does not require attribution but prohibits standalone redistribution. **Blast** and the normal cue use [explosion SFX by Abacagi (Freesound)](https://pixabay.com/sound-effects/musical-explosion-sfx-43814/); **Beat** uses [gabber by f0rest15 (Freesound)](https://pixabay.com/sound-effects/musical-gabber-82562/). The MP3s are excluded from the repository's Apache-2.0 software license; full provenance, checksums, and asset terms are recorded in `app/public/audio/LICENSE.txt`.
+The two bundled recordings are shared between the normal and ADHD cues. **Beat** uses [gabber by f0rest15 (Freesound)](https://pixabay.com/sound-effects/musical-gabber-82562/) under the [Pixabay Content License](https://pixabay.com/service/license-summary/). The metadata-stripped **Chime** was supplied by the project owner, who states that its original recording is free to use; no standardized license identifier, original creator, or primary source was supplied. The MP3s are excluded from the repository's Apache-2.0 software license; full provenance, checksums, and asset notices are recorded in `app/public/audio/LICENSE.txt`.
 
 ## Browser storage, privacy, and offline behavior
 
 | Storage | Contents | Lifecycle |
 |---|---|---|
 | `shithead:name` | Last nonempty player name | Reused for later setup |
-| Session Storage: `shithead:sound` | Sound preference | Current tab session; unmuted by default |
+| Session Storage: `shithead:sound` | Sound preference | Current tab session; muted by default |
 | Session Storage: `shithead:turn-alerts` | Turn-alert preference | Current tab session; enabled by default |
 | Session Storage: `shithead:adhd-mode` | Attention-mode preference | Current tab session; disabled by default |
-| Session Storage: `shithead:adhd-sound` | Attention-mode sound (`Beat` or `Blast`) | Current tab session; `Beat` by default |
+| Session Storage: `shithead:adhd-sound` | Attention-mode sound (`Beat` or `Chime`) | Current tab session; `Beat` by default |
 | `shithead:session` | Room code, player ID, resume token, player name | Replaced on `WELCOME`; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
 | Workbox Cache Storage | Versioned static app-shell files | Managed and cleaned by the generated service worker |
 | Offline match | Zustand memory only | Lost on refresh |
@@ -791,6 +791,6 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 
 Application code is licensed under Apache License 2.0. See [`LICENSE`](LICENSE).
 
-The two files under `app/public/audio/` are separately licensed under the Pixabay Content License and are not Apache-2.0 assets. See [`app/public/audio/LICENSE.txt`](app/public/audio/LICENSE.txt).
+The audio files under `app/public/audio/` are separately licensed or supplied under the permission recorded in their asset notice; they are not Apache-2.0 assets. See [`app/public/audio/LICENSE.txt`](app/public/audio/LICENSE.txt).
 
 The selected reaction artwork comes from [Microsoft Fluent Emoji](https://github.com/microsoft/fluentui-emoji) commit `62ecdc0d7ca5c6df32148c169556bc8d3782fca4` under the MIT License. The required license text ships with the assets at [`app/public/reactions/LICENSE.txt`](app/public/reactions/LICENSE.txt).

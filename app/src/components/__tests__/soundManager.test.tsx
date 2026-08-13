@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import type { GameState } from '../../engine'
-import { setSoundHandler, useSoundFromLog } from '../soundManager'
+import { setSoundHandler, setSoundMuted, useSoundFromLog } from '../soundManager'
 
 function state(seq: number, log: GameState['log']): GameState {
   return {
@@ -18,8 +18,13 @@ function Harness({ value, enabled }: { value: GameState; enabled: boolean }) {
   return null
 }
 
+beforeEach(() => {
+  setSoundMuted(false)
+})
+
 afterEach(() => {
   cleanup()
+  setSoundMuted(true)
   setSoundHandler(() => {})
   vi.useRealTimers()
 })

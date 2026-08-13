@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Phase } from '../engine'
 import {
-  emitSoundDebounced,
+  emitSound,
   setSoundMuted,
   soundNameForAdhdAlert,
-  startLoopingSound,
   stopSound,
   type AdhdAlertSound,
   type SoundName,
@@ -23,7 +22,7 @@ export interface TurnAlertPreferences {
 }
 
 const DEFAULT_PREFERENCES: TurnAlertPreferences = {
-  soundOn: true,
+  soundOn: false,
   turnAlertsEnabled: true,
   adhdMode: false,
   adhdSound: 'beat',
@@ -40,11 +39,13 @@ function browserStorage(): Storage | null {
 export function loadTurnAlertPreferences(storage: Pick<Storage, 'getItem'> | null = browserStorage()): TurnAlertPreferences {
   if (!storage) return { ...DEFAULT_PREFERENCES }
   try {
+    const storedAdhdSound = storage.getItem(ADHD_SOUND_KEY)
     return {
-      soundOn: storage.getItem(SOUND_KEY) !== 'off',
+      soundOn: storage.getItem(SOUND_KEY) === 'on',
       turnAlertsEnabled: storage.getItem(TURN_ALERTS_KEY) !== 'off',
       adhdMode: storage.getItem(ADHD_MODE_KEY) === 'on',
-      adhdSound: storage.getItem(ADHD_SOUND_KEY) === 'blast' ? 'blast' : 'beat',
+      // Preserve the user's former second-option choice across the rename.
+      adhdSound: storedAdhdSound === 'chime' || storedAdhdSound === 'blast' ? 'chime' : 'beat',
     }
   } catch {
     return { ...DEFAULT_PREFERENCES }
@@ -137,7 +138,7 @@ export function shouldStartTurnAlert(previous: TurnSnapshot | null, next: TurnSn
   return previous.currentPlayerId !== null && previous.currentPlayerId !== next.currentPlayerId
 }
 
-/** Owns one-shot and persistent attention feedback at wrapper lifetime. */
+/** Owns one-shot sensory cues and the persistent attention visual. */
 export function useTurnAlertController({
   phase,
   currentPlayerId,
@@ -176,17 +177,27 @@ export function useTurnAlertController({
 
     if (adhdMode) {
       setAttentionActive(true)
+      if (soundOn) {
+        const sound = soundNameForAdhdAlert(adhdSound)
+        activeAttentionSound.current = sound
+        emitSound(sound)
+      }
       vibrate([120, 80, 120])
     } else {
       // Haptics are a turn alert, not audio: muting sound must not suppress
       // vibration on browsers that support the Vibration API.
-      if (soundOn) emitSoundDebounced('turn_yours')
+      if (soundOn) emitSound('turn_yours')
       vibrate([80, 45, 80])
     }
-  }, [adhdMode, currentPlayerId, dismissAttention, localHumanTurn, phase, soundOn, turnAlertsEnabled])
+  }, [adhdMode, adhdSound, currentPlayerId, dismissAttention, localHumanTurn, phase, soundOn, turnAlertsEnabled])
 
   useEffect(() => {
-    if (!turnAlertsEnabled || !adhdMode) dismissAttention()
+    if (!turnAlertsEnabled) {
+      dismissAttention()
+      stopSound('turn_yours')
+    } else if (!adhdMode) {
+      dismissAttention()
+    }
   }, [adhdMode, dismissAttention, turnAlertsEnabled])
 
   useEffect(() => {
@@ -194,15 +205,8 @@ export function useTurnAlertController({
       stopSound('turn_yours')
       if (activeAttentionSound.current) stopSound(activeAttentionSound.current)
       activeAttentionSound.current = null
-    } else if (attentionActive && turnAlertsEnabled && adhdMode) {
-      const nextSound = soundNameForAdhdAlert(adhdSound)
-      if (activeAttentionSound.current && activeAttentionSound.current !== nextSound) {
-        stopSound(activeAttentionSound.current)
-      }
-      activeAttentionSound.current = nextSound
-      startLoopingSound(nextSound)
     }
-  }, [adhdMode, adhdSound, attentionActive, soundOn, turnAlertsEnabled])
+  }, [soundOn])
 
   useEffect(() => {
     if (!attentionActive) return
@@ -237,11 +241,11 @@ export function TurnAttentionBeacon({ active }: { active: boolean }) {
       <div className="turn-attention-beacon" data-testid="turn-attention-beacon" aria-hidden="true">
         <div className="turn-attention-beacon__label">
           <strong>Your turn</strong>
-          <span>Tap anywhere to silence</span>
+          <span>Tap anywhere to dismiss</span>
         </div>
       </div>
       <span className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
-        Your turn. Tap anywhere or press any key to stop the attention alert.
+        Your turn. Tap anywhere or press any key to dismiss the attention alert.
       </span>
     </>
   )

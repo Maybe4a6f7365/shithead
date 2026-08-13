@@ -9,35 +9,35 @@ import { latestActionEvents } from './feedText'
 
 export type SoundName =
   | 'deal' | 'select' | 'deselect' | 'play' | 'play_multi' | 'draw' | 'pickup'
-  | 'burn' | 'turn_yours' | 'turn_attention_beat' | 'turn_attention_blast'
+  | 'burn' | 'turn_yours' | 'turn_attention_beat' | 'turn_attention_chime'
   | 'invalid' | 'round_end' | 'reconnect_restored'
   | 'player_joined' | 'player_left'
 
-export type AdhdAlertSound = 'beat' | 'blast'
+export type AdhdAlertSound = 'beat' | 'chime'
 
 export function soundNameForAdhdAlert(sound: AdhdAlertSound): SoundName {
-  return sound === 'blast' ? 'turn_attention_blast' : 'turn_attention_beat'
+  return sound === 'chime' ? 'turn_attention_chime' : 'turn_attention_beat'
 }
 
 export type SoundHandler = (name: SoundName) => void
 
 let handler: SoundHandler = () => {}
-let muted = false
+// Audio stays gated until the session preference effect explicitly enables it.
+let muted = true
 
 const browserAudioAssets: Partial<Record<SoundName, { src: string; volume: number }>> = {
-  // The short explosion cue is already mastered close to full scale.
+  // The short chime is shared by the standard alert and ADHD Chime option.
   turn_yours: { src: '/audio/turn-notification.mp3', volume: 0.55 },
-  // The gabber cue is sustained and peaks at full scale. Keep the looping
-  // attention alarm well below the one-shot notification.
+  // The gabber cue is sustained and peaks at full scale. Keep its one-shot
+  // playback well below the short notification.
   turn_attention_beat: { src: '/audio/attention-alert.mp3', volume: 0.25 },
-  // The compact blast repeats much more frequently than the beat when looped,
-  // so keep this deliberately restrained as an attention-mode alternative.
-  turn_attention_blast: { src: '/audio/attention-blast.mp3', volume: 0.22 },
+  turn_attention_chime: { src: '/audio/turn-notification.mp3', volume: 0.55 },
 }
 
 type BrowserAudioRecord = {
   element: HTMLAudioElement
   active: boolean
+  playId: number
 }
 
 const browserAudio = new Map<SoundName, BrowserAudioRecord>()
@@ -65,31 +65,35 @@ function getBrowserAudio(name: SoundName): BrowserAudioRecord | null {
   const element = new Audio(asset.src)
   element.preload = 'auto'
   element.volume = asset.volume
-  const record: BrowserAudioRecord = { element, active: false }
+  const record: BrowserAudioRecord = { element, active: false, playId: 0 }
   element.addEventListener('ended', () => {
-    if (!element.loop) record.active = false
+    record.active = false
   })
   browserAudio.set(name, record)
   return record
 }
 
 function safelyPlay(record: BrowserAudioRecord) {
+  const playId = ++record.playId
   record.active = true
+  // Every app sound is a one-shot. Keeping this invariant next to play()
+  // prevents a reused media element from retaining an outside loop setting.
+  record.element.loop = false
   try {
     const result = record.element.play()
     void Promise.resolve(result).catch(() => {
-      record.active = false
-      record.element.loop = false
+      // A rejected promise from an older attempt must not mark a newer replay
+      // inactive and make it impossible to stop.
+      if (record.playId === playId) record.active = false
     })
   } catch {
     // Browser autoplay policies and incomplete media support may reject or
     // synchronously throw. A missed cue must never break the game UI.
-    record.active = false
-    record.element.loop = false
+    if (record.playId === playId) record.active = false
   }
 }
 
-function playBrowserSound(name: SoundName, loop: boolean) {
+function playBrowserSound(name: SoundName) {
   const record = getBrowserAudio(name)
   if (!record) return
 
@@ -97,7 +101,7 @@ function playBrowserSound(name: SoundName, loop: boolean) {
     try { record.element.pause() } catch { /* best-effort reset */ }
   }
   record.active = false
-  record.element.loop = loop
+  record.element.loop = false
   try { record.element.currentTime = 0 } catch { /* metadata may not be ready */ }
   safelyPlay(record)
 }
@@ -105,13 +109,7 @@ function playBrowserSound(name: SoundName, loop: boolean) {
 /** Install the asset-backed browser handler. Safe to call more than once. */
 export function installBrowserAudioBackend() {
   if (typeof Audio === 'undefined') return
-  setSoundHandler((name) => playBrowserSound(name, false))
-}
-
-/** Start a mapped sound continuously until stopSound() is called. */
-export function startLoopingSound(name: SoundName) {
-  if (muted) return
-  playBrowserSound(name, true)
+  setSoundHandler(playBrowserSound)
 }
 
 /** Stop one mapped sound, or every active sound when no name is supplied. */
@@ -122,6 +120,7 @@ export function stopSound(name?: SoundName) {
 
   for (const record of records) {
     if (!record.active && !record.element.loop) continue
+    record.playId += 1
     try { record.element.pause() } catch { /* already stopped/unavailable */ }
     record.active = false
     record.element.loop = false

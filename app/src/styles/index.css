@@ -2288,6 +2288,12 @@
 }
 .icon-button:hover,
 .icon-button[aria-expanded="true"] { background: rgba(241, 229, 199, 0.1); }
+.quiet-menu__popover {
+  max-height: calc(100dvh - 64px - env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .emote-picker,
 .quiet-menu__popover {
   color: var(--color-ink);
