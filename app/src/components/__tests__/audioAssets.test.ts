@@ -18,13 +18,13 @@ function audioBytes(file: string) {
 describe('turn alert audio assets', () => {
   it('ships the expected gabber and metadata-stripped chime recordings', () => {
     expect(readdirSync(audioRoot).filter((file) => file.endsWith('.mp3')).sort()).toEqual([
-      'attention-alert.mp3',
+      'adhd-beat.mp3',
       'turn-notification.mp3',
     ])
     expect(sha256('turn-notification.mp3')).toBe(
       '8415fa3399513ad8563102e83d18386782359904b5646b605da38320a0a6dece',
     )
-    expect(sha256('attention-alert.mp3')).toBe(
+    expect(sha256('adhd-beat.mp3')).toBe(
       '4a0376b6d9ce29c0202a1db3bd2107c7a85ff53066e1f92e42716b45befaed70',
     )
   })

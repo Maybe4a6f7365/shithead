@@ -30,7 +30,7 @@ const browserAudioAssets: Partial<Record<SoundName, { src: string; volume: numbe
   turn_yours: { src: '/audio/turn-notification.mp3', volume: 0.55 },
   // The gabber cue is sustained and peaks at full scale. Keep its one-shot
   // playback well below the short notification.
-  turn_attention_beat: { src: '/audio/attention-alert.mp3', volume: 0.25 },
+  turn_attention_beat: { src: '/audio/adhd-beat.mp3', volume: 0.25 },
   turn_attention_chime: { src: '/audio/turn-notification.mp3', volume: 0.55 },
 }
 

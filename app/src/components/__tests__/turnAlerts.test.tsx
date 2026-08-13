@@ -8,6 +8,7 @@ import {
   useTurnAlertPreferences,
   type TurnAlertControllerOptions,
 } from '../turnAlerts'
+import { QuietMenu } from '../QuietMenu'
 
 const soundMocks = vi.hoisted(() => ({
   emitSound: vi.fn(),
@@ -80,6 +81,38 @@ function PreferenceHarness() {
   )
 }
 
+function IntegratedAlertMenuHarness({
+  phase,
+  currentPlayerId,
+  localHumanTurn,
+}: Pick<TurnAlertControllerOptions, 'phase' | 'currentPlayerId' | 'localHumanTurn'>) {
+  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
+  const active = useTurnAlertController({
+    phase,
+    currentPlayerId,
+    localHumanTurn,
+    ...preferences,
+  })
+  return (
+    <div className="game-screen">
+      <TurnAttentionBeacon active={active} />
+      <QuietMenu
+        onOpenRules={vi.fn()}
+        soundOn={preferences.soundOn}
+        onToggleSound={toggleSound}
+        turnAlertsEnabled={preferences.turnAlertsEnabled}
+        onToggleTurnAlerts={toggleTurnAlerts}
+        adhdMode={preferences.adhdMode}
+        onToggleAdhdMode={toggleAdhdMode}
+        adhdSound={preferences.adhdSound}
+        onSelectAdhdSound={selectAdhdSound}
+        onLeave={vi.fn()}
+        matchRunning
+      />
+    </div>
+  )
+}
+
 describe('turn alert preferences', () => {
   it('starts a fresh session muted with turn alerts on and ADHD mode off', async () => {
     // Stale preferences from an older app version must not leak into a new
@@ -135,6 +168,51 @@ describe('turn alert preferences', () => {
     expect(sessionStorage.getItem('shithead:adhd-mode')).toBe('on')
     expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('chime')
     await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(false))
+  })
+
+  it('keeps previews silent while muted but still saves either selection', () => {
+    render(<PreferenceHarness />)
+    fireEvent.click(screen.getByRole('button', { name: 'ADHD sound beat' }))
+    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('chime')
+    fireEvent.click(screen.getByRole('button', { name: 'ADHD sound chime' }))
+    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('beat')
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+  })
+
+  it('switches Chime back to Beat, previews gabber once, and uses it on the next ADHD turn', async () => {
+    sessionStorage.setItem('shithead:sound', 'on')
+    sessionStorage.setItem('shithead:adhd-mode', 'on')
+    const { rerender } = render(
+      <IntegratedAlertMenuHarness phase="waiting" currentPlayerId={null} localHumanTurn={false} />,
+    )
+    await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(false))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
+    soundMocks.emitSound.mockClear()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'ADHD sound: Chime' }))
+    await waitFor(() => {
+      expect(screen.getByRole('menuitemradio', { name: 'ADHD sound: Chime' }).getAttribute('aria-checked')).toBe('true')
+    })
+    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('chime')
+    expect(soundMocks.emitSound).toHaveBeenCalledTimes(1)
+    expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_attention_chime')
+
+    soundMocks.emitSound.mockClear()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'ADHD sound: Beat' }))
+    await waitFor(() => {
+      expect(screen.getByRole('menuitemradio', { name: 'ADHD sound: Beat' }).getAttribute('aria-checked')).toBe('true')
+    })
+    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('beat')
+    expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_yours')
+    expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_attention_chime')
+    expect(soundMocks.emitSound).toHaveBeenCalledTimes(1)
+    expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_attention_beat')
+
+    soundMocks.emitSound.mockClear()
+    rerender(<IntegratedAlertMenuHarness phase="play" currentPlayerId="other" localHumanTurn={false} />)
+    rerender(<IntegratedAlertMenuHarness phase="play" currentPlayerId="me" localHumanTurn />)
+    await waitFor(() => expect(soundMocks.emitSound).toHaveBeenCalledTimes(1))
+    expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_attention_beat')
   })
 })
 

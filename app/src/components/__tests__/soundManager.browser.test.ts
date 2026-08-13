@@ -69,7 +69,7 @@ describe('browser audio backend', () => {
 
     emitSound('turn_attention_beat')
     const audio = AudioStub.instances[0]
-    expect(audio.src).toBe('/audio/attention-alert.mp3')
+    expect(audio.src).toBe('/audio/adhd-beat.mp3')
     expect(audio.loop).toBe(false)
     expect(audio.volume).toBe(0.25)
     expect(audio.play).toHaveBeenCalledOnce()
@@ -84,6 +84,11 @@ describe('browser audio backend', () => {
     expect(AudioStub.instances[1].src).toBe('/audio/turn-notification.mp3')
     expect(AudioStub.instances[1].volume).toBe(0.55)
     expect(AudioStub.instances[1].loop).toBe(false)
+
+    emitSound('turn_attention_beat')
+    expect(audio.src).toBe('/audio/adhd-beat.mp3')
+    expect(audio.play).toHaveBeenCalledTimes(2)
+    expect(audio.loop).toBe(false)
   })
 
   it('swallows rejected and synchronous play failures', async () => {

@@ -212,7 +212,7 @@ export function QuietMenu({
           </button>
           {onSelectAdhdSound && (
             <div role="group" aria-label="ADHD sound">
-              <div className="quiet-menu__subhead" aria-hidden="true">ADHD sound</div>
+              <div className="quiet-menu__subhead" aria-hidden="true">ADHD sound · select to preview</div>
               {(['beat', 'chime'] as const).map((sound) => {
                 const label = sound === 'beat' ? 'Beat' : 'Chime'
                 return (

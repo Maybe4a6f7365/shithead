@@ -63,10 +63,28 @@ function persistValue(key: string, value: string): void {
 /** Shared sensory preferences for this browser tab's current play session. */
 export function useTurnAlertPreferences() {
   const [preferences, setPreferences] = useState(loadTurnAlertPreferences)
+  const [previewSound, setPreviewSound] = useState<SoundName | null>(null)
 
   useEffect(() => {
     setSoundMuted(!preferences.soundOn)
+    if (!preferences.soundOn) setPreviewSound(null)
   }, [preferences.soundOn])
+
+  useEffect(() => {
+    if (!previewSound) return
+    const dismissPointer = () => setPreviewSound(null)
+    const dismissKey = (event: KeyboardEvent) => {
+      if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'NumLock', 'ScrollLock'].includes(event.key)) return
+      setPreviewSound(null)
+    }
+    document.addEventListener('pointerdown', dismissPointer, true)
+    document.addEventListener('keydown', dismissKey, true)
+    return () => {
+      document.removeEventListener('pointerdown', dismissPointer, true)
+      document.removeEventListener('keydown', dismissKey, true)
+      stopSound(previewSound)
+    }
+  }, [previewSound])
 
   const toggleSound = useCallback(() => {
     setPreferences(current => {
@@ -95,7 +113,19 @@ export function useTurnAlertPreferences() {
   const selectAdhdSound = useCallback((adhdSound: AdhdAlertSound) => {
     persistValue(ADHD_SOUND_KEY, adhdSound)
     setPreferences(current => ({ ...current, adhdSound }))
-  }, [])
+    // Make both directions immediately verifiable. A selection is a single,
+    // user-initiated preview and never changes the automatic one-play-per-turn
+    // behavior. Stop either previous sample before starting the new choice.
+    stopSound('turn_yours')
+    stopSound('turn_attention_beat')
+    stopSound('turn_attention_chime')
+    setPreviewSound(null)
+    if (preferences.soundOn) {
+      const sound = soundNameForAdhdAlert(adhdSound)
+      emitSound(sound)
+      setPreviewSound(sound)
+    }
+  }, [preferences.soundOn])
 
   return { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound }
 }
@@ -150,12 +180,13 @@ export function useTurnAlertController({
 }: TurnAlertControllerOptions): boolean {
   const [attentionActive, setAttentionActive] = useState(false)
   const previous = useRef<TurnSnapshot | null>(null)
-  const activeAttentionSound = useRef<SoundName | null>(null)
+  const selectedAdhdSound = useRef(adhdSound)
+  selectedAdhdSound.current = adhdSound
 
   const dismissAttention = useCallback(() => {
     setAttentionActive(false)
-    if (activeAttentionSound.current) stopSound(activeAttentionSound.current)
-    activeAttentionSound.current = null
+    stopSound('turn_attention_beat')
+    stopSound('turn_attention_chime')
     vibrate(0)
   }, [])
 
@@ -178,8 +209,7 @@ export function useTurnAlertController({
     if (adhdMode) {
       setAttentionActive(true)
       if (soundOn) {
-        const sound = soundNameForAdhdAlert(adhdSound)
-        activeAttentionSound.current = sound
+        const sound = soundNameForAdhdAlert(selectedAdhdSound.current)
         emitSound(sound)
       }
       vibrate([120, 80, 120])
@@ -189,7 +219,7 @@ export function useTurnAlertController({
       if (soundOn) emitSound('turn_yours')
       vibrate([80, 45, 80])
     }
-  }, [adhdMode, adhdSound, currentPlayerId, dismissAttention, localHumanTurn, phase, soundOn, turnAlertsEnabled])
+  }, [adhdMode, currentPlayerId, dismissAttention, localHumanTurn, phase, soundOn, turnAlertsEnabled])
 
   useEffect(() => {
     if (!turnAlertsEnabled) {
@@ -203,8 +233,8 @@ export function useTurnAlertController({
   useEffect(() => {
     if (!soundOn) {
       stopSound('turn_yours')
-      if (activeAttentionSound.current) stopSound(activeAttentionSound.current)
-      activeAttentionSound.current = null
+      stopSound('turn_attention_beat')
+      stopSound('turn_attention_chime')
     }
   }, [soundOn])
 
@@ -224,8 +254,8 @@ export function useTurnAlertController({
   }, [attentionActive, dismissAttention])
 
   useEffect(() => () => {
-    if (activeAttentionSound.current) stopSound(activeAttentionSound.current)
-    activeAttentionSound.current = null
+    stopSound('turn_attention_beat')
+    stopSound('turn_attention_chime')
     stopSound('turn_yours')
     vibrate(0)
   }, [])
