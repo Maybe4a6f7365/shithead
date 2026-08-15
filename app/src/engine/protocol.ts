@@ -103,6 +103,7 @@ export const BROADCAST_IDS = [
   'shrug',
   'womp-womp',
   'kill-me',
+  'take-it',
 ] as const
 export type BroadcastId = typeof BROADCAST_IDS[number]
 

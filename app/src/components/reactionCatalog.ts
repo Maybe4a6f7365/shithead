@@ -71,6 +71,7 @@ export const BROADCAST_OPTIONS: readonly BroadcastOption[] = [
   { id: 'shrug', text: '¯\\_(ツ)_/¯', label: 'Shrug' },
   { id: 'womp-womp', text: '𝖜𝖔𝖒𝖕 𝖜𝖔𝖒𝖕', label: 'Womp womp' },
   { id: 'kill-me', text: '𝓴𝓲𝓵𝓵 𝓶𝒆', label: 'Kill me' },
+  { id: 'take-it', text: 'Take it.', label: 'Take it' },
 ] as const
 
 export const BROADCAST_BY_ID = Object.fromEntries(

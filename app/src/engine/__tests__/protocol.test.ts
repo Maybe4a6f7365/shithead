@@ -101,9 +101,9 @@ describe('isClientMsg', () => {
     expect(new Set(EMOTE_IDS).size).toBe(28)
     expect(BROADCAST_IDS).toEqual([
       'double-middle-finger', 'kiss-my-ass', 'upside-down-fuck', 'lenny',
-      'karma', 'shrug', 'womp-womp', 'kill-me',
+      'karma', 'shrug', 'womp-womp', 'kill-me', 'take-it',
     ])
-    expect(new Set(BROADCAST_IDS).size).toBe(8)
+    expect(new Set(BROADCAST_IDS).size).toBe(9)
     expect(PLAYER_LEFT_MESSAGE_IDS).toEqual(['bye-little-shits'])
     expect(ONDRA_MESSAGE_IDS).toEqual([
       'ondra-faster', 'ondra-love-toes', 'ondra-fuck-me',
