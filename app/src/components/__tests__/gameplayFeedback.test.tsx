@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { pickUpPile, type Card, type GameEvent, type GameState, type Player } from '../../engine'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { Card, GameEvent, GameState, Player } from '../../engine'
 import { ActionBar } from '../ActionBar'
 import { EmoteButton } from '../EmoteButton'
 import { specialEffectFromEvents } from '../SpecialEffectFeedback'
@@ -129,63 +129,10 @@ describe('quick matching draw action', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /continue the normal turn/i }))
     expect(screen.queryByRole('button', { name: /play the drawn 8/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /^take it\.$/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^pick up$/i })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /9 of clubs, playable/i }))
     expect(screen.getByRole('button', { name: /play 1 selected card/i })).toBeTruthy()
-  })
-})
-
-describe('Take it pickup feedback', () => {
-  const pickupState = (): GameState => ({
-    phase: 'play', rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
-    players: [
-      { id: 'me', name: 'Me', hand: [{ id: 'mine', rank: '4', suit: '♣' }], faceUp: [], faceDown: [], isOut: false },
-      { id: 'other', name: 'Other', hand: [{ id: 'theirs', rank: '5', suit: '♠' }], faceUp: [], faceDown: [], isOut: false },
-    ],
-    stock: [], pile: [{ cards: [{ id: 'pile', rank: '9', suit: '♥' }], cleared: false }],
-    currentPlayerIdx: 0, playDirection: 1, turnCount: 2,
-    winnerId: null, loserId: null, pendingTribute: null, pendingQuickFollowUp: null,
-    log: [], seq: 2,
-  })
-
-  it('uses the engine pickup result for the button, toast, and polite announcement', () => {
-    vi.useFakeTimers()
-    localStorage.removeItem('shithead:feature:take-it')
-    const before = pickupState()
-    const onPickUp = vi.fn()
-    const props = {
-      viewerId: 'me', viewerActive: true, onPlay: vi.fn(), onPickUp,
-      onLeave: vi.fn(), onOpenRules: vi.fn(), soundOn: false, onToggleSound: vi.fn(),
-    }
-    const view = render(<TableScreen state={before} {...props} />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Take it.' }))
-    expect(onPickUp).toHaveBeenCalledTimes(1)
-
-    const accepted = pickUpPile(before, 'me')
-    expect(accepted.error).toBeUndefined()
-    view.rerender(<TableScreen state={accepted.state} {...props} viewerActive={false} />)
-
-    expect(document.querySelector('.take-it-toast')?.textContent).toBe('Take it.')
-    act(() => { vi.advanceTimersByTime(1000) })
-    expect(document.querySelector('#announcer')?.textContent).toContain('Take it.')
-    expect(document.querySelector('.take-it-toast')?.textContent).toBe('Take it.')
-    act(() => { vi.advanceTimersByTime(500) })
-    expect(document.querySelector('.take-it-toast')).toBeNull()
-    vi.useRealTimers()
-  })
-
-  it('falls back to the existing pickup copy when the runtime flag is off', () => {
-    localStorage.setItem('shithead:feature:take-it', 'off')
-    render(
-      <TableScreen
-        state={pickupState()} viewerId="me" viewerActive onPlay={vi.fn()} onPickUp={vi.fn()}
-        onLeave={vi.fn()} onOpenRules={vi.fn()} soundOn={false} onToggleSound={vi.fn()}
-      />,
-    )
-    expect(screen.getByRole('button', { name: 'Pick up' })).toBeTruthy()
-    localStorage.removeItem('shithead:feature:take-it')
   })
 })
 

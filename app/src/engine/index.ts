@@ -1003,16 +1003,6 @@ export function interruptBurn(state: GameState, playerId: string, cards: Card[])
   return { state: applyAcceptedPlay(state, actorIdx, realCards, zone, true, 'interrupt') }
 }
 
-/** True when this player can submit the existing, authoritative pile pickup. */
-export function canPickUpPile(state: GameState, playerId: string): boolean {
-  if (state.phase !== 'play' && state.phase !== 'endgame') return false
-  const player = state.players[state.currentPlayerIdx]
-  return Boolean(
-    player && player.id === playerId && !player.isOut &&
-    state.pile.some(entry => !entry.cleared),
-  )
-}
-
 export function pickUpPile(state: GameState, playerId: string): PlayResult {
   // Phase guard (D8): pickup is only a play-phase action. Without this it was
   // abusable during rearrange (free stock draws) and gameOver (infinite loop).

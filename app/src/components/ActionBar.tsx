@@ -11,7 +11,6 @@ export interface ActionBarProps {
   pickupArmed: boolean
   onPlay: () => void
   onPickUp: () => void
-  takeItEnabled?: boolean
   burnIn?: { count: number; rank: string }
   onBurnIn?: () => void
   quickFollowUp?: { count: number; rank: string }
@@ -21,7 +20,7 @@ export interface ActionBarProps {
 }
 
 export function ActionBar({
-  selectionCount, canPickUp, pickupArmed, onPlay, onPickUp, takeItEnabled = false,
+  selectionCount, canPickUp, pickupArmed, onPlay, onPickUp,
   burnIn, onBurnIn, quickFollowUp, onQuickFollowUp,
   onDismissQuickFollowUp, dismissQuickFollowUpLabel = 'Normal turn',
 }: ActionBarProps) {
@@ -107,12 +106,9 @@ export function ActionBar({
               pickupArmed ? 'text-gold-bright bg-[var(--color-teal-soft)] rounded-button' : 'text-cream/80',
             )}
             data-armed={pickupArmed ? 'true' : 'false'}
-            aria-label={pickupArmed
-              ? `${takeItEnabled ? 'Take it.' : 'Pick up'} Tap again to confirm`
-              : takeItEnabled ? 'Take it.' : 'Pick up'}
           >
             <span className="action-button__content">
-              <span className="action-button__label">{takeItEnabled ? 'Take it.' : 'Pick up'}</span>
+              <span className="action-button__label">Pick up</span>
               {pickupArmed && <span className="action-button__meta">Tap again to confirm</span>}
             </span>
           </button>
@@ -124,9 +120,8 @@ export function ActionBar({
             onClick={onPickUp}
             disabled={!canPickUp}
             className="action-button action-button--secondary secondary-action min-w-[96px] px-s4 text-button font-bold tracking-button uppercase text-cream/80 disabled:opacity-40"
-            aria-label={takeItEnabled ? 'Take it.' : 'Pick up'}
           >
-            <span className="action-button__label">{takeItEnabled ? 'Take it.' : 'Pick up'}</span>
+            <span className="action-button__label">Pick up</span>
           </button>
           <button
             type="button"

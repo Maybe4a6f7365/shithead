@@ -277,7 +277,7 @@ describe('voluntary pickup', () => {
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: /5 of clubs, playable/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^take it\.$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^pick up$/i }))
     expect(pickUp).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: /^play/i })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /tap again to confirm/i }))
