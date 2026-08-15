@@ -219,7 +219,7 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
                   onClick={() => selectTab('emoji')}
                   data-reaction-focusable="true"
                 >
-                  Emoji <span aria-hidden="true">28</span>
+                  Emoji <span aria-hidden="true">{REACTION_OPTIONS.length}</span>
                 </button>
                 <button
                   ref={textTab}
@@ -232,7 +232,7 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
                   onClick={() => selectTab('text')}
                   data-reaction-focusable="true"
                 >
-                  Text <span aria-hidden="true">8</span>
+                  Text <span aria-hidden="true">{BROADCAST_OPTIONS.length}</span>
                 </button>
               </div>
 
