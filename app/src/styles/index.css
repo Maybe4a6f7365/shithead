@@ -3282,6 +3282,37 @@
   align-items: baseline;
   gap: 6px;
 }
+
+.game-screen .take-it-toast {
+  position: absolute;
+  z-index: 9;
+  left: 50%;
+  top: -30px;
+  transform: translateX(-50%);
+  width: max-content;
+  padding: 6px 12px;
+  border: 1px solid var(--table-line-strong);
+  border-radius: 999px;
+  color: var(--color-cream);
+  background: rgba(6, 25, 18, 0.94);
+  box-shadow: 0 7px 18px rgba(6, 25, 18, 0.26);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  animation: take-it-receipt 1500ms var(--ease-standard) both;
+}
+
+@keyframes take-it-receipt {
+  0% { opacity: 0; transform: translate(-50%, 4px); }
+  12%, 82% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-screen .take-it-toast { animation: none; }
+}
 .game-screen .special-effect-feedback__receipt { display: flex; align-items: baseline; }
 .game-screen .special-effect-feedback__label {
   font-family: var(--font-ui);

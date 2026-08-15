@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutGroup, useReducedMotion } from 'framer-motion'
 import type { Card as CardT, GameState } from '../engine'
-import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
+import { canPickUpPile, canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
 import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
@@ -37,6 +37,8 @@ import type {
 } from '../engine/protocol'
 import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
 import { TurnAttentionBeacon } from './turnAlerts'
+import { takeItFeatureEnabled } from '../featureFlags'
+import { GAME_STRINGS } from './gameStrings'
 
 export interface TableScreenProps {
   state: GameState
@@ -210,6 +212,7 @@ export function TableScreen({
   const [burning, setBurning] = useState(false)
   const [burnSnapshot, setBurnSnapshot] = useState<BurnSnapshot | null>(null)
   const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
+  const [takeItToast, setTakeItToast] = useState<string | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
   const [displayedBroadcast, setDisplayedBroadcast] = useState<BroadcastEvent | null>(null)
   const selectionOwner = useRef(viewerId)
@@ -224,6 +227,7 @@ export function TableScreen({
   const burnGenerationRef = useRef(0)
   const announcer = useAnnouncer()
   const reduceMotion = useReducedMotion()
+  const takeItEnabled = useMemo(takeItFeatureEnabled, [])
 
   const later = (ms: number, fn: () => void) => {
     timers.current.push(setTimeout(fn, ms))
@@ -343,9 +347,14 @@ export function TableScreen({
       }, burnCleanupDelay(reduceMotion))
     }
     setSpecialEffect(specialEffectFromEvents(fresh, cursor, topRank))
+    const pickup = fresh.find(event => event.type === 'PICK_UP_PILE')
     const ctx: FeedContext = { meId: viewerId, players: state.players }
     const line = feedLine(state, ctx)
-    if (line) announcer.sayPolite(line.text)
+    if (takeItEnabled && pickup) {
+      announcer.sayPolite(GAME_STRINGS.takeIt)
+      setTakeItToast(GAME_STRINGS.takeIt)
+      later(1500, () => setTakeItToast(current => current === GAME_STRINGS.takeIt ? null : current))
+    } else if (line) announcer.sayPolite(line.text)
     if (fresh.some(e => e.type === 'GAME_OVER')) {
       const loser = state.players.find(p => p.id === state.loserId)
       announcer.sayPolite(`Round over. ${loser?.name ?? ''} is the Shithead.`)
@@ -499,6 +508,7 @@ export function TableScreen({
     pickupDraftBackup.current = []
     setSelection([])
     setPickupArmed(false)
+    setFlash(null)
   }
 
   const commitBurnIn = () => {
@@ -797,6 +807,9 @@ export function TableScreen({
           data-burn-key={burnSnapshot?.actionKey}
         >
           <SpecialEffectFeedback effect={specialEffect} />
+          {takeItEnabled && takeItToast && (
+            <div className="take-it-toast" role="presentation">{takeItToast}</div>
+          )}
           <PileArea
             stockCount={state.stock.length}
             top={burning && burnSnapshot ? burnSnapshot.top : top}
@@ -844,8 +857,9 @@ export function TableScreen({
           {(viewerActive || canBurnIn || canQuickFollowUp) && (
             <ActionBar
               selectionCount={viewerActive ? effectiveSelection.length : 0}
-              canPickUp={viewerActive && ps > 0}
+              canPickUp={viewerActive && canPickUpPile(state, viewerId)}
               pickupArmed={pickupArmed}
+              takeItEnabled={takeItEnabled}
               onPlay={commitPlay}
               onPickUp={commitPickup}
               quickFollowUp={showQuickFollowUp ? {

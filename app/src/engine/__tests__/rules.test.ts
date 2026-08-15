@@ -2,7 +2,7 @@
 // Rules regression tests — every confirmed audit bug (B1-B15) pinned down
 // ============================================================================
 import { describe, it, expect } from 'vitest'
-import { playCards, pickUpPile, canPlay, getTopCard, getTopRank, pileSize, MAX_GAME_TURNS } from '../index'
+import { playCards, pickUpPile, canPickUpPile, canPlay, getTopCard, getTopRank, pileSize, MAX_GAME_TURNS } from '../index'
 import type { Card } from '../index'
 import { c, mkState } from './helpers'
 
@@ -100,6 +100,17 @@ describe('B2: burning (or playing) with last cards never strands the turn', () =
 })
 
 describe('B3/B8/V1/V2/B13: pickUpPile guards', () => {
+  it('exposes pickup eligibility without changing state', () => {
+    const state = mkState({
+      players: [{ id: 'a', hand: [c('5')] }, { id: 'b', hand: [c('6')] }],
+      pile: [[c('7')]],
+    })
+    expect(canPickUpPile(state, 'a')).toBe(true)
+    expect(canPickUpPile(state, 'b')).toBe(false)
+    expect(canPickUpPile({ ...state, pile: [] }, 'a')).toBe(false)
+    expect(state.pile).toHaveLength(1)
+  })
+
   it('rejected during rearrange phase (no free stock drain)', () => {
     const state = mkState({
       players: [{ id: 'a', hand: hand3('5','6','7') }, { id: 'b', hand: hand3('8','9','J') }],
