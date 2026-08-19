@@ -196,7 +196,7 @@ async function main() {
   const roomId = await newRoom()
   const wsUrl = `${wsBase}/api/room/${roomId}/ws`
   let host = await new Peer('host', wsUrl).connect()
-  const guest = await new Peer('guest', wsUrl).connect()
+  let guest = await new Peer('guest', wsUrl).connect()
 
   host.send({ type: 'CREATE_ROOM', playerName: 'Ondřej', version: PROTOCOL_VERSION })
   const hostWelcome = await host.waitType('WELCOME')
@@ -304,8 +304,20 @@ async function main() {
   // never become passive spectators of room, chat, or game broadcasts.
   const unauthenticated = [noToken, attacker, stale]
   const unauthLogStarts = new Map(unauthenticated.map(peer => [peer, peer.rawLog.length]))
-  host.send({ type: 'CHAT', text: 'authenticated-only' })
-  await guest.waitType('CHAT', message => message.text === 'authenticated-only')
+  host.send({ type: 'CHAT', text: 'extra field', payload: {} })
+  await host.waitType('ERROR', message => /invalid message/i.test(message.message))
+  host.send({ type: 'CHAT', text: '   ' })
+  await host.waitType('ERROR', message => /invalid message/i.test(message.message))
+  host.send({ type: 'CHAT', text: 'not during a game' })
+  await host.waitType('ERROR', isError('INVALID_MOVE'))
+  const hostLogBeforeUnauthChat = host.rawLog.length
+  attacker.send({ type: 'CHAT', text: 'unauthenticated' })
+  await sleep(100)
+  assert(
+    !host.rawLog.slice(hostLogBeforeUnauthChat).some(raw => JSON.parse(raw).type === 'CHAT'),
+    'unauthenticated CHAT was relayed',
+  )
+  ok('T7a CHAT is strict, authenticated, and restricted to active games')
 
   host.send({ type: 'EMOTE', emote: '<script>' })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
@@ -321,7 +333,7 @@ async function main() {
     assert.equal(typeof message.ts, 'number')
     assert(!('state' in message), 'ephemeral EMOTE must not include room/game state')
   }
-  ok('T7a EMOTE is strict, server-timestamped, authenticated, and contains no state')
+  ok('T7aa EMOTE is strict, server-timestamped, authenticated, and contains no state')
 
   const cooldownLogStarts = new Map([host, guest].map(peer => [peer, peer.rawLog.length]))
   host.send({ type: 'BROADCAST', broadcast: 'shrug' })
@@ -354,7 +366,7 @@ async function main() {
     assert.equal(typeof message.ts, 'number')
     assert(!('state' in message), 'ephemeral BROADCAST must not include room/game state')
   }
-  ok('T7aa BROADCAST is strict/authenticated/ephemeral and shares the EMOTE cooldown')
+  ok('T7ab BROADCAST is strict/authenticated/ephemeral and shares the EMOTE cooldown')
 
   // ---- T7b: strict partial rules, host authority, rapid merge
   guest.send({ type: 'SET_RULES', rules: { includeJokers: false } })
@@ -450,6 +462,94 @@ async function main() {
     assert(playIndex >= 0, `${peer.label} did not receive the play GAME_STATE`)
     assert.deepEqual(ondraIndexes, [], 'Ondra event must be delayed beyond the play transition')
   }
+
+  const seqBeforeChat = host.latestGameState.seq
+  host.send({ type: 'CHAT', text: '  Héllo\t<b>table</b> 👋  ' })
+  const [hostChat, guestChat] = await Promise.all([
+    host.waitType('CHAT', message => message.text === 'Héllo <b>table</b> 👋'),
+    guest.waitType('CHAT', message => message.text === 'Héllo <b>table</b> 👋'),
+  ])
+  for (const message of [hostChat, guestChat]) {
+    assert.equal(message.playerId, hostId)
+    assert.equal(message.version, PROTOCOL_VERSION)
+    assert.equal(typeof message.ts, 'number')
+    assert(!('state' in message), 'ephemeral CHAT must not include room/game state')
+  }
+  assert.equal(host.latestGameState.seq, seqBeforeChat, 'ephemeral CHAT mutated game sequence')
+
+  const chatCooldownLogStarts = new Map([host, guest].map(peer => [peer, peer.rawLog.length]))
+  host.send({ type: 'EMOTE', emote: 'fire' })
+  await sleep(100)
+  for (const peer of [host, guest]) {
+    assert(
+      !peer.rawLog.slice(chatCooldownLogStarts.get(peer)).some(raw => JSON.parse(raw).type === 'EMOTE'),
+      'alternating CHAT/EMOTE bypassed the shared reaction cooldown',
+    )
+  }
+
+  const hostLogBeforeActiveUnauthChat = host.rawLog.length
+  attacker.send({ type: 'CHAT', text: 'unauthenticated during play' })
+  await sleep(100)
+  assert(
+    !host.rawLog.slice(hostLogBeforeActiveUnauthChat).some(raw => JSON.parse(raw).type === 'CHAT'),
+    'unauthenticated active-game CHAT was relayed',
+  )
+
+  guest.send({ type: 'CHAT', text: 'guest burst 1' })
+  const firstGuestBurst = await host.waitType(
+    'CHAT', message => message.playerId === guestId && message.text === 'guest burst 1',
+  )
+  await guest.close()
+  await host.waitType('ROOM_STATE', message =>
+    message.room.players.find(player => player.id === guestId)?.connected === false
+  )
+  guest = await new Peer('guest-resumed-after-chat-burst', wsUrl).connect()
+  guest.send({
+    type: 'RESUME_ROOM',
+    roomCode: roomId,
+    playerId: guestId,
+    resumeToken: guestWelcome.resumeToken,
+  })
+  const guestAfterBurstResume = await guest.waitType('WELCOME')
+  assert.equal(guestAfterBurstResume.playerId, guestId)
+
+  // A new socket must not reset the shared custom/emoji/preset cooldown.
+  const hostLogBeforeResumedEmote = host.rawLog.length
+  guest.send({ type: 'EMOTE', emote: 'salute' })
+  await sleep(100)
+  assert(
+    !host.rawLog.slice(hostLogBeforeResumedEmote).some(raw => {
+      const message = JSON.parse(raw)
+      return message.type === 'EMOTE' && message.playerId === guestId && message.emote === 'salute'
+    }),
+    'socket resume reset the stable-player reaction cooldown',
+  )
+  await sleep(Math.max(0, firstGuestBurst.ts + 750 - Date.now()))
+  for (let index = 2; index <= 3; index++) {
+    guest.send({ type: 'CHAT', text: `guest burst ${index}` })
+    await host.waitType('CHAT', message => message.playerId === guestId && message.text === `guest burst ${index}`)
+    await sleep(750)
+  }
+
+  const hostLogBeforeFourthChat = host.rawLog.length
+  guest.send({ type: 'CHAT', text: 'guest burst 4' })
+  const chatRateLimit = await guest.waitType('ERROR', isError('RATE_LIMITED'))
+  assert.match(chatRateLimit.message, /limited to 3 every 10 seconds/i)
+  await sleep(100)
+  assert(
+    !host.rawLog.slice(hostLogBeforeFourthChat).some(raw => {
+      const message = JSON.parse(raw)
+      return message.type === 'CHAT' && message.text === 'guest burst 4'
+    }),
+    'fourth custom message in the rolling window was relayed',
+  )
+  guest.send({ type: 'EMOTE', emote: 'salute' })
+  await host.waitType('EMOTE', message => message.playerId === guestId && message.emote === 'salute')
+  host.send({ type: 'CHAT', text: 'other player still allowed' })
+  await guest.waitType('CHAT', message => message.playerId === hostId && message.text === 'other player still allowed')
+  assert.equal(host.latestGameState.seq, seqBeforeChat, 'custom messages or reactions mutated game state')
+  ok('T8-chat active-game CHAT is canonical/ephemeral, reconnect-safe, per-player, and limited to 3 per 10 seconds')
+
   const playState = hostPlay.state
   const currentId = playState.players[playState.currentPlayerIdx].id
   const [current, idle] = currentId === hostId ? [host, guest] : [guest, host]

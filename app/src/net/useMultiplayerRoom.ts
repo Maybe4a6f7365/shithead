@@ -13,7 +13,7 @@
 // ============================================================================
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
-  BroadcastEvent, BroadcastId, ClientMsg, EmoteEvent, EmoteId, RoomSummary, ServerMsg, SystemEvent,
+  BroadcastEvent, BroadcastId, ChatEvent, ClientMsg, EmoteEvent, EmoteId, RoomSummary, ServerMsg, SystemEvent,
 } from '../engine/protocol'
 import type { GameState } from '../engine'
 import { RoomClient, buildRoomWSUrl, getDefaultServerURL } from './RoomClient'
@@ -115,6 +115,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const [notice, setNotice] = useState<string | null>(null) // in-game rejections → feed
   const [latestEmote, setLatestEmote] = useState<EmoteEvent | null>(null)
   const [latestBroadcast, setLatestBroadcast] = useState<BroadcastEvent | null>(null)
+  const [latestChat, setLatestChat] = useState<ChatEvent | null>(null)
   const [latestSystemEvent, setLatestSystemEvent] = useState<SystemEvent | null>(null)
   const clientRef = useRef<RoomClient | null>(null)
   const lastSeqRef = useRef<number | null>(null)
@@ -125,6 +126,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const emoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const broadcastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const chatTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const systemEventTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -139,6 +141,9 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     if (broadcastTimer.current) clearTimeout(broadcastTimer.current)
     broadcastTimer.current = null
     setLatestBroadcast(null)
+    if (chatTimer.current) clearTimeout(chatTimer.current)
+    chatTimer.current = null
+    setLatestChat(null)
     if (systemEventTimer.current) clearTimeout(systemEventTimer.current)
     systemEventTimer.current = null
     setLatestSystemEvent(null)
@@ -329,6 +334,26 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
             }, 3500)
             break
           }
+          case 'CHAT': {
+            const received: ChatEvent = {
+              playerId: message.playerId,
+              text: message.text,
+              ts: message.ts,
+            }
+            if (chatTimer.current) clearTimeout(chatTimer.current)
+            setLatestChat(received)
+            chatTimer.current = setTimeout(() => {
+              chatTimer.current = null
+              setLatestChat(current => (
+                current?.playerId === received.playerId &&
+                current.text === received.text &&
+                current.ts === received.ts
+                  ? null
+                  : current
+              ))
+            }, 3500)
+            break
+          }
           case 'SYSTEM_EVENT': {
             const received = message.event
             if (systemEventTimer.current) clearTimeout(systemEventTimer.current)
@@ -356,6 +381,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
       if (emoteTimer.current) clearTimeout(emoteTimer.current)
       if (broadcastTimer.current) clearTimeout(broadcastTimer.current)
+      if (chatTimer.current) clearTimeout(chatTimer.current)
       if (systemEventTimer.current) clearTimeout(systemEventTimer.current)
       client.close()
       clientRef.current = null
@@ -363,15 +389,19 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   }, [roomId, playerName, intent])
 
   const send = useCallback((message: ClientMsg) => {
-    clientRef.current?.send(message)
+    return clientRef.current?.send(message) ?? false
   }, [])
 
   const sendEmote = useCallback((emote: EmoteId) => {
-    send({ type: 'EMOTE', emote })
+    return send({ type: 'EMOTE', emote })
   }, [send])
 
   const sendBroadcast = useCallback((broadcast: BroadcastId) => {
-    send({ type: 'BROADCAST', broadcast })
+    return send({ type: 'BROADCAST', broadcast })
+  }, [send])
+
+  const sendChat = useCallback((text: string) => {
+    return send({ type: 'CHAT', text })
   }, [send])
 
   /**
@@ -383,8 +413,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const quickFollowUp = useCallback((cardId: string) => {
     const expectedSeq = authoritativeStateRef.current?.seq
     if (!cardId || !Number.isSafeInteger(expectedSeq) || Number(expectedSeq) < 0) return false
-    send({ type: 'QUICK_FOLLOW_UP', cardId, expectedSeq: Number(expectedSeq) })
-    return true
+    return send({ type: 'QUICK_FOLLOW_UP', cardId, expectedSeq: Number(expectedSeq) })
   }, [send])
 
   /** Badge-as-button retry after the client gave up (§4.6). */
@@ -429,8 +458,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   return {
     status, attempt, maxAttempts: 5,
     room, gameState, playerId,
-    error, notice, clearNotice, latestEmote, latestBroadcast, latestSystemEvent,
-    send, sendEmote, sendBroadcast, quickFollowUp, retry, tryAgain, leave,
+    error, notice, clearNotice, latestEmote, latestBroadcast, latestChat, latestSystemEvent,
+    send, sendEmote, sendBroadcast, sendChat, quickFollowUp, retry, tryAgain, leave,
   }
 }
 

@@ -298,10 +298,14 @@ async function run() {
   assert.equal(guestPlay.state.turnCount, 0)
   log('both players entered synchronized play state')
 
-  guest.send({ type: 'CHAT', text: 'multiplayer smoke' })
+  const seqBeforeChat = host.latestGameState.seq
+  guest.send({ type: 'CHAT', text: '  multiplayer   smoke 👋  ' })
   const chat = await host.waitType('CHAT', message => message.playerId === guestId)
-  assert.equal(chat.text, 'multiplayer smoke')
+  assert.equal(chat.text, 'multiplayer smoke 👋')
+  assert.equal(typeof chat.ts, 'number')
+  assert.equal(host.latestGameState.seq, seqBeforeChat, 'ephemeral custom message mutated game sequence')
 
+  await sleep(750)
   const seqBeforeBroadcast = host.latestGameState.seq
   guest.send({ type: 'BROADCAST', broadcast: 'womp-womp' })
   const broadcast = await host.waitType('BROADCAST', message => message.playerId === guestId)

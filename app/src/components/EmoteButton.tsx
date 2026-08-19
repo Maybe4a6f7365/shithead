@@ -1,12 +1,21 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 import type {
   BroadcastEvent,
   BroadcastId,
+  ChatEvent,
   EmoteEvent,
   EmoteId,
   SystemEvent,
 } from '../engine/protocol'
+import { isValidChatText, MAX_CHAT_MESSAGE_LENGTH, normalizeChatText } from '../engine/protocol'
 import {
   BROADCAST_BY_ID,
   BROADCAST_OPTIONS,
@@ -23,23 +32,35 @@ const GRID_COLUMNS = 5
 export interface EmoteButtonProps {
   onSend: (emote: EmoteId) => void
   onSendBroadcast?: (broadcast: BroadcastId) => void
+  onSendChat?: (text: string) => void
 }
 
-export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: EmoteButtonProps) {
+export function EmoteButton({
+  onSend,
+  onSendBroadcast = () => undefined,
+  onSendChat = () => undefined,
+}: EmoteButtonProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<ReactionTab>('emoji')
   const [emojiFocus, setEmojiFocus] = useState(0)
   const [textFocus, setTextFocus] = useState(0)
+  const [composingChat, setComposingChat] = useState(false)
+  const [chatText, setChatText] = useState('')
   const root = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const emojiTab = useRef<HTMLButtonElement>(null)
   const textTab = useRef<HTMLButtonElement>(null)
+  const chatInput = useRef<HTMLInputElement>(null)
   const titleId = useId()
   const emojiPanelId = useId()
   const textPanelId = useId()
+  const chatInputId = useId()
+  const chatCountId = useId()
   const reduceMotion = useReducedMotion()
 
   const closeAndReturnFocus = () => {
+    setComposingChat(false)
+    setChatText('')
     setOpen(false)
     trigger.current?.focus()
   }
@@ -59,6 +80,16 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
     setTextFocus(0)
     ;(tab === 'emoji' ? emojiTab.current : textTab.current)?.focus()
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (open && composingChat) chatInput.current?.focus()
+  }, [open, composingChat])
+
+  useEffect(() => {
+    if (open) return
+    setComposingChat(false)
+    setChatText('')
+  }, [open])
 
   const focusAt = (selector: string, index: number) => {
     root.current?.querySelectorAll<HTMLButtonElement>(selector)[index]?.focus()
@@ -84,7 +115,7 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
     const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End']
     if (!keys.includes(event.key)) return
     event.preventDefault()
-    const last = BROADCAST_OPTIONS.length - 1
+    const last = BROADCAST_OPTIONS.length
     const current = Number((document.activeElement as HTMLElement | null)?.dataset.broadcastIndex ?? textFocus)
     const next = event.key === 'Home' ? 0
       : event.key === 'End' ? last
@@ -109,14 +140,15 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
       return
     }
     if (event.key !== 'Tab') return
+    type FocusableControl = HTMLButtonElement | HTMLInputElement
     const focusable = Array.from(
-      root.current?.querySelectorAll<HTMLButtonElement>('[data-reaction-focusable="true"]:not([tabindex="-1"])') ?? [],
+      root.current?.querySelectorAll<FocusableControl>('[data-reaction-focusable="true"]:not([tabindex="-1"])') ?? [],
     ).filter(element => !element.disabled && element.offsetParent !== null)
     // jsdom has no layout and reports offsetParent null. Keep the rendered
     // controls as a deterministic fallback for accessibility tests.
     const rendered = focusable.length > 0
       ? focusable
-      : Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[data-reaction-focusable="true"]:not([tabindex="-1"])') ?? [])
+      : Array.from(root.current?.querySelectorAll<FocusableControl>('[data-reaction-focusable="true"]:not([tabindex="-1"])') ?? [])
     if (rendered.length === 0) return
     const first = rendered[0]
     const last = rendered[rendered.length - 1]
@@ -131,8 +163,18 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
 
   const selectTab = (next: ReactionTab) => {
     setTab(next)
+    setComposingChat(false)
+    setChatText('')
     if (next === 'emoji') setEmojiFocus(0)
     else setTextFocus(0)
+  }
+
+  const submitChat = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const text = normalizeChatText(chatText)
+    if (!isValidChatText(text)) return
+    onSendChat(text)
+    closeAndReturnFocus()
   }
 
   return (
@@ -232,7 +274,7 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
                   onClick={() => selectTab('text')}
                   data-reaction-focusable="true"
                 >
-                  Text <span aria-hidden="true">{BROADCAST_OPTIONS.length}</span>
+                  Text <span aria-hidden="true">{BROADCAST_OPTIONS.length + 1}</span>
                 </button>
               </div>
 
@@ -274,19 +316,77 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
                   className="reaction-picker__panel reaction-picker__panel--text"
                   tabIndex={-1}
                 >
-                  <div className="reaction-picker__text-list" onKeyDown={moveTextFocus}>
-                    {BROADCAST_OPTIONS.map((option, index) => (
+                  {composingChat ? (
+                    <form className="reaction-picker__composer" onSubmit={submitChat}>
+                      <label className="reaction-picker__composer-label" htmlFor={chatInputId}>
+                        Custom message
+                      </label>
+                      <input
+                        ref={chatInput}
+                        id={chatInputId}
+                        className="reaction-picker__composer-input"
+                        type="text"
+                        value={chatText}
+                        maxLength={MAX_CHAT_MESSAGE_LENGTH}
+                        placeholder="Say something to the table…"
+                        autoComplete="off"
+                        enterKeyHint="send"
+                        dir="auto"
+                        aria-describedby={chatCountId}
+                        data-reaction-focusable="true"
+                        onChange={event => setChatText(event.target.value)}
+                      />
+                      <div className="reaction-picker__composer-footer">
+                        <span className="reaction-picker__composer-count" id={chatCountId}>
+                          {chatText.length}/{MAX_CHAT_MESSAGE_LENGTH}
+                        </span>
+                        <div className="reaction-picker__composer-actions">
+                          <button
+                            type="button"
+                            className="reaction-picker__composer-cancel"
+                            onClick={closeAndReturnFocus}
+                            data-reaction-focusable="true"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="reaction-picker__composer-send"
+                            disabled={!isValidChatText(normalizeChatText(chatText))}
+                            data-reaction-focusable="true"
+                          >
+                            Send
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="reaction-picker__text-list" onKeyDown={moveTextFocus}>
+                      <button
+                        type="button"
+                        className="reaction-picker__text reaction-picker__text--custom"
+                        data-broadcast-index={0}
+                        data-reaction-focusable="true"
+                        tabIndex={textFocus === 0 ? 0 : -1}
+                        aria-label="Custom message"
+                        onFocus={() => setTextFocus(0)}
+                        onClick={() => setComposingChat(true)}
+                      >
+                        <span className="reaction-picker__custom-title">Custom message</span>
+                        <span className="reaction-picker__custom-hint">Write your own broadcast</span>
+                      </button>
+                      {BROADCAST_OPTIONS.map((option, index) => (
                       <button
                         key={option.id}
                         type="button"
                         className="reaction-picker__text"
                         data-broadcast={option.id}
-                        data-broadcast-index={index}
+                        data-broadcast-index={index + 1}
                         data-reaction-focusable="true"
-                        tabIndex={index === textFocus ? 0 : -1}
+                        tabIndex={index + 1 === textFocus ? 0 : -1}
                         aria-label={`Broadcast: ${option.label}`}
                         dir="auto"
-                        onFocus={() => setTextFocus(index)}
+                        onFocus={() => setTextFocus(index + 1)}
                         onClick={() => {
                           onSendBroadcast(option.id)
                           closeAndReturnFocus()
@@ -294,8 +394,9 @@ export function EmoteButton({ onSend, onSendBroadcast = () => undefined }: Emote
                       >
                         {option.text}
                       </button>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -358,6 +459,16 @@ export function BroadcastFeedback({ event, playerName }: { event: BroadcastEvent
       eventKey={event && option ? `${event.playerId}:${event.broadcast}:${event.ts}` : null}
       playerName={playerName ?? 'Player'}
       text={option?.text ?? ''}
+    />
+  )
+}
+
+export function ChatFeedback({ event, playerName }: { event: ChatEvent | null; playerName?: string }) {
+  return (
+    <SpeechFeedback
+      eventKey={event ? `${event.playerId}:${event.text}:${event.ts}` : null}
+      playerName={playerName ?? 'Player'}
+      text={event?.text ?? ''}
     />
   )
 }

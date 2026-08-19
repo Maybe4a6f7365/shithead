@@ -46,8 +46,8 @@ export interface MultiplayerGameTableProps {
 export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
   const {
     status, attempt, maxAttempts, room, gameState, playerId,
-    error, notice, latestEmote, latestBroadcast, latestSystemEvent,
-    send, sendEmote, sendBroadcast, quickFollowUp, retry, tryAgain, leave,
+    error, notice, latestEmote, latestBroadcast, latestChat, latestSystemEvent,
+    send, sendEmote, sendBroadcast, sendChat, quickFollowUp, retry, tryAgain, leave,
   } = useMultiplayerRoom({ roomId, playerName, intent })
 
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -255,9 +255,10 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         state={gameState}
         viewerId={playerId}
         viewerActive={gameState.players[gameState.currentPlayerIdx]?.id === playerId && gameState.phase !== 'gameOver'}
+        actionsEnabled={status === 'connected' || status === 'restored'}
         error={notice}
         onPlay={cards => send({ type: 'PLAY', cards })}
-        onQuickFollowUp={card => { quickFollowUp(card.id) }}
+        onQuickFollowUp={card => quickFollowUp(card.id)}
         onBurnIn={cards => send({ type: 'BURN_IN', cards })}
         onPickUp={() => send({ type: 'PICK_UP' })}
         onLeave={quit}
@@ -281,6 +282,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         onSendEmote={sendEmote}
         latestBroadcast={latestBroadcast}
         onSendBroadcast={sendBroadcast}
+        latestChat={latestChat}
+        onSendChat={sendChat}
         latestSystemEvent={latestSystemEvent}
       />
 

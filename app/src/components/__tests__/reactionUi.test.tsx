@@ -4,16 +4,21 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { GameState, Player } from '../../engine'
-import type { SystemEvent } from '../../engine/protocol'
+import { MAX_CHAT_MESSAGE_LENGTH, type SystemEvent } from '../../engine/protocol'
 import {
   BroadcastFeedback,
+  ChatFeedback,
   EmoteButton,
   EmoteFeedback,
   SystemEventFeedback,
 } from '../EmoteButton'
 import { LobbySystemFeedback } from '../MultiplayerGameTable'
 import { BROADCAST_OPTIONS, REACTION_OPTIONS } from '../reactionCatalog'
-import { canSendReaction, isMatchingSelfBroadcastEcho, TableScreen } from '../TableScreen'
+import {
+  canSendReaction,
+  isMatchingSelfBroadcastEcho,
+  TableScreen,
+} from '../TableScreen'
 
 declare const process: { cwd: () => string }
 
@@ -70,6 +75,41 @@ describe('modern reaction picker', () => {
     expect(screen.getByRole('button', { name: 'Open reactions' })).toBe(document.activeElement)
   })
 
+  it('puts an accessible custom-message composer first in the text menu', async () => {
+    const sendChat = vi.fn()
+    render(<EmoteButton onSend={vi.fn()} onSendChat={sendChat} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+    fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+
+    const panel = screen.getByRole('tabpanel')
+    const choices = within(panel).getAllByRole('button')
+    expect(choices[0].getAttribute('aria-label')).toBe('Custom message')
+    expect(choices[0].getAttribute('data-broadcast-index')).toBe('0')
+    expect(choices[1].getAttribute('aria-label')).toBe(`Broadcast: ${BROADCAST_OPTIONS[0].label}`)
+
+    fireEvent.click(choices[0])
+    const input = screen.getByRole('textbox', { name: 'Custom message' })
+    expect(input).toBe(document.activeElement)
+    expect(input.getAttribute('maxlength')).toBe(String(MAX_CHAT_MESSAGE_LENGTH))
+    expect(input.getAttribute('dir')).toBe('auto')
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.change(input, {
+      target: { value: `A${'\u0344'.repeat(MAX_CHAT_MESSAGE_LENGTH - 1)}` },
+    })
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.change(input, { target: { value: '  Héllo   table 👋  ' } })
+    const send = screen.getByRole('button', { name: 'Send' })
+    expect((send as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.submit(input.closest('form')!)
+
+    expect(sendChat).toHaveBeenCalledTimes(1)
+    expect(sendChat).toHaveBeenCalledWith('Héllo table 👋')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Open reactions' })).toBe(document.activeElement)
+  })
+
   it('supports a five-column arrow grid, Escape, focus return and focus trapping', async () => {
     render(<EmoteButton onSend={vi.fn()} />)
     const trigger = screen.getByRole('button', { name: 'Open reactions' })
@@ -111,6 +151,15 @@ describe('reaction receipts and table events', () => {
     )
     expect(screen.getByRole('status').textContent).toContain('Mira')
     expect(screen.getByRole('status').textContent).toContain('𝖜𝖔𝖒𝖕 𝖜𝖔𝖒𝖕')
+
+    rerender(
+      <ChatFeedback
+        event={{ playerId: 'p1', text: '<img src=x onerror=alert(1)> Hé 👋', ts: 12 }}
+        playerName="Mira"
+      />,
+    )
+    expect(screen.getByRole('status').textContent).toContain('<img src=x onerror=alert(1)> Hé 👋')
+    expect(screen.getByRole('status').querySelector('img')).toBeNull()
   })
 
   it('labels player-left as Table while Ondra looks like a normal player broadcast', () => {
@@ -193,6 +242,139 @@ describe('reaction receipts and table events', () => {
     expect(isMatchingSelfBroadcastEcho(
       { broadcast: 'karma', sentAt: echoed.ts - 10 }, echoed, 'me', echoed.ts,
     )).toBe(true)
+  })
+
+  it('waits for the canonical server echo before showing multiplayer custom text', async () => {
+    const me: Player = {
+      id: 'me', name: 'Me', hand: [{ id: 'five', rank: '5', suit: '♣' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const other: Player = {
+      id: 'other', name: 'Other', hand: [{ id: 'six', rank: '6', suit: '♠' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const state: GameState = {
+      phase: 'play', rules: { includeJokers: false, winnerSwapsFaceUp: false, deckCount: 1 },
+      players: [me, other], stock: [], pile: [], currentPlayerIdx: 0,
+      playDirection: 1, turnCount: 1, winnerId: null, loserId: null,
+      pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 1,
+    }
+    const sendChat = vi.fn((_text: string) => true)
+    const props = {
+      state, viewerId: 'me', viewerActive: true, onPlay: vi.fn(), onPickUp: vi.fn(),
+      onLeave: vi.fn(), onOpenRules: vi.fn(), soundOn: false, onToggleSound: vi.fn(),
+      onSendChat: sendChat,
+    }
+    const view = render(<TableScreen {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+    fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Custom message' }))
+    const input = screen.getByRole('textbox', { name: 'Custom message' })
+    fireEvent.change(input, { target: { value: 'Hello   table 👋' } })
+    fireEvent.submit(input.closest('form')!)
+
+    expect(sendChat).toHaveBeenCalledWith('Hello table 👋')
+    expect(screen.queryByText('Hello table 👋')).toBeNull()
+
+    const echoed = { playerId: 'me', text: 'Hello table 👋', ts: Date.now() }
+    view.rerender(<TableScreen {...props} latestChat={echoed} />)
+    await waitFor(() => expect(screen.getAllByText('Hello table 👋')).toHaveLength(1))
+    expect(document.querySelector('.reaction-feedback--broadcast')?.textContent).toContain('MeHello table 👋')
+  })
+
+  it('does not show a custom message when reconnecting or when transport rejects it', async () => {
+    const me: Player = {
+      id: 'me', name: 'Me', hand: [{ id: 'five', rank: '5', suit: '♣' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const other: Player = {
+      id: 'other', name: 'Other', hand: [{ id: 'six', rank: '6', suit: '♠' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const state: GameState = {
+      phase: 'play', rules: { includeJokers: false, winnerSwapsFaceUp: false, deckCount: 1 },
+      players: [me, other], stock: [], pile: [], currentPlayerIdx: 0,
+      playDirection: 1, turnCount: 1, winnerId: null, loserId: null,
+      pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 1,
+    }
+    const sendChat = vi.fn((_text: string) => false)
+    render(
+      <TableScreen
+        state={state}
+        viewerId="me"
+        viewerActive
+        actionsEnabled={false}
+        onPlay={vi.fn()}
+        onPickUp={vi.fn()}
+        onLeave={vi.fn()}
+        onOpenRules={vi.fn()}
+        soundOn={false}
+        onToggleSound={vi.fn()}
+        onSendChat={sendChat}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+    fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Custom message' }))
+    const input = screen.getByRole('textbox', { name: 'Custom message' })
+    fireEvent.change(input, { target: { value: 'Never relayed' } })
+    fireEvent.submit(input.closest('form')!)
+
+    expect(sendChat).not.toHaveBeenCalled()
+    expect(screen.queryByText('Never relayed')).toBeNull()
+    await waitFor(() => expect(screen.getByText('Reconnecting — reaction not sent')).toBeTruthy())
+  })
+
+  it('stops a fourth custom message in the rolling client burst window', async () => {
+    const me: Player = {
+      id: 'me', name: 'Me', hand: [{ id: 'five', rank: '5', suit: '♣' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const other: Player = {
+      id: 'other', name: 'Other', hand: [{ id: 'six', rank: '6', suit: '♠' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const state: GameState = {
+      phase: 'play', rules: { includeJokers: false, winnerSwapsFaceUp: false, deckCount: 1 },
+      players: [me, other], stock: [], pile: [], currentPlayerIdx: 0,
+      playDirection: 1, turnCount: 1, winnerId: null, loserId: null,
+      pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 1,
+    }
+    const sendChat = vi.fn((_text: string) => true)
+    let now = 1_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      render(
+        <TableScreen
+          state={state}
+          viewerId="me"
+          viewerActive
+          onPlay={vi.fn()}
+          onPickUp={vi.fn()}
+          onLeave={vi.fn()}
+          onOpenRules={vi.fn()}
+          soundOn={false}
+          onToggleSound={vi.fn()}
+          onSendChat={sendChat}
+        />,
+      )
+
+      for (let index = 1; index <= 4; index++) {
+        fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+        fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+        fireEvent.click(screen.getByRole('button', { name: 'Custom message' }))
+        const input = screen.getByRole('textbox', { name: 'Custom message' })
+        fireEvent.change(input, { target: { value: `Burst ${index}` } })
+        fireEvent.submit(input.closest('form')!)
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+        now += 800
+      }
+
+      expect(sendChat.mock.calls.map(call => call[0])).toEqual(['Burst 1', 'Burst 2', 'Burst 3'])
+      expect(screen.getByText('Custom messages are limited to 3 every 10 seconds')).toBeTruthy()
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('shares one short client gate across emoji and text reactions', () => {

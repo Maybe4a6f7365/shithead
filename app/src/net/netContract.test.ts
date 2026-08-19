@@ -227,7 +227,7 @@ describe('RoomClient authentication ordering', () => {
     client.close()
   })
 
-  it('drops stale emotes and broadcasts instead of replaying them after authentication', () => {
+  it('drops stale chat, emotes and broadcasts instead of replaying them after authentication', () => {
     let client!: RoomClient
     client = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
@@ -235,9 +235,11 @@ describe('RoomClient authentication ordering', () => {
       onOpen: () => client.send({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'Ada' }),
     })
     const socket = FakeWebSocket.instances[0]
+    expect(client.send({ type: 'CHAT', text: 'stale while offline' })).toBe(false)
     client.send({ type: 'EMOTE', emote: 'laugh' })
     client.send({ type: 'BROADCAST', broadcast: 'shrug' })
     socket.open()
+    expect(client.send({ type: 'CHAT', text: 'stale before auth' })).toBe(false)
     client.send({ type: 'BROADCAST', broadcast: 'womp-womp' })
     client.markAuthenticated()
     expect(socket.sent.map(message => message.type)).toEqual(['JOIN_ROOM'])
@@ -246,6 +248,8 @@ describe('RoomClient authentication ordering', () => {
     expect(socket.sent.at(-1)).toEqual({ type: 'EMOTE', emote: 'laugh', version: PROTOCOL_VERSION })
     client.send({ type: 'BROADCAST', broadcast: 'shrug' })
     expect(socket.sent.at(-1)).toEqual({ type: 'BROADCAST', broadcast: 'shrug', version: PROTOCOL_VERSION })
+    expect(client.send({ type: 'CHAT', text: 'fresh' })).toBe(true)
+    expect(socket.sent.at(-1)).toEqual({ type: 'CHAT', text: 'fresh', version: PROTOCOL_VERSION })
     client.close()
   })
 
@@ -331,6 +335,35 @@ describe('RoomClient authentication ordering', () => {
 
     act(() => vi.advanceTimersByTime(2501))
     expect(result.current.latestEmote).toBeNull()
+    unmount()
+  })
+
+  it('sends custom chat and keeps only the newest transient relay', () => {
+    vi.useFakeTimers()
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+
+    let sent = false
+    act(() => { sent = result.current.sendChat('Hello table 👋') })
+    expect(sent).toBe(true)
+    expect(socket.sent.at(-1)).toEqual({
+      type: 'CHAT', text: 'Hello table 👋', version: PROTOCOL_VERSION,
+    })
+
+    act(() => socket.receive({ type: 'CHAT', playerId: 'p2', text: 'First', ts: 100 }))
+    expect(result.current.latestChat).toEqual({ playerId: 'p2', text: 'First', ts: 100 })
+    act(() => vi.advanceTimersByTime(3000))
+    act(() => socket.receive({ type: 'CHAT', playerId: 'p3', text: 'Newest', ts: 200 }))
+    act(() => vi.advanceTimersByTime(501))
+    expect(result.current.latestChat).toEqual({ playerId: 'p3', text: 'Newest', ts: 200 })
+    act(() => vi.advanceTimersByTime(2999))
+    expect(result.current.latestChat).toBeNull()
     unmount()
   })
 
