@@ -46,7 +46,7 @@ export interface MultiplayerGameTableProps {
 export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
   const {
     status, attempt, maxAttempts, room, gameState, playerId,
-    error, notice, latestEmote, latestBroadcast, latestChat, latestSystemEvent,
+    error, notice, latestEmote, latestBroadcast, latestChat, recentCustomMessages, latestSystemEvent,
     send, sendEmote, sendBroadcast, sendChat, quickFollowUp, retry, tryAgain, leave,
   } = useMultiplayerRoom({ roomId, playerName, intent })
 
@@ -284,6 +284,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         onSendBroadcast={sendBroadcast}
         latestChat={latestChat}
         onSendChat={sendChat}
+        recentCustomMessages={recentCustomMessages}
         latestSystemEvent={latestSystemEvent}
       />
 

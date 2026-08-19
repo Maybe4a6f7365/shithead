@@ -32,13 +32,15 @@ const GRID_COLUMNS = 5
 export interface EmoteButtonProps {
   onSend: (emote: EmoteId) => void
   onSendBroadcast?: (broadcast: BroadcastId) => void
-  onSendChat?: (text: string) => void
+  onSendChat?: (text: string) => void | boolean
+  recentCustomMessages?: readonly string[]
 }
 
 export function EmoteButton({
   onSend,
   onSendBroadcast = () => undefined,
   onSendChat = () => undefined,
+  recentCustomMessages = [],
 }: EmoteButtonProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<ReactionTab>('emoji')
@@ -56,6 +58,10 @@ export function EmoteButton({
   const textPanelId = useId()
   const chatInputId = useId()
   const chatCountId = useId()
+  const recentMessagesId = useId()
+  const presetsId = useId()
+  const recentMessagesKey = recentCustomMessages.join('\u0000')
+  const previousRecentMessagesKey = useRef(recentMessagesKey)
   const reduceMotion = useReducedMotion()
 
   const closeAndReturnFocus = () => {
@@ -68,7 +74,7 @@ export function EmoteButton({
   useEffect(() => {
     if (!open) return
     const closeOutside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false)
+      if (!root.current?.contains(event.target as Node)) closeAndReturnFocus()
     }
     document.addEventListener('pointerdown', closeOutside)
     return () => document.removeEventListener('pointerdown', closeOutside)
@@ -84,6 +90,17 @@ export function EmoteButton({
   useEffect(() => {
     if (open && composingChat) chatInput.current?.focus()
   }, [open, composingChat])
+
+  // A delayed authoritative self echo can insert or promote an MRU item while
+  // this menu is already open. Return roving focus to the stable first choice
+  // instead of leaving the focused preset with tabIndex=-1 after indices move.
+  useEffect(() => {
+    if (previousRecentMessagesKey.current === recentMessagesKey) return
+    previousRecentMessagesKey.current = recentMessagesKey
+    if (!open || tab !== 'text' || composingChat) return
+    setTextFocus(0)
+    root.current?.querySelector<HTMLButtonElement>('[data-broadcast-index="0"]')?.focus()
+  }, [recentMessagesKey, open, tab, composingChat])
 
   useEffect(() => {
     if (open) return
@@ -115,14 +132,18 @@ export function EmoteButton({
     const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End']
     if (!keys.includes(event.key)) return
     event.preventDefault()
-    const last = BROADCAST_OPTIONS.length
+    const items = Array.from(
+      root.current?.querySelectorAll<HTMLButtonElement>('[data-broadcast-index]') ?? [],
+    )
+    const last = items.length - 1
+    if (last < 0) return
     const current = Number((document.activeElement as HTMLElement | null)?.dataset.broadcastIndex ?? textFocus)
     const next = event.key === 'Home' ? 0
       : event.key === 'End' ? last
         : event.key === 'ArrowDown' ? Math.min(last, current + 1)
           : Math.max(0, current - 1)
     setTextFocus(next)
-    focusAt('[data-broadcast-index]', next)
+    items[next]?.focus()
   }
 
   const moveTabFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -173,7 +194,7 @@ export function EmoteButton({
     event.preventDefault()
     const text = normalizeChatText(chatText)
     if (!isValidChatText(text)) return
-    onSendChat(text)
+    if (onSendChat(text) === false) return
     closeAndReturnFocus()
   }
 
@@ -274,7 +295,7 @@ export function EmoteButton({
                   onClick={() => selectTab('text')}
                   data-reaction-focusable="true"
                 >
-                  Text <span aria-hidden="true">{BROADCAST_OPTIONS.length + 1}</span>
+                  Text <span aria-hidden="true">{BROADCAST_OPTIONS.length + recentCustomMessages.length + 1}</span>
                 </button>
               </div>
 
@@ -375,26 +396,69 @@ export function EmoteButton({
                         <span className="reaction-picker__custom-title">Custom message</span>
                         <span className="reaction-picker__custom-hint">Write your own broadcast</span>
                       </button>
-                      {BROADCAST_OPTIONS.map((option, index) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className="reaction-picker__text"
-                        data-broadcast={option.id}
-                        data-broadcast-index={index + 1}
-                        data-reaction-focusable="true"
-                        tabIndex={index + 1 === textFocus ? 0 : -1}
-                        aria-label={`Broadcast: ${option.label}`}
-                        dir="auto"
-                        onFocus={() => setTextFocus(index + 1)}
-                        onClick={() => {
-                          onSendBroadcast(option.id)
-                          closeAndReturnFocus()
-                        }}
+                      {recentCustomMessages.length > 0 && (
+                        <div
+                          className="reaction-picker__text-group reaction-picker__text-group--recent"
+                          role="group"
+                          aria-labelledby={recentMessagesId}
+                        >
+                          <span className="reaction-picker__section-label" id={recentMessagesId}>Recent messages</span>
+                          {recentCustomMessages.map((message, index) => {
+                            const itemIndex = index + 1
+                            return (
+                              <button
+                                key={message}
+                                type="button"
+                                className="reaction-picker__text reaction-picker__text--recent"
+                                data-broadcast-index={itemIndex}
+                                data-reaction-focusable="true"
+                                tabIndex={itemIndex === textFocus ? 0 : -1}
+                                aria-label={`Send again: ${message}`}
+                                dir="auto"
+                                onFocus={() => setTextFocus(itemIndex)}
+                                onClick={() => {
+                                  if (onSendChat(message) === false) return
+                                  closeAndReturnFocus()
+                                }}
+                              >
+                                <span className="reaction-picker__recent-copy">{message}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <div
+                        className="reaction-picker__text-group reaction-picker__text-group--presets"
+                        role={recentCustomMessages.length > 0 ? 'group' : undefined}
+                        aria-labelledby={recentCustomMessages.length > 0 ? presetsId : undefined}
                       >
-                        {option.text}
-                      </button>
-                      ))}
+                        {recentCustomMessages.length > 0 && (
+                          <span className="reaction-picker__section-label" id={presetsId}>Presets</span>
+                        )}
+                        {BROADCAST_OPTIONS.map((option, index) => {
+                          const itemIndex = recentCustomMessages.length + index + 1
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              className="reaction-picker__text"
+                              data-broadcast={option.id}
+                              data-broadcast-index={itemIndex}
+                              data-reaction-focusable="true"
+                              tabIndex={itemIndex === textFocus ? 0 : -1}
+                              aria-label={`Broadcast: ${option.label}`}
+                              dir="auto"
+                              onFocus={() => setTextFocus(itemIndex)}
+                              onClick={() => {
+                                onSendBroadcast(option.id)
+                                closeAndReturnFocus()
+                              }}
+                            >
+                              {option.text}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>

@@ -5,7 +5,7 @@ A mobile-first implementation of the Shithead shedding card game, built as an in
 - **Production (canonical):** <https://shead.online>
 - **Fallback/diagnostic endpoint:** <https://shithead.not4a6f7365.workers.dev>
 - **Application version:** `0.2.0`
-- **Wire protocol:** `5`
+- **Wire protocol:** `6`
 - **Persistent room schema:** `3`
 - **Runtime:** Node.js `>=22`, modern evergreen browsers, Cloudflare Workers
 
@@ -18,7 +18,7 @@ This document is the technical source of truth for the shipped game. Rule behavi
 | Offline play | 2–5 seats on one device; any mix of humans and Easy/Medium/Hard AI |
 | Online play | Private rooms for 2–5 human players over WebSocket |
 | Round configuration | 1–3 decks, Jokers on/off, optional previous-winner face-up exchange |
-| Rules | 2 reset, 3 mirror, 7 low, stacked 8 skip, 10 burn except after 7, Joker burn, cumulative four-plus burn, out-of-turn burn-in, exact drawn-card quick follow-up |
+| Rules | 2 reset, 3 mirror, 7 low, stacked 8 skip, 10 burn except after 7, Joker burn, cumulative four-plus burn, out-of-turn burn-in, exact matching-card quick follow-up |
 | Refresh recovery | Online seats resume with a rotating secret token stored locally |
 | Installation | Standalone PWA with an auto-updating Workbox app shell |
 | Sharing | Six-character room code, native Web Share, full-link clipboard/select fallback |
@@ -146,7 +146,7 @@ A player must play from exactly one active zone:
 
 After an accepted visible play, the player draws from stock until the hand contains three cards or the stock is empty. A player who picked up above three does not draw until their hand falls below three. Pickup itself never draws from stock.
 
-If that refill contains the same printed rank that was just played, only the exact newly drawn card identifiers become eligible for a quick follow-up. The player may add them while the next turn is already live, provided the request reaches the authoritative game before another gameplay action is accepted. Pre-existing cards of that rank do not qualify.
+If that refill contains the same printed rank that was just played, only the exact newly drawn card identifiers become eligible for a quick follow-up. The same applies to matching face-up cards when playing the final hand card makes that public row active. The player may add those newly available cards while the next turn is already live, provided the request reaches the authoritative game before another gameplay action is accepted. Pre-existing active-zone matches do not qualify, and face-down cards are never exposed by this rule.
 
 ### Ordinary play and pickup
 
@@ -166,7 +166,7 @@ If that refill contains the same printed rank that was just played, only the exa
 | `2` | Playable on anything. It is a reset boundary, so any card may follow. Physical 2s still count as printed 2s toward a four-plus burn. |
 | `3` | Playable on anything. It mirrors the first effective rank below a chain of 3s. Above a 2, or with no non-3 beneath it, play remains unrestricted. It mirrors rank legality only and does not repeat an 8 skip. |
 | `7` | The next ordinary card must be 7 or lower. The play-anytime 2, 3, and Joker remain valid; **10 is not exempt**. A 3 above a 7 preserves the low restriction. |
-| `8` | Each 8 skips one additional active player. Already-out seats do not count. A four-plus 8 burn takes precedence over skipping. |
+| `8` | Each 8 skips one additional active player. Already-out seats do not count. With two opponents left, a final pair skips both and wraps to the first opponent, so the turn marker can appear unchanged. A four-plus 8 burn takes precedence over skipping. |
 | `10` | Burns the pile immediately. It is normally unrestricted, but cannot be played on an effective 7. |
 | Joker | Playable on anything and burns immediately. It is not a rank-substitution wildcard and cannot be mixed into another set. |
 | Physical top run `>=4` | An uninterrupted run of four or more equal printed ranks burns, whether produced in one action or accumulated across actions. Multi-deck games may burn more than four. |
@@ -175,20 +175,21 @@ A burn removes the entire pile and the newly played cards from the game; there i
 
 `playDirection` is retained in state for compatibility and is honored by seat traversal, but no current rank reverses direction and new games initialize it to `1`.
 
-### Drawn-card quick follow-up
+### Matching-card quick follow-up
 
-An accepted normal play from `hand` or `faceUp` may open a short, race-based follow-up opportunity after refill:
+An accepted visible play may open a short, race-based follow-up opportunity after a hand refill or when playing the final hand card exposes the face-up row:
 
-- the entitlement contains only exact card IDs drawn by that action whose printed rank equals the played rank;
-- a same-rank card that was already in hand is never eligible, even though it is owned by the player;
+- the entitlement contains only exact card IDs newly made playable by that action whose printed rank equals the played rank: freshly drawn hand cards or matching face-up cards exposed by a real `hand` → `faceUp` transition;
+- a same-rank card that was already playable in the active zone is never eligible merely because it matches;
+- face-down cards never qualify: they remain blind until their ordinary turn;
 - blind plays and any play that clears the pile do not open a follow-up;
-- the player may submit one eligible replacement at a time; unused eligible cards survive, and a newly drawn matching replacement can extend the chain;
+- the player may submit one eligible replacement at a time; unused eligible cards survive while their visible zone remains active, and another newly drawn or newly exposed match can extend the chain;
 - each accepted follow-up is a full engine mutation: it refills toward three, increments `seq` and `turnCount`, and emits `PLAY_CARDS` plus `QUICK_FOLLOW_UP` events;
 - a quick 8 adds another skip to the turn already calculated; completing a physical four-plus run burns and gives the actor the empty-pile lead;
 - the first accepted competing play, pickup, or burn-in closes the opportunity. Rejected actions, chat, and reactions do not;
 - in the two-player stacked-8 edge, where the actor remains current, choosing a normal play or pickup declines the follow-up and proceeds with normal-turn semantics.
 
-Online requests carry the exact authoritative sequence that exposed the entitlement. The Durable Object serializes competing frames, so the first accepted mutation wins deterministically; stale, duplicate, forged, wrong-player, and reconnect-replayed requests cannot apply. Offline AI uses an eligible replacement automatically. Pass-and-play keeps the prior player's hand visible until that player acts or explicitly passes the device onward.
+Online requests carry the exact authoritative sequence that exposed the entitlement. The Durable Object serializes competing frames, so the first accepted mutation wins deterministically; stale, duplicate, forged, wrong-player, and reconnect-replayed requests cannot apply. Offline AI uses an eligible replacement automatically. Pass-and-play keeps the prior player's active visible zone available until that player acts or explicitly passes the device onward.
 
 ### Out-of-turn burn-in
 
@@ -465,7 +466,7 @@ At bootstrap, a complete saved online credential resumes directly into its room.
 - Selecting a different rank atomically replaces the previous highlighted rank.
 - Equal-rank cards can be added or removed individually, including more than four in multi-deck games.
 - Play, pickup, and burn-in remain explicit actions.
-- A freshly drawn exact-rank replacement receives a distinct quick-match highlight and one-tap action while the next player may already act.
+- A freshly drawn or newly activated face-up exact-rank replacement receives a distinct quick-match highlight and one-tap action while the next player may already act.
 - The three face-up final cards overlay their three face-down partners, displaying six cards in three physical stacks.
 - Opponent order is stable relative to the viewer, with the next player leftmost.
 - Opponent hands render as counts/backs; public final cards remain visible.
@@ -526,7 +527,7 @@ Keyboard controls:
 | `P` | Play selection |
 | `U` | Pick up |
 | `B` | Burn in |
-| `Q` | Play the currently eligible freshly drawn replacement |
+| `Q` | Play the currently eligible matching replacement |
 | `Escape` | Clear card selection / close supported overlay |
 | Left / Right | Navigate hand cards |
 | Arrow keys / Home / End | Navigate reaction choices, menus, and deck-count radio options |
@@ -540,9 +541,9 @@ Waiting-room invites use `/?room=CODE`. The UI attempts native Web Share, falls 
 The reaction sheet has two modes:
 
 - **Emoji:** 28 fixed reactions, including angry/rage, clown, skull, melting, exploding-head, peach, foot, and a medium-dark middle-finger reaction. They render from a locally bundled subset of Microsoft Fluent Emoji SVGs rather than platform-native glyphs, so Android and iOS present the same artwork.
-- **Text:** a first-position **Custom message** button opens a focused, single-line composer with a live 200-character counter. It is followed by nine fixed table broadcasts: `╭∩╮( •̀_•́ )╭∩╮`, `kiss my ( ㅅ )`, `ʞɔnɟ`, `( ͠° ͟ʖ ͡°)`, `☘Karma☠`, `¯\_(ツ)_/¯`, `𝖜𝖔𝖒𝖕 𝖜𝖔𝖒𝖕`, `𝓴𝓲𝓵𝓵 𝓶𝒆`, and `Take it.`
+- **Text:** a first-position **Custom message** button opens a focused, single-line composer with a live 200-character counter. Up to five unique messages accepted for the current player in this game session then appear newest-first for one-tap reuse, followed by nine fixed table broadcasts: `╭∩╮( •̀_•́ )╭∩╮`, `kiss my ( ㅅ )`, `ʞɔnɟ`, `( ͠° ͟ʖ ͡°)`, `☘Karma☠`, `¯\_(ツ)_/¯`, `𝖜𝖔𝖒𝖕 𝖜𝖔𝖒𝖕`, `𝓴𝓲𝓵𝓵 𝓶𝒆`, and `Take it.`
 
-Preset buttons send only a stable catalog ID; custom messages send canonical text. The Worker validates each exact message shape, applies the normal socket limit, one combined custom/emoji/preset reaction slot every 700 ms, and the custom-message three-per-10-second burst limit, then relays the message with player ID and server timestamp. The UI applies a shared 800 ms gate. Emoji and presets reconcile optimistic feedback with the server echo, while multiplayer custom text waits for that authoritative echo so a dropped or rejected message never appears as delivered. All three event forms are ephemeral, are dropped while offline or unauthenticated, and are never replayed after reconnect or written to room storage.
+Preset buttons send only a stable catalog ID; custom messages send canonical text. The Worker validates each exact message shape, applies the normal socket limit, one combined custom/emoji/preset reaction slot every 700 ms, and the custom-message three-per-10-second burst limit, then relays the message with player ID and server timestamp. The UI applies a shared 800 ms gate. Emoji and presets reconcile optimistic feedback with the server echo, while multiplayer custom text waits for that authoritative echo so a dropped or rejected message never appears as delivered. Recent-message buttons reuse this same validated and rate-limited send path; they cannot bypass either gate. Multiplayer history records only this player's authoritative echoes, never peers or failed attempts, and survives an ordinary socket reconnect within the mounted room session. Offline pass-and-play keeps a separate in-memory list per local viewer. The three event forms are ephemeral, dropped while offline or unauthenticated, never replayed after reconnect, and never written to room storage. Recent-message lists also stay in memory only and disappear when their game or mounted room session ends.
 
 An explicit leave emits a typed table event for the playful departure line. Separately, when a round makes its single authoritative transition into `play`, the Worker checks for a narrowly normalized Ondra/Ondřej-like player. An eligible round privately schedules one of six server-only easter-egg lines for a random target three to seven accepted gameplay actions later; it is not shown at the start of the round. Once due, the line uses the same speech-bubble treatment as that player's normal preset broadcasts. The schedule is stored with the room, consumed once before relay, cleared if the round ends or the player leaves, and is not re-rolled by reconnect, resume, repeated state broadcasts, or later actions. The line is not client-selectable and never appears in the lobby.
 
@@ -654,12 +655,12 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **401 tests across 35 Vitest files**:
+At this revision, the default suite contains **420 tests across 36 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
-| Engine | 11 | Core rules, AI, decks, cumulative/interrupt burns, exact drawn-card follow-ups, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
-| Components/UI | 20 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, custom-message and reaction accessibility/assets, gameplay feedback, tribute, sound cursor |
+| Engine | 11 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
+| Components/UI | 21 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, reaction accessibility/assets, gameplay feedback, tribute, sound cursor |
 | Network | 1 | Session validation, auth ordering, sequence guard, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
 | Root routing | 1 | Invite-link and hard-refresh resume routing |

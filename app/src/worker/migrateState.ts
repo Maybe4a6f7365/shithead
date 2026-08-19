@@ -86,22 +86,29 @@ export function normalizePersistedGameState(
       ? { winnerId: pending.winnerId, loserId: pending.loserId }
       : null
 
-  // Preserve a live replacement-draw entitlement across a harmless worker
+  // Preserve a live quick-match entitlement across a harmless worker
   // restart only when every security-relevant invariant still holds. Old or
   // malformed snapshots default to null instead of granting by rank alone.
   const quick = state.pendingQuickFollowUp
   const quickActor = quick && state.players.find(player => player.id === quick.playerId)
   const eligibleIds = quick && Array.isArray(quick.eligibleCardIds) ? quick.eligibleCardIds : []
   const uniqueEligible = new Set(eligibleIds)
-  const handById = new Map(quickActor?.hand.map(card => [card.id, card] as const) ?? [])
+  const activeVisibleCards = quickActor
+    ? quickActor.hand.length > 0
+      ? quickActor.hand
+      : quickActor.faceUp.length > 0
+        ? quickActor.faceUp
+        : []
+    : []
+  const activeVisibleById = new Map(activeVisibleCards.map(card => [card.id, card] as const))
   const topRun = getPhysicalTopRun(state as GameState)
   const pendingQuickFollowUp = quick &&
     (state.phase === 'play' || state.phase === 'endgame') &&
     quickActor && !quickActor.isOut &&
     Number.isSafeInteger(quick.sourceSeq) && quick.sourceSeq === (state.seq ?? 0) &&
     eligibleIds.length > 0 && uniqueEligible.size === eligibleIds.length &&
-    eligibleIds.every(id => typeof id === 'string' && handById.get(id)?.rank === quick.rank) &&
-    topRun?.rank === quick.rank
+    eligibleIds.every(id => typeof id === 'string' && activeVisibleById.get(id)?.rank === quick.rank) &&
+    topRun?.rank === quick.rank && topRun.count < 4
       ? { ...quick, eligibleCardIds: [...eligibleIds] }
       : null
 

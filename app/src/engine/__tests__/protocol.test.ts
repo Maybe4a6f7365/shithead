@@ -228,7 +228,7 @@ describe('serializeGameState (security)', () => {
     expect(opponent.faceUp).toEqual(state.players.find(p => p.id === 'opponent')!.faceUp)
   })
 
-  it('keeps a replacement-draw follow-up entitlement owner-only', () => {
+  it('keeps an exact quick-match entitlement owner-only', () => {
     const eligible = c('6', '♥', 'secret-drawn-six')
     const state = {
       ...mkState({

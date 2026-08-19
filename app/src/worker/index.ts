@@ -726,7 +726,7 @@ export class Room {
   }
 
   /**
-   * Apply one same-rank replacement draw before a competing action closes
+   * Apply one exact same-rank quick match before a competing action closes
    * the window. Durable Object messages are serialized through `operation`;
    * expectedSeq therefore gives a deterministic winner and prevents stale
    * clicks/reconnect replays from mutating a later state.

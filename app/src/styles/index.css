@@ -323,6 +323,22 @@
   gap: 6px;
 }
 
+.game-screen .reaction-picker__text-group {
+  display: grid;
+  gap: 6px;
+}
+
+.game-screen .reaction-picker__section-label {
+  padding: 3px 3px 0;
+  color: var(--table-copy-muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 680;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .game-screen .reaction-picker__text {
   width: 100%;
   min-height: 48px;
@@ -351,6 +367,17 @@
   gap: 1px;
   border-color: rgba(241, 229, 199, 0.18);
   background: rgba(241, 229, 199, 0.11);
+}
+
+.game-screen .reaction-picker__text--recent {
+  background: rgba(241, 229, 199, 0.09);
+}
+
+.game-screen .reaction-picker__recent-copy {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .game-screen .reaction-picker__custom-title {

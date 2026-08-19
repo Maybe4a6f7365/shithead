@@ -97,6 +97,10 @@ export interface TableScreenProps {
   onSendBroadcast?: (broadcast: BroadcastId) => void | boolean
   latestChat?: ChatEvent | null
   onSendChat?: (text: string) => void | boolean
+  /** Accepted custom messages owned by this viewer in the current session. */
+  recentCustomMessages?: readonly string[]
+  /** Local-only receipt used by GameTable to retain per-viewer history. */
+  onLocalChatAccepted?: (text: string) => void
   /** Server-authored table notices and the deliberately rare Ondra easter egg. */
   latestSystemEvent?: SystemEvent | null
 }
@@ -203,7 +207,8 @@ export function TableScreen({
   adhdMode = false, onToggleAdhdMode, adhdSound = 'beat', onSelectAdhdSound, attentionAlertActive = false,
   easterEggEnabled, onToggleEasterEgg,
   connectionBadge, seatOffline, latestEmote, onSendEmote,
-  latestBroadcast, onSendBroadcast, latestChat, onSendChat, latestSystemEvent,
+  latestBroadcast, onSendBroadcast, latestChat, onSendChat,
+  recentCustomMessages = [], onLocalChatAccepted, latestSystemEvent,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
   const current = state.players[state.currentPlayerIdx]
@@ -228,8 +233,11 @@ export function TableScreen({
   const invalidDraftNoticeKey = useRef('')
   const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
   const pendingSelfBroadcast = useRef<{ broadcast: BroadcastId; sentAt: number } | null>(null)
-  const lastReactionSentAt = useRef<number | null>(null)
-  const recentSelfChatTimestamps = useRef<number[]>([])
+  // Pass-and-play reuses one mounted table for several viewers. Keep reaction
+  // gates per viewer so one local player neither blocks nor lends a fresh
+  // burst window to another player when the device changes hands.
+  const lastReactionSentAtByViewer = useRef(new Map<string, number>())
+  const recentSelfChatTimestampsByViewer = useRef(new Map<string, number[]>())
   const debounceRef = useRef(0)
   const pickupDraftBackup = useRef<string[]>([])
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
@@ -558,12 +566,12 @@ export function TableScreen({
 
   const sendEmote = (emote: EmoteId) => {
     const sentAt = Date.now()
-    if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return
     if (!actionsEnabled || onSendEmote?.(emote) === false) {
       explainReactionReconnect()
       return
     }
-    lastReactionSentAt.current = sentAt
+    lastReactionSentAtByViewer.current.set(viewerId, sentAt)
     const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt }
     if (onSendEmote) pendingSelfEmote.current = { emote, sentAt }
     setDisplayedEmote(event)
@@ -571,48 +579,53 @@ export function TableScreen({
 
   const sendBroadcast = (broadcast: BroadcastId) => {
     const sentAt = Date.now()
-    if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return
     if (!actionsEnabled || onSendBroadcast?.(broadcast) === false) {
       explainReactionReconnect()
       return
     }
-    lastReactionSentAt.current = sentAt
+    lastReactionSentAtByViewer.current.set(viewerId, sentAt)
     const event: BroadcastEvent = { playerId: viewerId, broadcast, ts: sentAt }
     if (onSendBroadcast) pendingSelfBroadcast.current = { broadcast, sentAt }
     setDisplayedBroadcast(event)
   }
 
-  const sendChat = (rawText: string) => {
+  const sendChat = (rawText: string): boolean => {
     const text = normalizeChatText(rawText)
-    if (!isValidChatText(text)) return
+    if (!isValidChatText(text)) return false
     const sentAt = Date.now()
-    if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return false
     if (!actionsEnabled) {
       explainReactionReconnect()
-      return
+      return false
     }
-    const burst = acceptedCustomMessageBurst(recentSelfChatTimestamps.current, sentAt)
+    const burst = acceptedCustomMessageBurst(
+      recentSelfChatTimestampsByViewer.current.get(viewerId) ?? [],
+      sentAt,
+    )
     if (!burst.accepted) {
-      recentSelfChatTimestamps.current = burst.timestamps
+      recentSelfChatTimestampsByViewer.current.set(viewerId, burst.timestamps)
       const message = `Custom messages are limited to ${CUSTOM_MESSAGE_BURST_LIMIT} every ${CUSTOM_MESSAGE_BURST_WINDOW_MS / 1000} seconds`
       setFlash(message)
       announcer.sayPolite(message)
       later(2200, () => setFlash(current => current === message ? null : current))
-      return
+      return false
     }
     if (onSendChat && onSendChat(text) === false) {
       explainReactionReconnect()
-      return
+      return false
     }
-    recentSelfChatTimestamps.current = burst.timestamps
-    lastReactionSentAt.current = sentAt
+    recentSelfChatTimestampsByViewer.current.set(viewerId, burst.timestamps)
+    lastReactionSentAtByViewer.current.set(viewerId, sentAt)
     // Multiplayer waits for the authenticated server echo. This keeps a
     // transport drop or authoritative rate-limit rejection from appearing as
     // a message that other players never received. Single-player remains
     // local-only and can render immediately.
-    if (onSendChat) return
+    if (onSendChat) return true
     const event: ChatEvent = { playerId: viewerId, text, ts: sentAt }
     setDisplayedChat(event)
+    onLocalChatAccepted?.(text)
+    return true
   }
 
   const tapCard = (card: CardT, cardZone: Zone) => {
@@ -672,7 +685,7 @@ export function TableScreen({
     for (const c of [...viewer.hand, ...viewer.faceUp]) {
       if (quickActionVisible && quickFollowUpIds.has(c.id)) {
         states.set(c.id, 'joinable')
-        hints.set(c.id, 'drawn match, quick follow-up available')
+        hints.set(c.id, 'matching card, quick follow-up available')
         continue
       }
       if (canBurnIn && interruptIds.has(c.id)) {
@@ -687,7 +700,7 @@ export function TableScreen({
       }
       if (quickFollowUpIds.has(c.id)) {
         states.set(c.id, 'joinable')
-        hints.set(c.id, 'drawn match, quick follow-up available')
+        hints.set(c.id, 'matching card, quick follow-up available')
         continue
       }
       if (invalidId === c.id) {
@@ -815,7 +828,13 @@ export function TableScreen({
             </span>
           </div>
           <div className="game-tools table-tools" aria-label="Table controls">
-            <EmoteButton onSend={sendEmote} onSendBroadcast={sendBroadcast} onSendChat={sendChat} />
+            <EmoteButton
+              key={viewerId}
+              onSend={sendEmote}
+              onSendBroadcast={sendBroadcast}
+              onSendChat={sendChat}
+              recentCustomMessages={recentCustomMessages}
+            />
             <QuietMenu
               onOpenRules={onOpenRules}
               soundOn={soundOn}

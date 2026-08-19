@@ -34,7 +34,7 @@ describe('quick matching draw action', () => {
     )
 
     expect(screen.getByRole('group', { name: /quick follow-up/i })).toBeTruthy()
-    const action = screen.getByRole('button', { name: /play the drawn 7 before the next card/i })
+    const action = screen.getByRole('button', { name: /play the matching 7 before the next card/i })
     expect(action.textContent).toContain('Quick match')
     expect(action.textContent?.toLowerCase()).not.toContain('second')
     expect(screen.queryByRole('button', { name: /pick up/i })).toBeNull()
@@ -78,10 +78,52 @@ describe('quick matching draw action', () => {
       />,
     )
 
-    expect(screen.getByRole('img', { name: /5 of hearts, drawn match, quick follow-up available/i })).toBeTruthy()
+    expect(screen.getByRole('img', { name: /5 of hearts, matching card, quick follow-up available/i })).toBeTruthy()
     expect(screen.getByRole('img', { name: /5 of clubs, 2 of 2/i })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /play the drawn 5 before the next card/i }))
+    fireEvent.click(screen.getByRole('button', { name: /play the matching 5 before the next card/i }))
     expect(followUp).toHaveBeenCalledWith(drawn)
+  })
+
+  it('offers the same explicit action for an entitled active face-up card', () => {
+    const faceUp: Card = { id: 'face-up-five', rank: '5', suit: '♥' }
+    const mine: Player = {
+      id: 'me', name: 'Me', hand: [],
+      faceUp: [faceUp, { id: 'face-up-nine', rank: '9', suit: '♣' }],
+      faceDown: [{ id: 'blind-card', rank: 'A', suit: '♠' }], isOut: false,
+    }
+    const other: Player = {
+      id: 'other', name: 'Other', hand: [{ id: 'other-nine', rank: '9', suit: '♠' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const state: GameState = {
+      phase: 'endgame', rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
+      players: [other, mine], stock: [],
+      pile: [{ cards: [{ id: 'pile-five', rank: '5', suit: '♦' }], cleared: false }],
+      currentPlayerIdx: 0, playDirection: 1, turnCount: 5,
+      winnerId: null, loserId: null, pendingTribute: null,
+      pendingQuickFollowUp: { playerId: 'me', rank: '5', eligibleCardIds: [faceUp.id], sourceSeq: 5 },
+      log: [], seq: 5,
+    }
+    const followUp = vi.fn()
+
+    render(
+      <TableScreen
+        state={state}
+        viewerId="me"
+        viewerActive={false}
+        onPlay={vi.fn()}
+        onQuickFollowUp={followUp}
+        onPickUp={vi.fn()}
+        onLeave={vi.fn()}
+        onOpenRules={vi.fn()}
+        soundOn={false}
+        onToggleSound={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('img', { name: /5 of hearts, matching card, quick follow-up available/i })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /play the matching 5 before the next card/i }))
+    expect(followUp).toHaveBeenCalledWith(faceUp)
   })
 
   it('lets an active player dismiss the quick choice and use normal turn controls', () => {
@@ -119,16 +161,16 @@ describe('quick matching draw action', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: /play the drawn 8/i })).toBeTruthy()
-    const drawnCard = screen.getByRole('button', { name: /8 of hearts, drawn match, quick follow-up available/i })
+    expect(screen.getByRole('button', { name: /play the matching 8/i })).toBeTruthy()
+    const drawnCard = screen.getByRole('button', { name: /8 of hearts, matching card, quick follow-up available/i })
     fireEvent.click(drawnCard)
     expect(screen.getByRole('button', { name: /8 of hearts, selected/i }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.queryByRole('button', { name: /play the drawn 8 before/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /play the matching 8 before/i })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /8 of hearts, selected/i }))
-    expect(screen.getByRole('button', { name: /play the drawn 8 before/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /play the matching 8 before/i })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /continue the normal turn/i }))
-    expect(screen.queryByRole('button', { name: /play the drawn 8/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /play the matching 8/i })).toBeNull()
     expect(screen.getByRole('button', { name: /^pick up$/i })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /9 of clubs, playable/i }))
@@ -153,9 +195,9 @@ describe('expanded table reactions', () => {
 })
 
 describe('rules copy', () => {
-  it('documents the exact quick-draw window and the low-seven exception set', () => {
+  it('documents exact quick-match sources and the low-seven exception set', () => {
     render(<RulesSheet open onClose={vi.fn()} />)
-    expect(screen.getByText(/quick draw .* only cards drawn by that play qualify/i)).toBeTruthy()
+    expect(screen.getByText(/quick match .* non-burning play of your last hand card also unlocks matching face-up cards/i)).toBeTruthy()
     expect(screen.getByText(/only 2, 3 and joker bypass this; 10 cannot be played on an effective 7/i)).toBeTruthy()
   })
 })

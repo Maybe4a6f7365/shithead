@@ -11,6 +11,7 @@ import { GameOverOverlay } from './GameOverOverlay'
 import { RulesSheet } from './RulesSheet'
 import { TributeScreen } from './TributeScreen'
 import { useTurnAlertController, useTurnAlertPreferences } from './turnAlerts'
+import { addRecentCustomMessage } from '../customMessageHistory'
 
 const AI_TICK_MS = 900
 
@@ -24,6 +25,9 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const nextRules = useSPGame(s => s.rules)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [declinedQuickSourceSeq, setDeclinedQuickSourceSeq] = useState<number | null>(null)
+  const [recentCustomMessagesByViewer, setRecentCustomMessagesByViewer] = useState(
+    () => new Map<string, string[]>(),
+  )
   const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
 
   const {
@@ -147,6 +151,14 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           adhdSound={preferences.adhdSound}
           onSelectAdhdSound={selectAdhdSound}
           attentionAlertActive={attentionAlertActive}
+          recentCustomMessages={recentCustomMessagesByViewer.get(viewer.id) ?? []}
+          onLocalChatAccepted={text => {
+            setRecentCustomMessagesByViewer(current => {
+              const next = new Map(current)
+              next.set(viewer.id, addRecentCustomMessage(current.get(viewer.id) ?? [], text))
+              return next
+            })
+          }}
         />
       )}
 
