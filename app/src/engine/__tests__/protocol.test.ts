@@ -6,10 +6,12 @@ import { initGame, seededRng, MAX_LOG_ENTRIES } from '../index'
 import {
   BROADCAST_IDS,
   EMOTE_IDS,
+  MAX_CHAT_MESSAGE_LENGTH,
   ONDRA_MESSAGE_IDS,
   PLAYER_LEFT_MESSAGE_IDS,
   isBroadcastId,
   isClientMsg,
+  normalizeChatText,
   serializeGameState,
   toPlayerSummary,
   PROTOCOL_VERSION,
@@ -26,6 +28,8 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'BURN_IN', cards: [{ id: 'four-a' }, { id: 'four-b' }, { id: 'four-c' }] })).toBe(true)
     expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 7 })).toBe(true)
     expect(isClientMsg({ type: 'CHAT', text: 'hi' })).toBe(true)
+    expect(isClientMsg({ type: 'CHAT', text: '👋 Héllo, 世界!' })).toBe(true)
+    expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(MAX_CHAT_MESSAGE_LENGTH) })).toBe(true)
     for (const emote of EMOTE_IDS) expect(isClientMsg({ type: 'EMOTE', emote })).toBe(true)
     for (const broadcast of BROADCAST_IDS) {
       expect(isClientMsg({ type: 'BROADCAST', broadcast })).toBe(true)
@@ -56,7 +60,14 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: -1 })).toBe(false)
     expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 1.5 })).toBe(false)
     expect(isClientMsg({ type: 'QUICK_FOLLOW_UP', cardId: 'drawn-card', expectedSeq: 1, cards: [] })).toBe(false)
-    expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(201) })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: 'x'.repeat(MAX_CHAT_MESSAGE_LENGTH + 1) })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: '' })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: ' \t\n\u0085 ' })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: `A${'\u0344'.repeat(MAX_CHAT_MESSAGE_LENGTH - 1)}` })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: '\u200B\u2060\uFEFF' })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: '\u200D\uFE0F' })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: 'hi', payload: {} })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: 'hi', version: PROTOCOL_VERSION + 1 })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE', emote: '👍' })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE', emote: 'thumbs-up<script>' })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE' })).toBe(false)
@@ -88,6 +99,14 @@ describe('isClientMsg', () => {
     expect(isClientMsg(null)).toBe(false)
     expect(isClientMsg('string')).toBe(false)
     expect(isClientMsg(42)).toBe(false)
+  })
+
+  it('normalizes chat while preserving Unicode, emoji, and punctuation', () => {
+    expect(normalizeChatText('  Cafe\u0301\t👋 <nice>!?  ')).toBe('Café 👋 <nice>!?')
+    expect(normalizeChatText('one\u0000\n\u0085two')).toBe('one two')
+    expect(normalizeChatText('left\u061C\u202Eright\u2067!')).toBe('leftright!')
+    expect(normalizeChatText('\u200Bhidden\u2060\uFEFF')).toBe('hidden')
+    expect(isClientMsg({ type: 'CHAT', text: 'Family 👨‍👩‍👧‍👦' })).toBe(true)
   })
 
   it('pins protocol v6 reaction, broadcast, and system-event wire ids', () => {

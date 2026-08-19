@@ -216,7 +216,10 @@
 .game-screen .reaction-picker__close:focus-visible,
 .game-screen .reaction-picker__tabs button:focus-visible,
 .game-screen .reaction-picker__emoji:focus-visible,
-.game-screen .reaction-picker__text:focus-visible {
+.game-screen .reaction-picker__text:focus-visible,
+.game-screen .reaction-picker__composer-input:focus-visible,
+.game-screen .reaction-picker__composer-cancel:focus-visible,
+.game-screen .reaction-picker__composer-send:focus-visible {
   outline: 2px solid var(--color-cream);
   outline-offset: -2px;
 }
@@ -341,6 +344,105 @@
 .game-screen .reaction-picker__text:focus-visible {
   border-color: var(--table-line-strong);
   background: rgba(241, 229, 199, 0.12);
+}
+
+.game-screen .reaction-picker__text--custom {
+  display: grid;
+  gap: 1px;
+  border-color: rgba(241, 229, 199, 0.18);
+  background: rgba(241, 229, 199, 0.11);
+}
+
+.game-screen .reaction-picker__custom-title {
+  font-size: 14px;
+  line-height: 19px;
+  font-weight: 760;
+}
+
+.game-screen .reaction-picker__custom-hint {
+  color: var(--table-copy-muted);
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 560;
+}
+
+.game-screen .reaction-picker__composer {
+  padding: 8px 2px 2px;
+  display: grid;
+  gap: 8px;
+}
+
+.game-screen .reaction-picker__composer-label {
+  color: var(--table-copy);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 720;
+}
+
+.game-screen .reaction-picker__composer-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--table-line-strong);
+  border-radius: 12px;
+  color: var(--table-copy);
+  background: rgba(6, 25, 18, 0.38);
+  caret-color: var(--color-cream);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 22px;
+  user-select: text;
+}
+
+.game-screen .reaction-picker__composer-input::placeholder {
+  color: var(--table-copy-faint);
+}
+
+.game-screen .reaction-picker__composer-footer {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.game-screen .reaction-picker__composer-count {
+  color: var(--table-copy-muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-screen .reaction-picker__composer-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.game-screen .reaction-picker__composer-cancel,
+.game-screen .reaction-picker__composer-send {
+  min-width: 72px;
+  min-height: 44px;
+  padding: 8px 13px;
+  border: 1px solid var(--table-line-strong);
+  border-radius: 11px;
+  color: var(--table-copy);
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 720;
+}
+
+.game-screen .reaction-picker__composer-send {
+  border-color: transparent;
+  color: #17392d;
+  background: var(--color-cream);
+}
+
+.game-screen .reaction-picker__composer-send:disabled {
+  opacity: 0.42;
 }
 
 .table-reaction-feedback-stack {

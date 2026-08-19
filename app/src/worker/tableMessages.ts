@@ -204,7 +204,7 @@ export function normalizeStoredPendingOndraEvent(
 
 /**
  * Return the accepted server timestamp, or null while the combined
- * EMOTE/BROADCAST cooldown is closed. Suppressed attempts do not extend it.
+ * CHAT/EMOTE/BROADCAST cooldown is closed. Suppressed attempts do not extend it.
  */
 export function acceptedReactionAt(lastReactionAt: number | null, now: number): number | null {
   if (lastReactionAt !== null && now - lastReactionAt < REACTION_COOLDOWN_MS) return null

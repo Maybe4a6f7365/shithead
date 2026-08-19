@@ -24,6 +24,7 @@ import { feedLine, latestActionEvents, type FeedContext } from './feedText'
 import { useSoundFromLog, emitSoundDebounced, type AdhdAlertSound } from './soundManager'
 import {
   BroadcastFeedback,
+  ChatFeedback,
   EmoteButton,
   EmoteFeedback,
   SystemEventFeedback,
@@ -31,9 +32,17 @@ import {
 import type {
   BroadcastEvent,
   BroadcastId,
+  ChatEvent,
   EmoteEvent,
   EmoteId,
   SystemEvent,
+} from '../engine/protocol'
+import {
+  acceptedCustomMessageBurst,
+  CUSTOM_MESSAGE_BURST_LIMIT,
+  CUSTOM_MESSAGE_BURST_WINDOW_MS,
+  isValidChatText,
+  normalizeChatText,
 } from '../engine/protocol'
 import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
 import { TurnAttentionBeacon } from './turnAlerts'
@@ -86,6 +95,8 @@ export interface TableScreenProps {
   onSendEmote?: (emote: EmoteId) => void | boolean
   latestBroadcast?: BroadcastEvent | null
   onSendBroadcast?: (broadcast: BroadcastId) => void | boolean
+  latestChat?: ChatEvent | null
+  onSendChat?: (text: string) => void | boolean
   /** Server-authored table notices and the deliberately rare Ondra easter egg. */
   latestSystemEvent?: SystemEvent | null
 }
@@ -192,7 +203,7 @@ export function TableScreen({
   adhdMode = false, onToggleAdhdMode, adhdSound = 'beat', onSelectAdhdSound, attentionAlertActive = false,
   easterEggEnabled, onToggleEasterEgg,
   connectionBadge, seatOffline, latestEmote, onSendEmote,
-  latestBroadcast, onSendBroadcast, latestSystemEvent,
+  latestBroadcast, onSendBroadcast, latestChat, onSendChat, latestSystemEvent,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
   const current = state.players[state.currentPlayerIdx]
@@ -212,11 +223,13 @@ export function TableScreen({
   const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
   const [displayedBroadcast, setDisplayedBroadcast] = useState<BroadcastEvent | null>(null)
+  const [displayedChat, setDisplayedChat] = useState<ChatEvent | null>(null)
   const selectionOwner = useRef(viewerId)
   const invalidDraftNoticeKey = useRef('')
   const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
   const pendingSelfBroadcast = useRef<{ broadcast: BroadcastId; sentAt: number } | null>(null)
   const lastReactionSentAt = useRef<number | null>(null)
+  const recentSelfChatTimestamps = useRef<number[]>([])
   const debounceRef = useRef(0)
   const pickupDraftBackup = useRef<string[]>([])
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
@@ -393,6 +406,11 @@ export function TableScreen({
     setDisplayedBroadcast(latestBroadcast)
   }, [latestBroadcast, viewerId])
 
+  useEffect(() => {
+    if (!latestChat) return
+    setDisplayedChat(latestChat)
+  }, [latestChat])
+
   // Surface external (server) errors assertively.
   useEffect(() => { if (error) announcer.sayAssertive(error) }, [error]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -564,6 +582,39 @@ export function TableScreen({
     setDisplayedBroadcast(event)
   }
 
+  const sendChat = (rawText: string) => {
+    const text = normalizeChatText(rawText)
+    if (!isValidChatText(text)) return
+    const sentAt = Date.now()
+    if (!canSendReaction(lastReactionSentAt.current, sentAt)) return
+    if (!actionsEnabled) {
+      explainReactionReconnect()
+      return
+    }
+    const burst = acceptedCustomMessageBurst(recentSelfChatTimestamps.current, sentAt)
+    if (!burst.accepted) {
+      recentSelfChatTimestamps.current = burst.timestamps
+      const message = `Custom messages are limited to ${CUSTOM_MESSAGE_BURST_LIMIT} every ${CUSTOM_MESSAGE_BURST_WINDOW_MS / 1000} seconds`
+      setFlash(message)
+      announcer.sayPolite(message)
+      later(2200, () => setFlash(current => current === message ? null : current))
+      return
+    }
+    if (onSendChat && onSendChat(text) === false) {
+      explainReactionReconnect()
+      return
+    }
+    recentSelfChatTimestamps.current = burst.timestamps
+    lastReactionSentAt.current = sentAt
+    // Multiplayer waits for the authenticated server echo. This keeps a
+    // transport drop or authoritative rate-limit rejection from appearing as
+    // a message that other players never received. Single-player remains
+    // local-only and can render immediately.
+    if (onSendChat) return
+    const event: ChatEvent = { playerId: viewerId, text, ts: sentAt }
+    setDisplayedChat(event)
+  }
+
   const tapCard = (card: CardT, cardZone: Zone) => {
     const preparingNextTurn = !viewerActive && canPreselectVisible && cardZone === zone
     if (!viewerActive && !preparingNextTurn) return
@@ -717,6 +768,9 @@ export function TableScreen({
   const broadcastPlayer = displayedBroadcast
     ? state.players.find(player => player.id === displayedBroadcast.playerId)?.name
     : undefined
+  const chatPlayer = displayedChat
+    ? state.players.find(player => player.id === displayedChat.playerId)?.name
+    : undefined
   const visibleSystemEvent = latestSystemEvent?.kind === 'ondra-mode' && state.phase === 'gameOver'
     ? null
     : latestSystemEvent ?? null
@@ -734,6 +788,7 @@ export function TableScreen({
       <TurnAttentionBeacon active={attentionAlertActive} />
       <div className="table-reaction-feedback-stack" aria-label="Table reactions">
         <SystemEventFeedback event={visibleSystemEvent} />
+        <ChatFeedback event={displayedChat} playerName={chatPlayer} />
         <BroadcastFeedback event={displayedBroadcast} playerName={broadcastPlayer} />
         <EmoteFeedback event={displayedEmote} playerName={emotePlayer} />
       </div>
@@ -760,7 +815,7 @@ export function TableScreen({
             </span>
           </div>
           <div className="game-tools table-tools" aria-label="Table controls">
-            <EmoteButton onSend={sendEmote} onSendBroadcast={sendBroadcast} />
+            <EmoteButton onSend={sendEmote} onSendBroadcast={sendBroadcast} onSendChat={sendChat} />
             <QuietMenu
               onOpenRules={onOpenRules}
               soundOn={soundOn}

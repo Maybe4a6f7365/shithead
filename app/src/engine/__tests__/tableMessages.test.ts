@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { ONDRA_MESSAGE_IDS } from '../protocol'
+import {
+  acceptedCustomMessageBurst,
+  CUSTOM_MESSAGE_BURST_LIMIT,
+  CUSTOM_MESSAGE_BURST_WINDOW_MS,
+  ONDRA_MESSAGE_IDS,
+} from '../protocol'
 import {
   acceptedReactionAt,
   createSeededRandom,
@@ -254,5 +259,25 @@ describe('table message easter eggs', () => {
     expect(first).toBe(1_000)
     expect(acceptedReactionAt(first, 1_000 + REACTION_COOLDOWN_MS - 1)).toBeNull()
     expect(acceptedReactionAt(first, 1_000 + REACTION_COOLDOWN_MS)).toBe(1_700)
+  })
+
+  it('allows three custom messages per rolling window and rejects the fourth', () => {
+    let timestamps: number[] = []
+    for (let index = 0; index < CUSTOM_MESSAGE_BURST_LIMIT; index++) {
+      const result = acceptedCustomMessageBurst(timestamps, 1_000 + index * 800)
+      expect(result.accepted).toBe(true)
+      timestamps = result.timestamps
+    }
+
+    const blocked = acceptedCustomMessageBurst(timestamps, 3_400)
+    expect(blocked.accepted).toBe(false)
+    expect(blocked.timestamps).toHaveLength(CUSTOM_MESSAGE_BURST_LIMIT)
+
+    const reopened = acceptedCustomMessageBurst(
+      blocked.timestamps,
+      1_000 + CUSTOM_MESSAGE_BURST_WINDOW_MS,
+    )
+    expect(reopened.accepted).toBe(true)
+    expect(reopened.timestamps).toHaveLength(CUSTOM_MESSAGE_BURST_LIMIT)
   })
 })

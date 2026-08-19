@@ -11,7 +11,11 @@ import {
 } from '../engine'
 import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
 import {
+  acceptedCustomMessageBurst,
+  CUSTOM_MESSAGE_BURST_LIMIT,
+  CUSTOM_MESSAGE_BURST_WINDOW_MS,
   isClientMsg,
+  normalizeChatText,
   PLAYER_LEFT_MESSAGE_IDS,
   PROTOCOL_VERSION,
   serializeGameState,
@@ -41,7 +45,6 @@ interface Session {
   webSocket: WebSocket
   playerId: string | null
   recentMessages: number[]
-  lastReactionAt: number | null
 }
 
 interface RoomData {
@@ -140,6 +143,10 @@ function makePlayer(name: string): Player {
 
 export class Room {
   private readonly sessions = new Map<string, Session>()
+  /** Ephemeral per-player spam buckets survive socket reconnects within this room instance. */
+  private readonly customMessageTimestamps = new Map<string, number[]>()
+  /** Shared reaction cooldown follows the authenticated player across socket resumes. */
+  private readonly lastReactionAtByPlayer = new Map<string, number>()
   private data: RoomData | null = null
   private code = ''
   private operation: Promise<void> = Promise.resolve()
@@ -229,6 +236,8 @@ export class Room {
     const idleFor = Date.now() - this.data.lastActivity
     if (idleFor >= ROOM_TTL_MS && this.sessions.size === 0) {
       this.data = null
+      this.customMessageTimestamps.clear()
+      this.lastReactionAtByPlayer.clear()
       await this.state.storage.deleteAll()
       return
     }
@@ -246,7 +255,6 @@ export class Room {
       webSocket: server,
       playerId: null,
       recentMessages: [],
-      lastReactionAt: null,
     })
 
     server.accept()
@@ -801,12 +809,39 @@ export class Room {
     return resolution.frame
   }
 
+  /** Relay one canonical, authenticated custom message as an ephemeral reaction. */
   private chat(session: Session, rawText: string): void {
-    if (!session.playerId) return
-    const text = rawText.slice(0, 200).replace(/[^\w\s!?.,-]/g, '')
+    const playerId = session.playerId
+    const data = this.data
+    if (!playerId || !data?.players.some(player => player.id === playerId)) return
+    const gameState = data.state
+    if (
+      !gameState ||
+      (gameState.phase !== 'play' && gameState.phase !== 'endgame') ||
+      !gameState.players.some(player => player.id === playerId)
+    ) {
+      this.send(session, {
+        type: 'ERROR',
+        code: 'INVALID_MOVE',
+        message: 'Custom messages are only available during active games',
+      })
+      return
+    }
+    const text = normalizeChatText(rawText)
     if (!text) return
-
-    this.broadcast({ type: 'CHAT', playerId: session.playerId, text, ts: Date.now() })
+    const ts = acceptedReactionAt(this.lastReactionAtByPlayer.get(playerId) ?? null, Date.now())
+    if (ts === null) return
+    if (!this.takeCustomMessageBurstSlot(playerId, ts)) {
+      this.send(session, {
+        type: 'ERROR',
+        code: 'RATE_LIMITED',
+        message: `Custom messages are limited to ${CUSTOM_MESSAGE_BURST_LIMIT} ` +
+          `every ${CUSTOM_MESSAGE_BURST_WINDOW_MS / 1000} seconds`,
+      })
+      return
+    }
+    this.lastReactionAtByPlayer.set(playerId, ts)
+    this.broadcast({ type: 'CHAT', playerId, text, ts })
   }
 
   /**
@@ -840,9 +875,22 @@ export class Room {
   }
 
   private takeReactionSlot(session: Session): number | null {
-    const acceptedAt = acceptedReactionAt(session.lastReactionAt, Date.now())
-    if (acceptedAt !== null) session.lastReactionAt = acceptedAt
+    const playerId = session.playerId
+    if (!playerId) return null
+    const acceptedAt = acceptedReactionAt(this.lastReactionAtByPlayer.get(playerId) ?? null, Date.now())
+    if (acceptedAt !== null) this.lastReactionAtByPlayer.set(playerId, acceptedAt)
     return acceptedAt
+  }
+
+  private takeCustomMessageBurstSlot(playerId: string, now: number): boolean {
+    for (const [id, timestamps] of this.customMessageTimestamps) {
+      if (timestamps.length === 0 || now - timestamps[timestamps.length - 1] >= CUSTOM_MESSAGE_BURST_WINDOW_MS) {
+        this.customMessageTimestamps.delete(id)
+      }
+    }
+    const result = acceptedCustomMessageBurst(this.customMessageTimestamps.get(playerId) ?? [], now)
+    this.customMessageTimestamps.set(playerId, result.timestamps)
+    return result.accepted
   }
 
   private async leaveRoom(session: Session): Promise<void> {
@@ -850,6 +898,8 @@ export class Room {
     if (!data || !session.playerId) return
 
     const leavingId = session.playerId
+    this.customMessageTimestamps.delete(leavingId)
+    this.lastReactionAtByPlayer.delete(leavingId)
     const leavingPlayer = data.players.find(player => player.id === leavingId)
     delete data.resumeTokens[leavingId]
     data.players = data.players.filter(player => player.id !== leavingId)

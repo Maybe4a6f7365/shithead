@@ -19,7 +19,7 @@
 //    SET_EASTER_EGG {enabled}                host toggles the room easter egg
 //    TRIBUTE_SWAP {winnerCardId, loserCardId} optional public-row exchange
 //    TRIBUTE_SKIP {}                         previous winner declines the exchange
-//    CHAT {text}                             in-room chat (<=200 chars)
+//    CHAT {text}                             ephemeral custom table message (<=200 chars)
 //    EMOTE {emote}                           authenticated ephemeral reaction
 //    BROADCAST {broadcast}                   authenticated preset text reaction
 //    PING {}                                 keepalive
@@ -30,7 +30,7 @@
 //    GAME_STATE {state, version?}            per-viewer game state broadcast
 //    ERROR {code, message}                   action rejected
 //    PLAYER_JOINED / PLAYER_LEFT             lobby deltas
-//    CHAT {playerId, text, ts}               chat relay
+//    CHAT {playerId, text, ts}               ephemeral custom-message relay
 //    EMOTE {playerId, emote, ts}             ephemeral reaction relay
 //    BROADCAST {playerId, broadcast, ts}     ephemeral preset text relay
 //    SYSTEM_EVENT {event}                    typed ephemeral room event
@@ -57,8 +57,55 @@ import { MAX_LOG_ENTRIES } from './index'
 /** Wire protocol version. Bump on any breaking message change. */
 export const PROTOCOL_VERSION = 6
 
+/** Maximum UTF-16 length accepted for one ephemeral player chat message. */
+export const MAX_CHAT_MESSAGE_LENGTH = 200
+export const CUSTOM_MESSAGE_BURST_LIMIT = 3
+export const CUSTOM_MESSAGE_BURST_WINDOW_MS = 10_000
+
 /** Three decks contain at most twelve physical cards of one normal rank. */
 const MAX_CARDS_PER_ACTION = 12
+
+/**
+ * Canonicalize player-authored chat without restricting language or emoji.
+ * React renders the result as text, so punctuation and markup-like characters
+ * remain literal; only terminal/control formatting is removed here.
+ */
+export function normalizeChatText(text: string): string {
+  return text
+    .normalize('NFC')
+    .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+    .replace(/[\u00AD\u180E\u200B\u2060-\u2064\uFEFF\u{E0000}-\u{E007F}]/gu, '')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+}
+
+const CHAT_VISIBLE_CHARACTER = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Mark}]/u
+
+export function isValidChatText(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_CHAT_MESSAGE_LENGTH) return false
+  const text = normalizeChatText(value)
+  return text.length > 0 &&
+    text.length <= MAX_CHAT_MESSAGE_LENGTH &&
+    CHAT_VISIBLE_CHARACTER.test(text)
+}
+
+export interface CustomMessageBurstResult {
+  accepted: boolean
+  timestamps: number[]
+}
+
+/** Shared client/Worker policy: three custom messages per rolling window. */
+export function acceptedCustomMessageBurst(
+  timestamps: readonly number[],
+  now: number,
+): CustomMessageBurstResult {
+  const recent = timestamps.filter(timestamp =>
+    Number.isFinite(timestamp) && timestamp <= now && now - timestamp < CUSTOM_MESSAGE_BURST_WINDOW_MS
+  )
+  if (recent.length >= CUSTOM_MESSAGE_BURST_LIMIT) return { accepted: false, timestamps: recent }
+  return { accepted: true, timestamps: [...recent, now] }
+}
 
 /** Stable wire ids keep presentation (emoji/art/animation) out of the protocol. */
 export const EMOTE_IDS = [
@@ -107,7 +154,7 @@ export const BROADCAST_IDS = [
 ] as const
 export type BroadcastId = typeof BROADCAST_IDS[number]
 
-/** System copy is resolved by the client; the server never accepts free text. */
+/** System copy is resolved by the client; system events never accept client-authored text. */
 export const PLAYER_LEFT_MESSAGE_IDS = ['bye-little-shits'] as const
 export type PlayerLeftMessageId = typeof PLAYER_LEFT_MESSAGE_IDS[number]
 
@@ -132,6 +179,13 @@ export interface BroadcastEvent {
   playerId: string
   broadcast: BroadcastId
   /** Server timestamp; broadcasts are deliberately not persisted in room state. */
+  ts: number
+}
+
+export interface ChatEvent {
+  playerId: string
+  text: string
+  /** Server timestamp; chat is deliberately not persisted in room state. */
   ts: number
 }
 
@@ -184,7 +238,7 @@ export type ServerMsg =
   | { type: 'ERROR'; code: ErrorCode; message: string }
   | { type: 'PLAYER_JOINED'; player: PlayerSummary }
   | { type: 'PLAYER_LEFT'; playerId: string }
-  | { type: 'CHAT'; playerId: string; text: string; ts: number }
+  | ({ type: 'CHAT' } & ChatEvent)
   | ({ type: 'EMOTE' } & EmoteEvent)
   | ({ type: 'BROADCAST' } & BroadcastEvent)
   | { type: 'SYSTEM_EVENT'; event: SystemEvent }
@@ -292,7 +346,7 @@ export function isClientMsg(data: unknown): data is ClientMsg {
         isNonBlankShortString(data.cardId, 128) &&
         Number.isSafeInteger(data.expectedSeq) && Number(data.expectedSeq) >= 0
     case 'CHAT':
-      return typeof data.text === 'string' && data.text.length > 0 && data.text.length <= 200
+      return hasOnlyKeys(data, ['type', 'text', 'version']) && isValidChatText(data.text)
     case 'EMOTE':
       return hasOnlyKeys(data, ['type', 'emote', 'version']) && isEmoteId(data.emote)
     case 'BROADCAST':

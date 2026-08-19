@@ -110,26 +110,33 @@ export class RoomClient {
     return this.gaveUp
   }
 
-  send(msg: ClientMsg) {
+  send(msg: ClientMsg): boolean {
     const stamped = { ...msg, version: PROTOCOL_VERSION } as ClientMsg
-    // Reactions/broadcasts are presence, and QUICK_FOLLOW_UP is bound to one
+    // Chat/reactions/broadcasts are presence, and QUICK_FOLLOW_UP is bound to one
     // exact authoritative sequence. Never replay any after reconnect/auth the
     // way durable game actions are: the next player's move may have already
     // closed the follow-up window (and a rematch may restart seq at zero).
-    if ((stamped.type === 'EMOTE' || stamped.type === 'BROADCAST' || stamped.type === 'QUICK_FOLLOW_UP') &&
-      (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated)) return
+    if ((stamped.type === 'CHAT' || stamped.type === 'EMOTE' || stamped.type === 'BROADCAST' ||
+      stamped.type === 'QUICK_FOLLOW_UP') &&
+      (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated)) return false
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       if (this.isAuthentication(stamped) || stamped.type === 'LEAVE_ROOM' || this.authenticated) {
         this.ws.send(JSON.stringify(stamped))
+        return true
       } else {
         this.queue.push(stamped)
+        return true
       }
     } else {
       // The lifecycle owner re-sends fresh authentication from onOpen. Never
       // retain an offline auth frame: a queued RESUME would carry the token
       // that WELCOME just rotated and could invalidate the recovered session.
-      if (!this.isAuthentication(stamped)) this.queue.push(stamped)
+      if (!this.isAuthentication(stamped)) {
+        this.queue.push(stamped)
+        return true
+      }
     }
+    return false
   }
 
   /** Called after WELCOME: queued gameplay is now safe to send. */
@@ -141,7 +148,8 @@ export class RoomClient {
     for (const msg of queued) {
       // Defensive filtering also protects sessions created by older code or
       // tests that directly seeded the queue before authentication.
-      if (msg.type === 'EMOTE' || msg.type === 'BROADCAST' || msg.type === 'QUICK_FOLLOW_UP') continue
+      if (msg.type === 'CHAT' || msg.type === 'EMOTE' || msg.type === 'BROADCAST' ||
+        msg.type === 'QUICK_FOLLOW_UP') continue
       this.ws.send(JSON.stringify({ ...msg, version: PROTOCOL_VERSION }))
     }
   }
