@@ -96,7 +96,7 @@ describe('legacy worker state migration', () => {
     expect(normalizeGameRules({ deckCount: 99 } as never)).toMatchObject({ deckCount: 1 })
   })
 
-  it('preserves only a fully valid pending replacement-draw entitlement', () => {
+  it('preserves only a fully valid pending quick-match entitlement', () => {
     const base = stateWithOutPlayers([])
     const eligible = base.players[0].hand[0]
     const live: GameState = {
@@ -120,6 +120,50 @@ describe('legacy worker state migration', () => {
     expect(normalizePersistedGameState({
       ...live,
       pendingQuickFollowUp: { ...live.pendingQuickFollowUp!, eligibleCardIds: ['forged-id'] },
+    })?.pendingQuickFollowUp).toBeNull()
+    expect(normalizePersistedGameState({
+      ...live,
+      pile: [{
+        cards: Array.from({ length: 4 }, (_, index) => ({
+          id: `already-burned-${index}`,
+          suit: eligible.suit,
+          rank: eligible.rank,
+        })),
+        cleared: false,
+      }],
+    })?.pendingQuickFollowUp).toBeNull()
+  })
+
+  it('preserves active face-up entitlements but rejects inactive and blind-zone ids', () => {
+    const base = stateWithOutPlayers([])
+    const eligible = base.players[0].faceUp[0]
+    const blocker: Card = { id: 'blocking-hand-card', suit: '♣', rank: '4' }
+    const pending: NonNullable<GameState['pendingQuickFollowUp']> = {
+      playerId: 'a', rank: eligible.rank, eligibleCardIds: [eligible.id], sourceSeq: 9,
+    }
+    const faceUpLive: GameState = {
+      ...base,
+      phase: 'endgame',
+      seq: 9,
+      players: base.players.map(player => player.id === 'a'
+        ? { ...player, hand: [], faceUp: [eligible] }
+        : player),
+      pile: [{ cards: [{ id: 'matching-top', suit: eligible.suit, rank: eligible.rank }], cleared: false }],
+      pendingQuickFollowUp: pending,
+    }
+
+    expect(normalizePersistedGameState(faceUpLive)?.pendingQuickFollowUp).toEqual(pending)
+    expect(normalizePersistedGameState({
+      ...faceUpLive,
+      players: faceUpLive.players.map(player => player.id === 'a'
+        ? { ...player, hand: [blocker] }
+        : player),
+    })?.pendingQuickFollowUp).toBeNull()
+    expect(normalizePersistedGameState({
+      ...faceUpLive,
+      players: faceUpLive.players.map(player => player.id === 'a'
+        ? { ...player, faceUp: [], faceDown: [eligible] }
+        : player),
     })?.pendingQuickFollowUp).toBeNull()
   })
 })

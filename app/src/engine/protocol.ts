@@ -12,7 +12,7 @@
 //    READY {}                                mark rearrange done; game starts when all ready
 //    REARRANGE {handIdx, upIdx}              swap one hand card with one face-up card
 //    PLAY {cards: Card[]}                    play matching cards (unique ids, one rank)
-//    QUICK_FOLLOW_UP {cardId, expectedSeq}   immediately add an eligible replacement draw
+//    QUICK_FOLLOW_UP {cardId, expectedSeq}   immediately add an exact eligible quick match
 //    BURN_IN {cards: Card[]}                 out-of-turn four-of-a-kind completion
 //    PICK_UP {}                              pick up the pile (play/endgame only)
 //    SET_RULES {rules}                       host updates waiting/next-round rules
@@ -389,14 +389,14 @@ const hiddenCard = (id: string): Card => ({ id, suit: null, rank: '3' })
  *  - face-down cards: always placeholders, even for the owner (blind is
  *    blind), except in phase 'gameOver' where everything is revealed.
  *  - pendingQuickFollowUp: owner-only because its presence and eligible ids
- *    reveal the replacement draw; every other live viewer receives null.
+ *    reveal an exact quick-match entitlement; every other live viewer receives null.
  *  - log: capped to the most recent MAX_LOG_ENTRIES entries.
  *  - state.seq passes through unchanged for duplicate/replay detection.
  */
 export function serializeGameState(state: GameState, viewerId: string): GameState {
   const revealAll = state.phase === 'gameOver'
-  // Even the existence of an opponent's follow-up entitlement would reveal
-  // that their replacement draw matched the public play. Keep the complete
+  // Even the existence of an opponent's follow-up entitlement can reveal
+  // that an exact newly available card matched the public play. Keep the complete
   // pending record owner-only; the worker still holds the authoritative ids.
   const pendingQuickFollowUp = revealAll || state.pendingQuickFollowUp?.playerId === viewerId
     ? state.pendingQuickFollowUp

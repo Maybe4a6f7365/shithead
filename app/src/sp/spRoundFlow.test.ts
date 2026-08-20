@@ -123,7 +123,7 @@ describe('single-player burn in', () => {
   })
 })
 
-describe('single-player quick replacement follow-up', () => {
+describe('single-player quick matching follow-up', () => {
   it('lets a human add only the entitled replacement card while preserving the next turn', () => {
     const drawn = card('fresh-5', '5')
     const human = player('human', false, [], [drawn, card('old-5', '5')])
@@ -147,6 +147,37 @@ describe('single-player quick replacement follow-up', () => {
     expect(result.state.players[result.state.currentPlayerIdx].id).toBe('next')
     expect(result.state.pile.flatMap(entry => entry.cards).map(item => item.id)).toContain(drawn.id)
     expect(result.state.players[0].hand.map(item => item.id)).toEqual(['old-5'])
+  })
+
+  it('lets a human immediately play a matching face-up card exposed by their last hand card', () => {
+    const handAce = card('last-hand-ace', 'A')
+    const faceAce = card('face-up-ace', 'A')
+    const faceKing = card('face-up-king', 'K')
+    const human = player('human', false, [faceAce, faceKing], [handAce])
+    const next = player('next', false, [], [card('next-6', '6')])
+    const initial = state([human, next], {
+      phase: 'endgame',
+      currentPlayerIdx: 0,
+      pile: [{ cards: [card('pile-king', 'K')], cleared: false }],
+      rules: { includeJokers: true, winnerSwapsFaceUp: false, deckCount: 1 },
+      turnCount: 3,
+      seq: 3,
+    })
+    useSPGame.setState({ state: initial, meId: 'human' })
+
+    useSPGame.getState().playCards('human', [handAce])
+    const offered = useSPGame.getState().state
+    expect(offered.pendingQuickFollowUp).toEqual({
+      playerId: 'human', rank: 'A', eligibleCardIds: [faceAce.id], sourceSeq: 4,
+    })
+    expect(offered.players[offered.currentPlayerIdx].id).toBe('next')
+
+    useSPGame.getState().quickFollowUp('human', faceAce)
+    const result = useSPGame.getState()
+    expect(result.lastError).toBeNull()
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('next')
+    expect(result.state.players[0].faceUp).toEqual([faceKing])
+    expect(result.state.pendingQuickFollowUp).toBeNull()
   })
 
   it('automatically uses an AI replacement match before the human takes the next turn', () => {

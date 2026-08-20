@@ -50,8 +50,8 @@ export function applyInterruptBurnRequest(
  *
  * The wire carries only an opaque card id plus the exact state sequence the
  * player saw. We resolve that id exclusively through the engine's pending
- * draw entitlement — never through the player's whole hand — so an owned,
- * pre-existing card of the same rank is still rejected. The sequence check
+ * exact-card entitlement — never by ownership or rank alone — so an unrelated
+ * matching card is still rejected. The sequence check
  * makes serialized WebSocket races deterministic: whichever accepted action
  * mutates the room first closes or advances this window.
  */

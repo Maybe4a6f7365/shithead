@@ -24,7 +24,7 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
     lines: [
       'Normally, play one card — or any number of cards of the same rank — that matches or beats the effective pile rank.',
       'Draw from the stock to refill your hand to 3.',
-      'Quick draw — if a refill card matches the rank you just played, you may add that freshly drawn card before the next player plays. Only cards drawn by that play qualify; another matching refill can continue the chain.',
+      'Quick match — if a refill card matches the rank you just played, you may add that exact card before the next player plays. A non-burning play of your last hand card also unlocks matching face-up cards at that moment. Another matching refill or newly activated face-up card can continue the chain.',
       "Can't play — or prefer not to? Pick up the whole pile.",
       'Hand empty: play your face-up cards. Those gone: flip a face-down card blind.',
     ],

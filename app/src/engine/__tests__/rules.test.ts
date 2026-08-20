@@ -484,6 +484,103 @@ describe('confirmed special-card rules: reset 2, copying 3, low 7, stacking 8', 
     expect(result.state.players[result.state.currentPlayerIdx].id).toBe('c')
   })
 
+  it('a final hand pair of 8s still skips two active players', () => {
+    const eights = [c('8'), c('8', '♥')]
+    const state = mkState({
+      players: [
+        { id: 'a', hand: eights },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+        { id: 'd', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+
+    const result = playCards(state, 'a', eights)
+
+    expect(result.error).toBeUndefined()
+    expect(result.state.players[0].isOut).toBe(true)
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('d')
+  })
+
+  it('a final face-up pair of 8s still skips two active players in endgame', () => {
+    const eights = [c('8'), c('8', '♥')]
+    const state = mkState({
+      phase: 'endgame',
+      players: [
+        { id: 'a', faceUp: eights },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+        { id: 'd', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+
+    const result = playCards(state, 'a', eights)
+
+    expect(result.error).toBeUndefined()
+    expect(result.state.players[0].isOut).toBe(true)
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('d')
+  })
+
+  it('a final pair of 8s wraps after skipping both remaining players', () => {
+    const eights = [c('8'), c('8', '♥')]
+    const state = mkState({
+      players: [
+        { id: 'a', hand: eights },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+
+    const result = playCards(state, 'a', eights)
+
+    expect(result.error).toBeUndefined()
+    expect(result.state.players[0].isOut).toBe(true)
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('b')
+  })
+
+  it('a final pair of 8s that completes a quartet burns before applying skips', () => {
+    const eights = [c('8'), c('8', '♥')]
+    const state = mkState({
+      players: [
+        { id: 'a', hand: eights },
+        { id: 'b', hand: [c('9')] },
+        { id: 'c', hand: [c('9')] },
+        { id: 'd', hand: [c('9')] },
+      ],
+      pile: [[c('8', '♦'), c('8', '♣')]],
+    })
+
+    const result = playCards(state, 'a', eights)
+
+    expect(result.error).toBeUndefined()
+    expect(result.state.players[0].isOut).toBe(true)
+    expect(result.state.pile).toEqual([])
+    expect(result.state.players[result.state.currentPlayerIdx].id).toBe('b')
+    expect(result.state.log).toContainEqual({ type: 'CLEAR_PILE', reason: 'quartet' })
+  })
+
+  it('a final pair of 8s ends a two-player game instead of leaving a turn to skip', () => {
+    const eights = [c('8'), c('8', '♥')]
+    const state = mkState({
+      players: [
+        { id: 'a', hand: eights },
+        { id: 'b', hand: [c('9')] },
+      ],
+      pile: [[c('5')]],
+    })
+
+    const result = playCards(state, 'a', eights)
+
+    expect(result.error).toBeUndefined()
+    expect(result.state.players[0].isOut).toBe(true)
+    expect(result.state.phase).toBe('gameOver')
+    expect(result.state.winnerId).toBe('a')
+    expect(result.state.loserId).toBe('b')
+  })
+
   it('four 8s burn as a quartet, so burn precedence keeps the lead', () => {
     const eights = [c('8'), c('8', '♥'), c('8', '♦'), c('8', '♣')]
     const state = mkState({

@@ -8,7 +8,7 @@ import {
 } from '../index'
 import { c, mkState } from './helpers'
 
-describe('drawn-card quick follow-up entitlement', () => {
+describe('exact-card quick follow-up entitlement', () => {
   it('opens only for matching cards actually drawn by a normal visible play', () => {
     const played = c('5')
     const oldFive = c('5', '♥')
@@ -32,7 +32,78 @@ describe('drawn-card quick follow-up entitlement', () => {
     })
     expect(getQuickFollowUpCards(result.state, 'a')).toEqual([drawnFive])
     expect(getQuickFollowUpCards(result.state, 'b')).toEqual([])
-    expect(quickFollowUp(result.state, 'a', [oldFive]).error).toMatch(/not drawn/i)
+    expect(quickFollowUp(result.state, 'a', [oldFive]).error).toMatch(/not eligible/i)
+  })
+
+  it('opens for matching face-up cards at the exact hand-to-face-up transition', () => {
+    const handAce = c('A', '♠', 'last-hand-ace')
+    const faceAce = c('A', '♥', 'newly-active-face-ace')
+    const faceKing = c('K', '♦', 'newly-active-face-king')
+    const blindAce = c('A', '♣', 'blind-ace')
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [handAce], faceUp: [faceAce, faceKing], faceDown: [blindAce] },
+        { id: 'b', hand: [c('4')] },
+      ],
+      pile: [[c('K')]],
+      stock: [],
+    })
+
+    const normal = playCards(state, 'a', [handAce]).state
+    expect(normal.players[normal.currentPlayerIdx].id).toBe('b')
+    expect(normal.pendingQuickFollowUp).toEqual({
+      playerId: 'a', rank: 'A', eligibleCardIds: [faceAce.id], sourceSeq: 1,
+    })
+    expect(getQuickFollowUpCards(normal, 'a')).toEqual([faceAce])
+
+    const quick = quickFollowUp(normal, 'a', [faceAce])
+    expect(quick.error).toBeUndefined()
+    expect(quick.state.players[quick.state.currentPlayerIdx].id).toBe('b')
+    expect(quick.state.players[0].faceUp).toEqual([faceKing])
+    expect(quick.state.players[0].faceDown).toEqual([blindAce])
+    expect(quick.state.pendingQuickFollowUp).toBeNull()
+  })
+
+  it('chains from a matching replacement draw into a newly activated face-up match', () => {
+    const played = c('A', '♠', 'played-ace')
+    const drawn = c('A', '♥', 'drawn-ace')
+    const faceAce = c('A', '♦', 'face-ace')
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [played], faceUp: [faceAce, c('K')], faceDown: [c('4')] },
+        { id: 'b', hand: [c('5')] },
+      ],
+      pile: [[c('Q')]],
+      stock: [drawn],
+    })
+
+    const normal = playCards(state, 'a', [played]).state
+    expect(normal.pendingQuickFollowUp?.eligibleCardIds).toEqual([drawn.id])
+
+    const firstQuick = quickFollowUp(normal, 'a', [drawn]).state
+    expect(firstQuick.pendingQuickFollowUp).toEqual({
+      playerId: 'a', rank: 'A', eligibleCardIds: [faceAce.id], sourceSeq: 2,
+    })
+    expect(getQuickFollowUpCards(firstQuick, 'a')).toEqual([faceAce])
+  })
+
+  it('never carries a visible quick match into the blind face-down zone', () => {
+    const handAce = c('A', '♠', 'last-hand-ace')
+    const faceAce = c('A', '♥', 'last-face-ace')
+    const blindAce = c('A', '♦', 'blind-ace')
+    const state = mkState({
+      players: [
+        { id: 'a', hand: [handAce], faceUp: [faceAce], faceDown: [blindAce] },
+        { id: 'b', hand: [c('5')] },
+      ],
+      pile: [[c('K')]],
+    })
+
+    const normal = playCards(state, 'a', [handAce]).state
+    const quick = quickFollowUp(normal, 'a', [faceAce]).state
+    expect(quick.players[0].faceDown).toEqual([blindAce])
+    expect(quick.pendingQuickFollowUp).toBeNull()
+    expect(getQuickFollowUpCards(quick, 'a')).toEqual([])
   })
 
   it('does not open when the replacement rank differs', () => {
@@ -58,7 +129,7 @@ describe('drawn-card quick follow-up entitlement', () => {
     const result = playCards(state, 'a', pair)
     expect(result.state.pendingQuickFollowUp?.eligibleCardIds).toEqual([drawnA.id, drawnB.id])
     expect(getQuickFollowUpCards(result.state, 'a')).toEqual([drawnA, drawnB])
-    expect(quickFollowUp(result.state, 'a', [oldSix]).error).toMatch(/not drawn/i)
+    expect(quickFollowUp(result.state, 'a', [oldSix]).error).toMatch(/not eligible/i)
     expect(quickFollowUp(result.state, 'a', [drawnA, drawnB]).error).toBeUndefined()
   })
 
@@ -107,7 +178,7 @@ describe('drawn-card quick follow-up entitlement', () => {
       sourceSeq: 2,
     })
     expect(getQuickFollowUpCards(firstQuick, 'a')).toEqual([drawnB, chained])
-    expect(quickFollowUp(firstQuick, 'a', [oldFour]).error).toMatch(/not drawn/i)
+    expect(quickFollowUp(firstQuick, 'a', [oldFour]).error).toMatch(/not eligible/i)
   })
 
   it('burns a cumulative four-of-a-kind and hands the lead to the quick player', () => {
@@ -197,7 +268,7 @@ describe('drawn-card quick follow-up entitlement', () => {
     const ten = c('10')
     const tenReplacement = c('10', '♥')
     const burnState = mkState({
-      players: [{ id: 'a', hand: [ten, c('8'), c('9')] }, { id: 'b', hand: [c('6')] }],
+      players: [{ id: 'a', hand: [ten], faceUp: [c('10', '♦')] }, { id: 'b', hand: [c('6')] }],
       pile: [[c('4')]],
       stock: [tenReplacement],
     })
@@ -222,7 +293,7 @@ describe('drawn-card quick follow-up entitlement', () => {
     })
     const normal = playCards(state, 'a', [played]).state
     expect(quickFollowUp(normal, 'a', [drawn, drawn]).error).toMatch(/duplicate/i)
-    expect(quickFollowUp(normal, 'a', [c('5', '♦', 'unknown')]).error).toMatch(/not drawn/i)
+    expect(quickFollowUp(normal, 'a', [c('5', '♦', 'unknown')]).error).toMatch(/not eligible/i)
     expect(quickFollowUp(normal, 'b', [drawn]).error).toMatch(/no quick follow-up/i)
 
     const stale = {

@@ -53,11 +53,12 @@
 //      ordinary cards must be 7 or lower. An 8 skips one active player per
 //      card in the equal-rank set. Already-out players are never counted;
 //      a quartet burn takes precedence over its skip effect.
-//  D13. After a normal visible play refills from stock, only replacement
-//      cards actually drawn by that action which match the played printed
-//      rank may be played immediately as a quick follow-up. The entitlement
-//      is exact-card-id based, may chain through matching replacement draws,
-//      and expires on the next accepted competing gameplay action.
+//  D13. After a normal visible play, matching replacement cards drawn by that
+//      action may be played immediately as a quick follow-up. If the action
+//      empties the hand and thereby activates the face-up row, matching cards
+//      in that newly active row qualify too. The entitlement is exact-card-id
+//      based, may chain across replacement draws and that one visible-zone
+//      transition, and expires on the next accepted competing gameplay action.
 // ============================================================================
 
 // ---------- Types ----------
@@ -103,8 +104,9 @@ export interface PreviousRoundResult {
 export interface PendingTribute extends PreviousRoundResult {}
 
 /**
- * Server-authoritative entitlement for the just-played actor to add matching
- * replacement cards before another gameplay action wins the race.
+ * Server-authoritative entitlement for the just-played actor to add exact
+ * matching cards newly available from a refill or visible-zone transition
+ * before another gameplay action wins the race.
  */
 export interface PendingQuickFollowUp {
   playerId: string
@@ -405,6 +407,12 @@ function activeZone(player: Player): CardZone {
   if (player.hand.length > 0) return 'hand'
   if (player.faceUp.length > 0) return 'faceUp'
   return 'faceDown'
+}
+
+/** Cards in the zone that may be played with their identities visible. */
+function activeVisibleCards(player: Player): Card[] {
+  const zone = activeZone(player)
+  return zone === 'faceDown' ? [] : player[zone]
 }
 
 /** Flip global phase to 'endgame' once stock is empty and someone is on table cards. */
@@ -713,23 +721,30 @@ function applyAcceptedPlay(
 
   const nextSeq = (state.seq ?? 0) + 1
   let eligibleCardIds: string[] = []
-  if (!cleared && !wentOut && phase !== 'gameOver') {
-    if (kind === 'normal' && zone !== 'faceDown') {
-      eligibleCardIds = drawnCards
+  if (!cleared && !wentOut && phase !== 'gameOver' && kind !== 'interrupt' && zone !== 'faceDown') {
+    const nextActor = nextPlayers[actorIdx]
+    const matchingDrawIds = drawnCards
+      .filter(card => card.rank === realCards[0].rank)
+      .map(card => card.id)
+    // Face-up cards are not generally free follow-ups. They become eligible
+    // only at the precise action that changes the active zone from hand to
+    // faceUp, which covers playing the last hand card (or the last entitled
+    // replacement) without ever exposing a blind face-down identity.
+    const matchingActivatedFaceUpIds = zone === 'hand' && activeZone(nextActor) === 'faceUp'
+      ? nextActor.faceUp
         .filter(card => card.rank === realCards[0].rank)
         .map(card => card.id)
-    } else if (kind === 'quickFollowUp') {
-      const previous = state.pendingQuickFollowUp
-      const remaining = previous?.playerId === playerId && previous.rank === realCards[0].rank
-        ? previous.eligibleCardIds.filter(id => !playedIds.has(id))
-        : []
-      const newlyEligible = drawnCards
-        .filter(card => card.rank === realCards[0].rank)
-        .map(card => card.id)
-      const stillInHand = new Set(nextPlayers[actorIdx]?.hand.map(card => card.id) ?? [])
-      eligibleCardIds = [...new Set([...remaining, ...newlyEligible])]
-        .filter(id => stillInHand.has(id))
-    }
+      : []
+    const previous = kind === 'quickFollowUp' ? state.pendingQuickFollowUp : null
+    const remaining = previous?.playerId === playerId && previous.rank === realCards[0].rank
+      ? previous.eligibleCardIds.filter(id => !playedIds.has(id))
+      : []
+    const stillActiveAndVisible = new Set(activeVisibleCards(nextActor).map(card => card.id))
+    eligibleCardIds = [...new Set([
+      ...remaining,
+      ...matchingDrawIds,
+      ...matchingActivatedFaceUpIds,
+    ])].filter(id => stillActiveAndVisible.has(id))
   }
   const pendingQuickFollowUp: PendingQuickFollowUp | null = eligibleCardIds.length > 0
     ? { playerId, rank: realCards[0].rank, eligibleCardIds, sourceSeq: nextSeq }
@@ -862,7 +877,7 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
 /**
  * Canonical cards the named player may use for the currently open quick
  * follow-up. This never grants eligibility by rank alone: the exact card id
- * must have been recorded when that card was drawn from stock.
+ * must have been recorded when it was drawn or its face-up row became active.
  */
 export function getQuickFollowUpCards(state: GameState, playerId: string): Card[] {
   if (state.phase !== 'play' && state.phase !== 'endgame') return []
@@ -874,11 +889,12 @@ export function getQuickFollowUpCards(state: GameState, playerId: string): Card[
   if (!run || run.rank !== pending.rank) return []
 
   const eligible = new Set(pending.eligibleCardIds)
-  return actor.hand.filter(card => eligible.has(card.id) && card.rank === pending.rank)
+  return activeVisibleCards(actor)
+    .filter(card => eligible.has(card.id) && card.rank === pending.rank)
 }
 
 /**
- * Add one or more entitled replacement cards before a competing action is
+ * Add one or more entitled matching cards before a competing action is
  * accepted. Multiplayer currently submits one card at a time; the engine
  * supports a batch so offline/future callers preserve equal-rank semantics.
  */
@@ -910,14 +926,18 @@ export function quickFollowUp(state: GameState, playerId: string, cards: Card[])
   for (const card of cards) {
     const real = eligible.get(card.id)
     if (!real) {
-      return { state, error: `Card ${card.id} was not drawn for this quick follow-up` }
+      return { state, error: `Card ${card.id} is not eligible for this quick follow-up` }
     }
     realCards.push(real)
   }
 
   const cleared = playClearsPile(realCards) || completesPhysicalBurn(state, realCards)
+  const zone = activeZone(state.players[actorIdx])
+  if (zone === 'faceDown') {
+    return { state, error: 'Face-down cards cannot be used for a quick follow-up' }
+  }
   return {
-    state: applyAcceptedPlay(state, actorIdx, realCards, 'hand', cleared, 'quickFollowUp'),
+    state: applyAcceptedPlay(state, actorIdx, realCards, zone, cleared, 'quickFollowUp'),
   }
 }
 

@@ -59,6 +59,35 @@ describe('worker QUICK_FOLLOW_UP boundary', () => {
     expect(result.state).toBe(state)
   })
 
+  it('accepts only an entitled card from the active face-up zone', () => {
+    const eligible = c('A', '♥', 'eligible-face-ace')
+    const unrelated = c('A', '♠', 'unrelated-face-ace')
+    const state = {
+      ...mkState({
+        players: [
+          { id: 'a', faceUp: [eligible, unrelated], faceDown: [c('4')] },
+          { id: 'b', hand: [c('9')] },
+        ],
+        pile: [[c('A', '♣', 'table-ace')]],
+        currentPlayerIdx: 1,
+        pendingQuickFollowUp: {
+          playerId: 'a', rank: 'A', eligibleCardIds: [eligible.id], sourceSeq: 7,
+        },
+      }),
+      seq: 7,
+    }
+
+    const rejected = applyQuickFollowUpRequest(state, 'a', unrelated.id, 7)
+    expect(rejected.error).toBe('Quick follow-up is not available')
+    expect(rejected.state).toBe(state)
+
+    const accepted = applyQuickFollowUpRequest(state, 'a', eligible.id, 7)
+    expect(accepted.error).toBeUndefined()
+    expect(accepted.state.seq).toBe(8)
+    expect(accepted.state.players[0].faceUp).toEqual([unrelated])
+    expect(accepted.state.players[accepted.state.currentPlayerIdx].id).toBe('b')
+  })
+
   it.each([
     ['stale sequence', 'a', 'fresh-drawn-six', 10],
     ['future sequence', 'a', 'fresh-drawn-six', 12],
@@ -69,7 +98,7 @@ describe('worker QUICK_FOLLOW_UP boundary', () => {
     const { state } = pendingState()
     const result = applyQuickFollowUpRequest(state, playerId, cardId, expectedSeq)
     // One generic response prevents the boundary becoming an oracle for an
-    // opponent's hidden replacement draw or its exact eligible id.
+    // opponent's private quick-match entitlement or its exact eligible id.
     expect(result.error).toBe('Quick follow-up is not available')
     expect(result.state).toBe(state)
     expect(result.state.seq).toBe(11)

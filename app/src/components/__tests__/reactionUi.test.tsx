@@ -110,6 +110,57 @@ describe('modern reaction picker', () => {
     expect(screen.getByRole('button', { name: 'Open reactions' })).toBe(document.activeElement)
   })
 
+  it('offers unique recent messages before presets and resends them through the chat callback', async () => {
+    const sendChat = vi.fn((_text: string) => true)
+    const view = render(
+      <EmoteButton
+        onSend={vi.fn()}
+        onSendChat={sendChat}
+        recentCustomMessages={['Repeat me', '<img src=x onerror=alert(1)>']}
+      />,
+    )
+    const trigger = screen.getByRole('button', { name: 'Open reactions' })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+
+    const panel = screen.getByRole('tabpanel')
+    const choices = within(panel).getAllByRole('button')
+    expect(choices[0].getAttribute('aria-label')).toBe('Custom message')
+    expect(choices[1].getAttribute('aria-label')).toBe('Send again: Repeat me')
+    expect(choices[2].getAttribute('aria-label')).toBe('Send again: <img src=x onerror=alert(1)>')
+    expect(choices[3].getAttribute('aria-label')).toBe(`Broadcast: ${BROADCAST_OPTIONS[0].label}`)
+    expect(screen.getByRole('group', { name: 'Recent messages' })).toBeTruthy()
+    expect(choices[2].querySelector('img')).toBeNull()
+    expect(choices[2].getAttribute('dir')).toBe('auto')
+
+    choices[0].focus()
+    fireEvent.keyDown(choices[0], { key: 'ArrowDown' })
+    expect(choices[1]).toBe(document.activeElement)
+    fireEvent.keyDown(choices[1], { key: 'End' })
+    expect(choices.at(-1)).toBe(document.activeElement)
+
+    view.rerender(
+      <EmoteButton
+        onSend={vi.fn()}
+        onSendChat={sendChat}
+        recentCustomMessages={['Newest', 'Repeat me', '<img src=x onerror=alert(1)>']}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Custom message' })).toBe(document.activeElement)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send again: Repeat me' }))
+    expect(sendChat).toHaveBeenLastCalledWith('Repeat me')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(trigger).toBe(document.activeElement)
+
+    // A rejected resend stays open so the user does not lose context.
+    sendChat.mockReturnValue(false)
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send again: Repeat me' }))
+    expect(screen.getByRole('dialog', { name: 'Reactions' })).toBeTruthy()
+  })
+
   it('supports a five-column arrow grid, Escape, focus return and focus trapping', async () => {
     render(<EmoteButton onSend={vi.fn()} />)
     const trigger = screen.getByRole('button', { name: 'Open reactions' })
@@ -130,6 +181,11 @@ describe('modern reaction picker', () => {
     expect(cells[27]).toBe(document.activeElement)
 
     fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(trigger).toBe(document.activeElement)
+
+    fireEvent.click(trigger)
+    fireEvent.pointerDown(document.body)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(trigger).toBe(document.activeElement)
   })
@@ -282,6 +338,135 @@ describe('reaction receipts and table events', () => {
     expect(document.querySelector('.reaction-feedback--broadcast')?.textContent).toContain('MeHello table 👋')
   })
 
+  it('records accepted local-only messages and resends them through the same guarded path', async () => {
+    const me: Player = {
+      id: 'me', name: 'Me', hand: [{ id: 'five', rank: '5', suit: '♣' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const other: Player = {
+      id: 'other', name: 'Other', hand: [{ id: 'six', rank: '6', suit: '♠' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const state: GameState = {
+      phase: 'play', rules: { includeJokers: false, winnerSwapsFaceUp: false, deckCount: 1 },
+      players: [me, other], stock: [], pile: [], currentPlayerIdx: 0,
+      playDirection: 1, turnCount: 1, winnerId: null, loserId: null,
+      pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 1,
+    }
+    const onLocalChatAccepted = vi.fn()
+    let now = 1_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      const props = {
+        state, viewerId: 'me', viewerActive: true, onPlay: vi.fn(), onPickUp: vi.fn(),
+        onLeave: vi.fn(), onOpenRules: vi.fn(), soundOn: false, onToggleSound: vi.fn(),
+        onLocalChatAccepted,
+      }
+      const view = render(<TableScreen {...props} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+      fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Custom message' }))
+      const input = screen.getByRole('textbox', { name: 'Custom message' })
+      fireEvent.change(input, { target: { value: '  Local   phrase  ' } })
+      fireEvent.submit(input.closest('form')!)
+
+      expect(onLocalChatAccepted).toHaveBeenCalledWith('Local phrase')
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+      now += 800
+      view.rerender(<TableScreen {...props} recentCustomMessages={['Local phrase']} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+      fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Send again: Local phrase' }))
+
+      expect(onLocalChatAccepted).toHaveBeenCalledTimes(2)
+      expect(screen.getAllByText('Local phrase').length).toBeGreaterThan(0)
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('isolates hot-seat chat limits and clears an unsent draft when the viewer changes', async () => {
+    const first: Player = {
+      id: 'first', name: 'First', hand: [{ id: 'first-five', rank: '5', suit: '♣' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const second: Player = {
+      id: 'second', name: 'Second', hand: [{ id: 'second-six', rank: '6', suit: '♠' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const state: GameState = {
+      phase: 'play', rules: { includeJokers: false, winnerSwapsFaceUp: false, deckCount: 1 },
+      players: [first, second], stock: [], pile: [], currentPlayerIdx: 0,
+      playDirection: 1, turnCount: 1, winnerId: null, loserId: null,
+      pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 1,
+    }
+    const acceptedByFirst = vi.fn()
+    const acceptedBySecond = vi.fn()
+    let now = 1_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      const baseProps = {
+        onPlay: vi.fn(), onPickUp: vi.fn(), onLeave: vi.fn(), onOpenRules: vi.fn(),
+        soundOn: false, onToggleSound: vi.fn(),
+      }
+      const view = render(
+        <TableScreen
+          {...baseProps}
+          state={state}
+          viewerId="first"
+          viewerActive
+          onLocalChatAccepted={acceptedByFirst}
+        />,
+      )
+
+      const firstMessages = ['First one', 'First two', 'First three']
+      for (const [index, text] of firstMessages.entries()) {
+        fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+        fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+        fireEvent.click(screen.getByRole('button', { name: 'Custom message' }))
+        const input = screen.getByRole('textbox', { name: 'Custom message' })
+        fireEvent.change(input, { target: { value: text } })
+        fireEvent.submit(input.closest('form')!)
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+        if (index < firstMessages.length - 1) now += 800
+      }
+      expect(acceptedByFirst).toHaveBeenCalledTimes(3)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+      fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Custom message' }))
+      fireEvent.change(screen.getByRole('textbox', { name: 'Custom message' }), {
+        target: { value: 'First private draft' },
+      })
+
+      view.rerender(
+        <TableScreen
+          {...baseProps}
+          state={{ ...state, currentPlayerIdx: 1, seq: 2 }}
+          viewerId="second"
+          viewerActive
+          onLocalChatAccepted={acceptedBySecond}
+        />,
+      )
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByDisplayValue('First private draft')).toBeNull()
+
+      // The second viewer may send immediately even though the first viewer
+      // just exhausted their own three-message window.
+      fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+      fireEvent.click(screen.getByRole('tab', { name: /Text/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Custom message' }))
+      const secondInput = screen.getByRole('textbox', { name: 'Custom message' })
+      fireEvent.change(secondInput, { target: { value: 'Second message' } })
+      fireEvent.submit(secondInput.closest('form')!)
+      expect(acceptedBySecond).toHaveBeenCalledWith('Second message')
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   it('does not show a custom message when reconnecting or when transport rejects it', async () => {
     const me: Player = {
       id: 'me', name: 'Me', hand: [{ id: 'five', rank: '5', suit: '♣' }],
@@ -322,6 +507,7 @@ describe('reaction receipts and table events', () => {
 
     expect(sendChat).not.toHaveBeenCalled()
     expect(screen.queryByText('Never relayed')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Reactions' })).toBeTruthy()
     await waitFor(() => expect(screen.getByText('Reconnecting — reaction not sent')).toBeTruthy())
   })
 
@@ -366,12 +552,13 @@ describe('reaction receipts and table events', () => {
         const input = screen.getByRole('textbox', { name: 'Custom message' })
         fireEvent.change(input, { target: { value: `Burst ${index}` } })
         fireEvent.submit(input.closest('form')!)
-        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+        if (index <= 3) await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
         now += 800
       }
 
       expect(sendChat.mock.calls.map(call => call[0])).toEqual(['Burst 1', 'Burst 2', 'Burst 3'])
       expect(screen.getByText('Custom messages are limited to 3 every 10 seconds')).toBeTruthy()
+      expect(screen.getByRole('dialog', { name: 'Reactions' })).toBeTruthy()
     } finally {
       clock.mockRestore()
     }

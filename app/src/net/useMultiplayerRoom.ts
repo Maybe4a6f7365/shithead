@@ -16,6 +16,7 @@ import type {
   BroadcastEvent, BroadcastId, ChatEvent, ClientMsg, EmoteEvent, EmoteId, RoomSummary, ServerMsg, SystemEvent,
 } from '../engine/protocol'
 import type { GameState } from '../engine'
+import { addRecentCustomMessage } from '../customMessageHistory'
 import { RoomClient, buildRoomWSUrl, getDefaultServerURL } from './RoomClient'
 
 export type RoomStatus =
@@ -116,6 +117,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const [latestEmote, setLatestEmote] = useState<EmoteEvent | null>(null)
   const [latestBroadcast, setLatestBroadcast] = useState<BroadcastEvent | null>(null)
   const [latestChat, setLatestChat] = useState<ChatEvent | null>(null)
+  const [recentCustomMessages, setRecentCustomMessages] = useState<string[]>([])
   const [latestSystemEvent, setLatestSystemEvent] = useState<SystemEvent | null>(null)
   const clientRef = useRef<RoomClient | null>(null)
   const lastSeqRef = useRef<number | null>(null)
@@ -135,6 +137,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     setStatus('connecting')
     setError(null)
     setNotice(null)
+    setRecentCustomMessages([])
     if (emoteTimer.current) clearTimeout(emoteTimer.current)
     emoteTimer.current = null
     setLatestEmote(null)
@@ -225,6 +228,9 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
           case 'WELCOME': {
             clientRef.current?.markAuthenticated()
             clearAuthoritativeNotice()
+            if (sessionRef.current?.playerId && sessionRef.current.playerId !== message.playerId) {
+              setRecentCustomMessages([])
+            }
             setPlayerId(message.playerId)
             setRoom(message.room)
             setError(null)
@@ -274,6 +280,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
               case 'SESSION_EXPIRED':
                 sessionRef.current = null
                 clearSession()
+                setRecentCustomMessages([])
                 setError({ kind: 'session-expired', message: message.message })
                 break
               case 'GAME_IN_PROGRESS':
@@ -339,6 +346,12 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
               playerId: message.playerId,
               text: message.text,
               ts: message.ts,
+            }
+            // History is private to this client and contains only messages the
+            // server authoritatively accepted for this player. Peer messages,
+            // failed sends, and rate-limited attempts are never retained.
+            if (message.playerId === sessionRef.current?.playerId) {
+              setRecentCustomMessages(current => addRecentCustomMessage(current, message.text))
             }
             if (chatTimer.current) clearTimeout(chatTimer.current)
             setLatestChat(received)
@@ -450,6 +463,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     client.send({ type: 'LEAVE_ROOM' })
     sessionRef.current = null
     clearSession()
+    setRecentCustomMessages([])
     return true
   }, [])
 
@@ -458,7 +472,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   return {
     status, attempt, maxAttempts: 5,
     room, gameState, playerId,
-    error, notice, clearNotice, latestEmote, latestBroadcast, latestChat, latestSystemEvent,
+    error, notice, clearNotice, latestEmote, latestBroadcast, latestChat, recentCustomMessages, latestSystemEvent,
     send, sendEmote, sendBroadcast, sendChat, quickFollowUp, retry, tryAgain, leave,
   }
 }

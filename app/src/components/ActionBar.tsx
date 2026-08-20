@@ -36,12 +36,12 @@ export function ActionBar({
           type="button"
           onClick={onQuickFollowUp}
           className="action-button quick-follow-up-action min-h-[48px] px-s4"
-          aria-label={`Play the drawn ${quickFollowUp.rank} before the next card`}
+          aria-label={`Play the matching ${quickFollowUp.rank} before the next card`}
           data-rank={quickFollowUp.rank}
           data-count={quickFollowUp.count}
         >
           <span className="action-button__content quick-follow-up-action__content">
-            <strong className="action-button__label">Play drawn {quickFollowUp.rank}</strong>
+            <strong className="action-button__label">Play matching {quickFollowUp.rank}</strong>
             <span className="action-button__meta">Quick match · play now</span>
           </span>
         </button>

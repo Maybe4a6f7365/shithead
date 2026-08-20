@@ -367,6 +367,48 @@ describe('RoomClient authentication ordering', () => {
     unmount()
   })
 
+  it('retains only authoritative self chat as room-scoped recent messages', () => {
+    const { result, rerender, unmount } = renderHook(
+      ({ roomId }) => useMultiplayerRoom({ roomId, playerName: 'Ada', intent: 'join' }),
+      { initialProps: { roomId: 'ABC123' } },
+    )
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+
+    // An attempted send and a peer relay are not this player's accepted echo.
+    act(() => { result.current.sendChat('Attempted only') })
+    act(() => socket.receive({ type: 'CHAT', playerId: 'p2', text: 'Peer message', ts: 100 }))
+    expect(result.current.recentCustomMessages).toEqual([])
+
+    act(() => socket.receive({ type: 'CHAT', playerId: 'p1', text: ' First   accepted ', ts: 101 }))
+    act(() => socket.receive({ type: 'CHAT', playerId: 'p1', text: 'Second accepted', ts: 102 }))
+    act(() => socket.receive({ type: 'CHAT', playerId: 'p1', text: 'First accepted', ts: 103 }))
+    expect(result.current.recentCustomMessages).toEqual(['First accepted', 'Second accepted'])
+
+    // A transport reconnect does not start a new room session.
+    act(() => socket.close())
+    expect(result.current.recentCustomMessages).toEqual(['First accepted', 'Second accepted'])
+
+    // A replacement authenticated identity must never inherit the prior
+    // player's private MRU list, and expiry clears the current identity too.
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p9', resumeToken: 'replacement-token', room: roomSummary(),
+    }))
+    expect(result.current.recentCustomMessages).toEqual([])
+    act(() => socket.receive({ type: 'CHAT', playerId: 'p9', text: 'Replacement message', ts: 104 }))
+    expect(result.current.recentCustomMessages).toEqual(['Replacement message'])
+    act(() => socket.receive({ type: 'ERROR', code: 'SESSION_EXPIRED', message: 'Expired' }))
+    expect(result.current.recentCustomMessages).toEqual([])
+
+    // A different room is a different message-history boundary.
+    rerender({ roomId: 'XYZ789' })
+    expect(result.current.recentCustomMessages).toEqual([])
+    unmount()
+  })
+
   it('sends preset broadcasts and expires broadcast/system events independently', () => {
     vi.useFakeTimers()
     const { result, unmount } = renderHook(() => useMultiplayerRoom({
