@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Phase } from '../engine'
+import type { GameEvent, Phase } from '../engine'
+import { latestActionEvents } from './feedText'
 import {
   emitSound,
   setSoundMuted,
@@ -11,12 +12,16 @@ import {
 
 const SOUND_KEY = 'shithead:sound'
 const TURN_ALERTS_KEY = 'shithead:turn-alerts'
+const REPEAT_TURN_ALERTS_KEY = 'shithead:repeat-turn-alerts'
 const ADHD_MODE_KEY = 'shithead:adhd-mode'
 const ADHD_SOUND_KEY = 'shithead:adhd-sound'
+
+type PreferenceStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 export interface TurnAlertPreferences {
   soundOn: boolean
   turnAlertsEnabled: boolean
+  repeatTurnAlertsEnabled: boolean
   adhdMode: boolean
   adhdSound: AdhdAlertSound
 }
@@ -24,11 +29,20 @@ export interface TurnAlertPreferences {
 const DEFAULT_PREFERENCES: TurnAlertPreferences = {
   soundOn: false,
   turnAlertsEnabled: true,
+  repeatTurnAlertsEnabled: false,
   adhdMode: false,
   adhdSound: 'beat',
 }
 
-function browserStorage(): Storage | null {
+function browserLocalStorage(): PreferenceStorage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+function browserSessionStorage(): PreferenceStorage | null {
   try {
     return typeof sessionStorage === 'undefined' ? null : sessionStorage
   } catch {
@@ -36,14 +50,53 @@ function browserStorage(): Storage | null {
   }
 }
 
-export function loadTurnAlertPreferences(storage: Pick<Storage, 'getItem'> | null = browserStorage()): TurnAlertPreferences {
-  if (!storage) return { ...DEFAULT_PREFERENCES }
+/**
+ * Prefer durable local storage. A value left by the former tab-scoped version
+ * is copied once and removed only after that copy succeeds.
+ */
+function readStoredValue(
+  key: string,
+  storage: PreferenceStorage | null,
+  legacyStorage: PreferenceStorage | null,
+): string | null {
   try {
-    const storedAdhdSound = storage.getItem(ADHD_SOUND_KEY)
+    const current = storage?.getItem(key) ?? null
+    if (current !== null) {
+      if (legacyStorage && legacyStorage !== storage) {
+        try { legacyStorage.removeItem(key) } catch { /* the durable value already wins */ }
+      }
+      return current
+    }
+  } catch {
+    // A policy-blocked localStorage must not prevent the session fallback.
+  }
+
+  let legacy: string | null = null
+  try { legacy = legacyStorage?.getItem(key) ?? null } catch { return null }
+  if (legacy === null) return null
+
+  if (storage) {
+    try {
+      storage.setItem(key, legacy)
+      try { legacyStorage?.removeItem(key) } catch { /* the durable copy is enough */ }
+    } catch {
+      // Keep the session value when durable storage is unavailable.
+    }
+  }
+  return legacy
+}
+
+export function loadTurnAlertPreferences(
+  storage: PreferenceStorage | null = browserLocalStorage(),
+  legacyStorage: PreferenceStorage | null = browserSessionStorage(),
+): TurnAlertPreferences {
+  try {
+    const storedAdhdSound = readStoredValue(ADHD_SOUND_KEY, storage, legacyStorage)
     return {
-      soundOn: storage.getItem(SOUND_KEY) === 'on',
-      turnAlertsEnabled: storage.getItem(TURN_ALERTS_KEY) !== 'off',
-      adhdMode: storage.getItem(ADHD_MODE_KEY) === 'on',
+      soundOn: readStoredValue(SOUND_KEY, storage, legacyStorage) === 'on',
+      turnAlertsEnabled: readStoredValue(TURN_ALERTS_KEY, storage, legacyStorage) !== 'off',
+      repeatTurnAlertsEnabled: readStoredValue(REPEAT_TURN_ALERTS_KEY, storage, legacyStorage) === 'on',
+      adhdMode: readStoredValue(ADHD_MODE_KEY, storage, legacyStorage) === 'on',
       // Preserve the user's former second-option choice across the rename.
       adhdSound: storedAdhdSound === 'chime' || storedAdhdSound === 'blast' ? 'chime' : 'beat',
     }
@@ -53,14 +106,29 @@ export function loadTurnAlertPreferences(storage: Pick<Storage, 'getItem'> | nul
 }
 
 function persistPreference(key: string, enabled: boolean): void {
-  try { browserStorage()?.setItem(key, enabled ? 'on' : 'off') } catch { /* storage is optional */ }
+  const value = enabled ? 'on' : 'off'
+  try {
+    const storage = browserLocalStorage()
+    if (storage) {
+      storage.setItem(key, value)
+      return
+    }
+  } catch { /* fall back to this tab */ }
+  try { browserSessionStorage()?.setItem(key, value) } catch { /* storage is optional */ }
 }
 
 function persistValue(key: string, value: string): void {
-  try { browserStorage()?.setItem(key, value) } catch { /* storage is optional */ }
+  try {
+    const storage = browserLocalStorage()
+    if (storage) {
+      storage.setItem(key, value)
+      return
+    }
+  } catch { /* fall back to this tab */ }
+  try { browserSessionStorage()?.setItem(key, value) } catch { /* storage is optional */ }
 }
 
-/** Shared sensory preferences for this browser tab's current play session. */
+/** Shared sensory preferences retained for later games on this browser origin. */
 export function useTurnAlertPreferences() {
   const [preferences, setPreferences] = useState(loadTurnAlertPreferences)
   const [previewSound, setPreviewSound] = useState<SoundName | null>(null)
@@ -102,6 +170,14 @@ export function useTurnAlertPreferences() {
     })
   }, [])
 
+  const toggleRepeatTurnAlerts = useCallback(() => {
+    setPreferences(current => {
+      const repeatTurnAlertsEnabled = !current.repeatTurnAlertsEnabled
+      persistPreference(REPEAT_TURN_ALERTS_KEY, repeatTurnAlertsEnabled)
+      return { ...current, repeatTurnAlertsEnabled }
+    })
+  }, [])
+
   const toggleAdhdMode = useCallback(() => {
     setPreferences(current => {
       const adhdMode = !current.adhdMode
@@ -127,18 +203,36 @@ export function useTurnAlertPreferences() {
     }
   }, [preferences.soundOn])
 
-  return { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound }
+  return {
+    preferences,
+    toggleSound,
+    toggleTurnAlerts,
+    toggleRepeatTurnAlerts,
+    toggleAdhdMode,
+    selectAdhdSound,
+  }
 }
 
 interface TurnSnapshot {
   phase: Phase | 'waiting' | null
   gameplay: boolean
   currentPlayerId: string | null
+  turnCount: number | null
+  latestGameplayActorId: string | null
+  latestGameplayActionBurned: boolean
 }
 
 export interface TurnAlertControllerOptions extends TurnAlertPreferences {
   phase: Phase | 'waiting' | null
   currentPlayerId: string | null
+  /** Authoritative accepted-gameplay cursor; null before a game is available. */
+  turnCount: number | null
+  /** Actor of the latest accepted play/pickup action, derived from the game log. */
+  latestGameplayActorId: string | null
+  /** True when that action also contains an authoritative CLEAR_PILE event. */
+  latestGameplayActionBurned: boolean
+  /** Burn cleanup duration supplied by the table's reduced-motion timing. */
+  repeatTurnAlertDelayMs?: number
   /** True only when the current actor is a human controlled on this device. */
   localHumanTurn: boolean
 }
@@ -158,30 +252,63 @@ function vibrate(pattern: VibratePattern): void {
 }
 
 /**
- * Alert only when ownership enters a new local human turn. State sequence
- * changes made by that same player (burns, pickups, quick follow-ups) do not
- * retrigger it, and a first already-live snapshot after refresh stays quiet.
+ * Alert when ownership enters a local turn, plus opted-in consecutive turns
+ * that an accepted action genuinely leaves with the same actor. Merely
+ * rerendering, changing phase, or receiving another actor's quick follow-up
+ * cannot pass the turn-count/actor gate. A first live refresh stays quiet.
  */
-export function shouldStartTurnAlert(previous: TurnSnapshot | null, next: TurnSnapshot): boolean {
+export function shouldStartTurnAlert(
+  previous: TurnSnapshot | null,
+  next: TurnSnapshot,
+  repeatTurnAlertsEnabled = false,
+): boolean {
   if (!previous || previous.phase === null || !next.gameplay || !next.currentPlayerId) return false
   if (!previous.gameplay) return true
-  return previous.currentPlayerId !== null && previous.currentPlayerId !== next.currentPlayerId
+  if (previous.currentPlayerId !== null && previous.currentPlayerId !== next.currentPlayerId) return true
+  return repeatTurnAlertsEnabled &&
+    previous.currentPlayerId === next.currentPlayerId &&
+    previous.turnCount !== null &&
+    next.turnCount === previous.turnCount + 1 &&
+    next.latestGameplayActorId === next.currentPlayerId
+}
+
+export interface AcceptedGameplayActionAlertMeta {
+  actorId: string
+  burned: boolean
+}
+
+/** Public action metadata is sufficient; no private cards or schema field is needed. */
+export function latestAcceptedGameplayAction(
+  log: readonly GameEvent[],
+): AcceptedGameplayActionAlertMeta | null {
+  const events = latestActionEvents([...log])
+  const action = events.find(event =>
+    event.type === 'PLAY_CARDS' || event.type === 'PICK_UP_PILE'
+  )
+  return action && 'playerId' in action
+    ? { actorId: action.playerId, burned: events.some(event => event.type === 'CLEAR_PILE') }
+    : null
 }
 
 /** Owns one-shot sensory cues and the persistent attention visual. */
 export function useTurnAlertController({
   phase,
   currentPlayerId,
+  turnCount,
+  latestGameplayActorId,
+  latestGameplayActionBurned,
+  repeatTurnAlertDelayMs = 0,
   localHumanTurn,
   soundOn,
   turnAlertsEnabled,
+  repeatTurnAlertsEnabled,
   adhdMode,
   adhdSound,
 }: TurnAlertControllerOptions): boolean {
   const [attentionActive, setAttentionActive] = useState(false)
   const previous = useRef<TurnSnapshot | null>(null)
-  const selectedAdhdSound = useRef(adhdSound)
-  selectedAdhdSound.current = adhdSound
+  const sensoryPreferences = useRef({ soundOn, adhdMode, adhdSound })
+  sensoryPreferences.current = { soundOn, adhdMode, adhdSound }
 
   const dismissAttention = useCallback(() => {
     setAttentionActive(false)
@@ -190,13 +317,35 @@ export function useTurnAlertController({
     vibrate(0)
   }, [])
 
+  const startSensoryAlert = useCallback(() => {
+    const sensory = sensoryPreferences.current
+    if (sensory.adhdMode) {
+      setAttentionActive(true)
+      if (sensory.soundOn) emitSound(soundNameForAdhdAlert(sensory.adhdSound))
+      vibrate([120, 80, 120])
+    } else {
+      // Haptics are a turn alert, not audio: muting sound must not suppress
+      // vibration on browsers that support the Vibration API.
+      if (sensory.soundOn) emitSound('turn_yours')
+      vibrate([80, 45, 80])
+    }
+  }, [])
+
   useEffect(() => {
     const next: TurnSnapshot = {
       phase,
       gameplay: isGameplayPhase(phase),
       currentPlayerId,
+      turnCount,
+      latestGameplayActorId,
+      latestGameplayActionBurned,
     }
-    const start = localHumanTurn && shouldStartTurnAlert(previous.current, next)
+    const prior = previous.current
+    const start = localHumanTurn && shouldStartTurnAlert(
+      prior,
+      next,
+      repeatTurnAlertsEnabled,
+    )
     previous.current = next
 
     if (!next.gameplay || !localHumanTurn) {
@@ -206,20 +355,27 @@ export function useTurnAlertController({
     }
     if (!start || !turnAlertsEnabled) return
 
-    if (adhdMode) {
-      setAttentionActive(true)
-      if (soundOn) {
-        const sound = soundNameForAdhdAlert(selectedAdhdSound.current)
-        emitSound(sound)
-      }
-      vibrate([120, 80, 120])
-    } else {
-      // Haptics are a turn alert, not audio: muting sound must not suppress
-      // vibration on browsers that support the Vibration API.
-      if (soundOn) emitSound('turn_yours')
-      vibrate([80, 45, 80])
+    // Any burn-derived local turn waits for the visual pile cleanup. This also
+    // covers an interrupt/quick-follow-up burn that transfers ownership, not
+    // only the common case where the same actor keeps the turn.
+    if (next.latestGameplayActionBurned && repeatTurnAlertDelayMs > 0) {
+      const timer = setTimeout(startSensoryAlert, repeatTurnAlertDelayMs)
+      return () => clearTimeout(timer)
     }
-  }, [adhdMode, currentPlayerId, dismissAttention, localHumanTurn, phase, soundOn, turnAlertsEnabled])
+    startSensoryAlert()
+  }, [
+    currentPlayerId,
+    dismissAttention,
+    latestGameplayActionBurned,
+    latestGameplayActorId,
+    localHumanTurn,
+    phase,
+    repeatTurnAlertDelayMs,
+    repeatTurnAlertsEnabled,
+    startSensoryAlert,
+    turnAlertsEnabled,
+    turnCount,
+  ])
 
   useEffect(() => {
     if (!turnAlertsEnabled) {

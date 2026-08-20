@@ -1,20 +1,27 @@
 import {
   DEFAULT_GAME_RULES,
+  MAX_GAME_TURNS,
   MAX_LOG_ENTRIES,
+  MAX_PLAYERS,
+  createRoundStats,
   getPhysicalTopRun,
   type GameEvent,
   type GameRules,
   type GameState,
   type PendingQuickFollowUp,
   type PendingTribute,
+  type Phase,
   type Player,
+  type PlayerRoundStats,
+  type RoundStats,
 } from '../engine'
 
-type LegacyState = Omit<GameState, 'rules' | 'winnerId' | 'pendingTribute' | 'pendingQuickFollowUp'> & {
+type LegacyState = Omit<GameState, 'rules' | 'winnerId' | 'pendingTribute' | 'pendingQuickFollowUp' | 'roundStats'> & {
   rules?: Partial<GameRules>
   winnerId?: string | null
   pendingTribute?: PendingTribute | null
   pendingQuickFollowUp?: PendingQuickFollowUp | null
+  roundStats?: unknown
 }
 
 /**
@@ -44,6 +51,73 @@ export function normalizeEasterEggEnabled(value: unknown): boolean {
 
 function validPlayerId(value: unknown, players: Player[]): value is string {
   return typeof value === 'string' && players.some(player => player.id === value)
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** Votes never survive into a live/new round and never retain unknown IDs. */
+export function normalizeRematchVotes(
+  value: unknown,
+  players: readonly Player[],
+  phase: Phase | null,
+): Record<string, boolean> {
+  if (phase !== 'gameOver' || !isRecord(value)) return {}
+  return Object.fromEntries(players.flatMap(player =>
+    typeof value[player.id] === 'boolean' ? [[player.id, value[player.id] as boolean]] : []
+  ))
+}
+
+const isCount = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= MAX_GAME_TURNS * 12
+
+function validRoundPlayerStats(value: unknown): value is PlayerRoundStats {
+  if (!isRecord(value)) return false
+  return typeof value.playerId === 'string' && value.playerId.length > 0 && value.playerId.length <= 128 &&
+    typeof value.playerName === 'string' && value.playerName.length > 0 && value.playerName.length <= 32 &&
+    isCount(value.cardsPlayed) && isCount(value.tensPlayed) && isCount(value.burns) &&
+    isCount(value.pickups) && isCount(value.largestPickup) &&
+    value.tensPlayed <= value.cardsPlayed && value.burns <= value.cardsPlayed &&
+    value.pickups <= MAX_GAME_TURNS
+}
+
+/**
+ * Preserve counters only when the whole stored snapshot is internally
+ * coherent. Missing/legacy data starts at zero with `complete=false`; event
+ * logs are deliberately never replayed because they are capped and contain
+ * display duplicates for quick follow-ups.
+ */
+export function normalizeRoundStats(value: unknown, players: Player[]): RoundStats {
+  const fallback = () => createRoundStats(players, false)
+  if (!isRecord(value) || typeof value.complete !== 'boolean' ||
+    !Array.isArray(value.players) || !Array.isArray(value.finishOrder) ||
+    value.players.length > MAX_PLAYERS) return fallback()
+
+  if (!value.players.every(validRoundPlayerStats)) return fallback()
+  const storedPlayers = value.players.map(stats => ({ ...stats }))
+  if (storedPlayers.reduce((sum, stats) => sum + stats.cardsPlayed, 0) > MAX_GAME_TURNS * 12 ||
+    storedPlayers.reduce((sum, stats) => sum + stats.burns, 0) > MAX_GAME_TURNS ||
+    storedPlayers.reduce((sum, stats) => sum + stats.pickups, 0) > MAX_GAME_TURNS) return fallback()
+  const ids = new Set(storedPlayers.map(stats => stats.playerId))
+  if (ids.size !== storedPlayers.length) return fallback()
+  if (value.finishOrder.length > storedPlayers.length ||
+    !value.finishOrder.every(id => typeof id === 'string' && ids.has(id)) ||
+    new Set(value.finishOrder).size !== value.finishOrder.length) return fallback()
+
+  let complete = value.complete
+  for (const player of players) {
+    if (ids.has(player.id)) continue
+    storedPlayers.push(createRoundStats([player], false).players[0])
+    ids.add(player.id)
+    complete = false
+  }
+  if (storedPlayers.length > MAX_PLAYERS) return fallback()
+
+  return {
+    players: storedPlayers,
+    finishOrder: [...value.finishOrder] as string[],
+    complete,
+  }
 }
 
 /**
@@ -119,5 +193,6 @@ export function normalizePersistedGameState(
     loserId: validPlayerId(state.loserId, state.players) ? state.loserId : null,
     pendingTribute,
     pendingQuickFollowUp,
+    roundStats: normalizeRoundStats(state.roundStats, state.players),
   }
 }

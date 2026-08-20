@@ -112,12 +112,12 @@ export class RoomClient {
 
   send(msg: ClientMsg): boolean {
     const stamped = { ...msg, version: PROTOCOL_VERSION } as ClientMsg
-    // Chat/reactions/broadcasts are presence, and QUICK_FOLLOW_UP is bound to one
-    // exact authoritative sequence. Never replay any after reconnect/auth the
-    // way durable game actions are: the next player's move may have already
-    // closed the follow-up window (and a rematch may restart seq at zero).
+    // Chat/reactions/broadcasts are presence, QUICK_FOLLOW_UP is bound to one
+    // exact authoritative sequence, and a rematch vote belongs to one finished
+    // round. Never replay any after reconnect/auth the way durable game actions
+    // are: the table or voting phase may already have moved on.
     if ((stamped.type === 'CHAT' || stamped.type === 'EMOTE' || stamped.type === 'BROADCAST' ||
-      stamped.type === 'QUICK_FOLLOW_UP') &&
+      stamped.type === 'QUICK_FOLLOW_UP' || stamped.type === 'REMATCH_VOTE') &&
       (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated)) return false
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       if (this.isAuthentication(stamped) || stamped.type === 'LEAVE_ROOM' || this.authenticated) {
@@ -149,7 +149,7 @@ export class RoomClient {
       // Defensive filtering also protects sessions created by older code or
       // tests that directly seeded the queue before authentication.
       if (msg.type === 'CHAT' || msg.type === 'EMOTE' || msg.type === 'BROADCAST' ||
-        msg.type === 'QUICK_FOLLOW_UP') continue
+        msg.type === 'QUICK_FOLLOW_UP' || msg.type === 'REMATCH_VOTE') continue
       this.ws.send(JSON.stringify({ ...msg, version: PROTOCOL_VERSION }))
     }
   }

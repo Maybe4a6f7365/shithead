@@ -227,7 +227,7 @@ describe('RoomClient authentication ordering', () => {
     client.close()
   })
 
-  it('drops stale chat, emotes and broadcasts instead of replaying them after authentication', () => {
+  it('drops stale chat, reactions, broadcasts, and rematch votes instead of replaying them', () => {
     let client!: RoomClient
     client = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
@@ -238,9 +238,11 @@ describe('RoomClient authentication ordering', () => {
     expect(client.send({ type: 'CHAT', text: 'stale while offline' })).toBe(false)
     client.send({ type: 'EMOTE', emote: 'laugh' })
     client.send({ type: 'BROADCAST', broadcast: 'shrug' })
+    expect(client.send({ type: 'REMATCH_VOTE', vote: true })).toBe(false)
     socket.open()
     expect(client.send({ type: 'CHAT', text: 'stale before auth' })).toBe(false)
     client.send({ type: 'BROADCAST', broadcast: 'womp-womp' })
+    expect(client.send({ type: 'REMATCH_VOTE', vote: false })).toBe(false)
     client.markAuthenticated()
     expect(socket.sent.map(message => message.type)).toEqual(['JOIN_ROOM'])
 
@@ -283,6 +285,47 @@ describe('RoomClient authentication ordering', () => {
     expect(result.current.leave()).toBe(false)
     expect(loadSession()?.resumeToken).toBe('token')
     unmount()
+  })
+
+  it('treats SESSION_EXPIRED and RESUME_FAILED as terminal without retaining invalid sockets', () => {
+    const first = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+    }))
+
+    act(() => socket.receive({
+      type: 'ERROR', code: 'SESSION_EXPIRED', message: 'You chose not to join this rematch.',
+    }))
+
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(loadSession()).toBeNull()
+    expect(first.result.current.error).toEqual({
+      kind: 'session-expired', message: 'You chose not to join this rematch.',
+    })
+    first.unmount()
+
+    saveSession({ roomCode: 'ABC123', playerId: 'p1', playerName: 'Ada', resumeToken: 'stale-token' })
+    const second = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Ada', intent: 'join',
+    }))
+    const resumeSocket = FakeWebSocket.instances[1]
+    act(() => resumeSocket.open())
+    act(() => resumeSocket.receive({
+      type: 'RESUME_FAILED', version: PROTOCOL_VERSION, reason: 'invalid_token',
+    }))
+
+    expect(resumeSocket.readyState).toBe(FakeWebSocket.CLOSED)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(loadSession()).toBeNull()
+    expect(second.result.current.error).toEqual({
+      kind: 'session-expired', message: 'invalid_token',
+    })
+    second.unmount()
   })
 
   it('keeps an accepted GAME_STATE authoritative over a later stale ROOM_STATE', () => {

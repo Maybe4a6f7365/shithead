@@ -4,7 +4,7 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'https://shithead.not4a6f7365.workers.dev').replace(/\/$/, '')
 const expectedCommit = process.env.EXPECTED_COMMIT || ''
 const deploymentTimeoutMs = Number(process.env.DEPLOYMENT_TIMEOUT_MS || 10 * 60 * 1000)
-const PROTOCOL_VERSION = 6
+const PROTOCOL_VERSION = 7
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const log = message => console.log(`[multiplayer-smoke] ${message}`)

@@ -59,6 +59,8 @@ export interface QuietMenuProps {
   onToggleSound: () => void
   turnAlertsEnabled?: boolean
   onToggleTurnAlerts?: () => void
+  repeatTurnAlertsEnabled?: boolean
+  onToggleRepeatTurnAlerts?: () => void
   adhdMode?: boolean
   onToggleAdhdMode?: () => void
   adhdSound?: AdhdAlertSound
@@ -75,6 +77,8 @@ export function QuietMenu({
   onToggleSound,
   turnAlertsEnabled = true,
   onToggleTurnAlerts,
+  repeatTurnAlertsEnabled = false,
+  onToggleRepeatTurnAlerts,
   adhdMode = false,
   onToggleAdhdMode,
   adhdSound = 'beat',
@@ -185,6 +189,18 @@ export function QuietMenu({
             <span className="quiet-menu__item-icon"><MenuIcon name="bell" /></span>
             <span className="quiet-menu__item-label">Turn alerts</span>
             <span className="quiet-menu__item-value" aria-hidden="true">{turnAlertsEnabled ? 'On' : 'Off'}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={repeatTurnAlertsEnabled}
+            aria-label={`Repeat-turn alerts: ${repeatTurnAlertsEnabled ? 'on' : 'off'}`}
+            onClick={onToggleRepeatTurnAlerts}
+            className="quiet-menu__item quiet-menu__item--repeat-turn-alerts w-full text-left px-s4 min-h-[44px] text-body text-cream"
+          >
+            <span className="quiet-menu__item-icon"><MenuIcon name="bell" /></span>
+            <span className="quiet-menu__item-label">Repeat-turn alerts</span>
+            <span className="quiet-menu__item-value" aria-hidden="true">{repeatTurnAlertsEnabled ? 'On' : 'Off'}</span>
           </button>
           <button
             type="button"

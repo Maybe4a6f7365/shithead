@@ -1,7 +1,7 @@
 // ============================================================================
 // Shared test helpers for engine tests
 // ============================================================================
-import { DEFAULT_GAME_RULES } from '../index'
+import { createRoundStats, DEFAULT_GAME_RULES } from '../index'
 import type {
   Card,
   GameRules,
@@ -11,6 +11,7 @@ import type {
   Phase,
   Player,
   Rank,
+  RoundStats,
   Suit,
 } from '../index'
 
@@ -42,6 +43,7 @@ export interface MkState {
   loserId?: string | null
   pendingTribute?: PendingTribute | null
   pendingQuickFollowUp?: PendingQuickFollowUp | null
+  roundStats?: RoundStats
   log?: GameState['log']
 }
 
@@ -70,6 +72,7 @@ export function mkState(over: MkState): GameState {
     loserId: over.loserId ?? null,
     pendingTribute: over.pendingTribute ?? null,
     pendingQuickFollowUp: over.pendingQuickFollowUp ?? null,
+    roundStats: over.roundStats ?? createRoundStats(players),
     log: over.log ?? [],
     seq: 0,
   }

@@ -163,6 +163,7 @@ describe('quiet menu keyboard navigation', () => {
 
   it('exposes local alert choices and lets the host toggle the Easter egg', () => {
     const toggleTurnAlerts = vi.fn()
+    const toggleRepeatTurnAlerts = vi.fn()
     const toggleSound = vi.fn()
     const toggleAdhdMode = vi.fn()
     const selectAdhdSound = vi.fn()
@@ -174,6 +175,8 @@ describe('quiet menu keyboard navigation', () => {
         onToggleSound={toggleSound}
         turnAlertsEnabled
         onToggleTurnAlerts={toggleTurnAlerts}
+        repeatTurnAlertsEnabled={false}
+        onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
         adhdMode={false}
         onToggleAdhdMode={toggleAdhdMode}
         adhdSound="beat"
@@ -187,13 +190,15 @@ describe('quiet menu keyboard navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
 
     const turnAlerts = screen.getByRole('menuitemcheckbox', { name: 'Turn alerts: on' })
+    const repeatTurnAlerts = screen.getByRole('menuitemcheckbox', { name: 'Repeat-turn alerts: off' })
     const muteSounds = screen.getByRole('menuitemcheckbox', { name: 'Mute sounds: off' })
     const adhdMode = screen.getByRole('menuitemcheckbox', { name: 'ADHD mode: off' })
     const beatSound = screen.getByRole('menuitemradio', { name: 'ADHD sound: Beat' })
     const chimeSound = screen.getByRole('menuitemradio', { name: 'ADHD sound: Chime' })
     const easterEgg = screen.getByRole('menuitemcheckbox', { name: 'Easter egg: on' })
-    expect(screen.getAllByRole('menuitemcheckbox')).toHaveLength(4)
+    expect(screen.getAllByRole('menuitemcheckbox')).toHaveLength(5)
     expect(turnAlerts.getAttribute('aria-checked')).toBe('true')
+    expect(repeatTurnAlerts.getAttribute('aria-checked')).toBe('false')
     expect(muteSounds.getAttribute('aria-checked')).toBe('false')
     expect(adhdMode.getAttribute('aria-checked')).toBe('false')
     expect(easterEgg.tagName).toBe('BUTTON')
@@ -204,6 +209,7 @@ describe('quiet menu keyboard navigation', () => {
     expect(chimeSound).toBe(document.activeElement)
 
     fireEvent.click(turnAlerts)
+    fireEvent.click(repeatTurnAlerts)
     fireEvent.click(muteSounds)
     fireEvent.click(adhdMode)
     expect(beatSound.getAttribute('aria-checked')).toBe('true')
@@ -211,6 +217,7 @@ describe('quiet menu keyboard navigation', () => {
     fireEvent.click(chimeSound)
     fireEvent.click(easterEgg)
     expect(toggleTurnAlerts).toHaveBeenCalledOnce()
+    expect(toggleRepeatTurnAlerts).toHaveBeenCalledOnce()
     expect(toggleSound).toHaveBeenCalledOnce()
     expect(toggleAdhdMode).toHaveBeenCalledOnce()
     expect(selectAdhdSound).toHaveBeenCalledWith('chime')

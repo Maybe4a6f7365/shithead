@@ -9,6 +9,7 @@
 //    RESUME_ROOM {roomCode, playerId, resumeToken} reclaim a seat securely
 //    LEAVE_ROOM {}                           leave (seat kept during a game)
 //    START_GAME {}                           host only; deals and enters rearrange
+//    REMATCH_VOTE {vote}                     yes/no vote after game over
 //    READY {}                                mark rearrange done; game starts when all ready
 //    REARRANGE {handIdx, upIdx}              swap one hand card with one face-up card
 //    PLAY {cards: Card[]}                    play matching cards (unique ids, one rank)
@@ -55,7 +56,7 @@ import type { Card, GameRules, GameState, Phase } from './index'
 import { MAX_LOG_ENTRIES } from './index'
 
 /** Wire protocol version. Bump on any breaking message change. */
-export const PROTOCOL_VERSION = 6
+export const PROTOCOL_VERSION = 7
 
 /** Maximum UTF-16 length accepted for one ephemeral player chat message. */
 export const MAX_CHAT_MESSAGE_LENGTH = 200
@@ -213,6 +214,7 @@ export type ClientMsg =
   | { type: 'RESUME_ROOM'; roomCode: string; playerId: string; resumeToken: string; version?: number }
   | { type: 'LEAVE_ROOM'; version?: number }
   | { type: 'START_GAME'; version?: number }
+  | { type: 'REMATCH_VOTE'; vote: boolean; version?: number }
   | { type: 'READY'; version?: number }
   | { type: 'REARRANGE'; handIdx: number; upIdx: number; version?: number }
   | { type: 'PLAY'; cards: Card[]; version?: number }
@@ -264,6 +266,13 @@ export interface RoomSummary {
   players: PlayerSummary[]
   createdAt: number
   rules: GameRules
+  /** One public yes/no/pending status for each current roster member. */
+  rematchVotes?: RematchVoteSummary[]
+}
+
+export interface RematchVoteSummary {
+  playerId: string
+  vote: 'yes' | 'no' | 'pending'
 }
 
 export type ErrorCode =
@@ -345,6 +354,8 @@ export function isClientMsg(data: unknown): data is ClientMsg {
       return hasOnlyKeys(data, ['type', 'cardId', 'expectedSeq', 'version']) &&
         isNonBlankShortString(data.cardId, 128) &&
         Number.isSafeInteger(data.expectedSeq) && Number(data.expectedSeq) >= 0
+    case 'REMATCH_VOTE':
+      return hasOnlyKeys(data, ['type', 'vote', 'version']) && typeof data.vote === 'boolean'
     case 'CHAT':
       return hasOnlyKeys(data, ['type', 'text', 'version']) && isValidChatText(data.text)
     case 'EMOTE':

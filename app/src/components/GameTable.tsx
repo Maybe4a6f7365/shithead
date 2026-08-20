@@ -3,15 +3,21 @@
 // rearrange sequencing, game-over overlay. The table itself is TableScreen.
 // ============================================================================
 import { useEffect, useState } from 'react'
+import { useReducedMotion } from 'framer-motion'
 import { useSPGame, resolveViewerId, needsPassGate } from '../sp/SPSinglePlayer'
-import { TableScreen } from './TableScreen'
+import { burnCleanupDelay, TableScreen } from './TableScreen'
 import { RearrangeScreen } from './RearrangeScreen'
 import { PassGate } from './PassGate'
 import { GameOverOverlay } from './GameOverOverlay'
 import { RulesSheet } from './RulesSheet'
 import { TributeScreen } from './TributeScreen'
-import { useTurnAlertController, useTurnAlertPreferences } from './turnAlerts'
+import {
+  latestAcceptedGameplayAction,
+  useTurnAlertController,
+  useTurnAlertPreferences,
+} from './turnAlerts'
 import { addRecentCustomMessage } from '../customMessageHistory'
+import { gameOverResults } from './gameOverResults'
 
 const AI_TICK_MS = 900
 
@@ -28,7 +34,14 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const [recentCustomMessagesByViewer, setRecentCustomMessagesByViewer] = useState(
     () => new Map<string, string[]>(),
   )
-  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
+  const {
+    preferences,
+    toggleSound,
+    toggleTurnAlerts,
+    toggleRepeatTurnAlerts,
+    toggleAdhdMode,
+    selectAdhdSound,
+  } = useTurnAlertPreferences()
 
   const {
     playCards, quickFollowUp, interruptBurn, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
@@ -37,11 +50,18 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
 
   const { players, currentPlayerIdx, phase, loserId, turnCount } = state
   const current = players[currentPlayerIdx]
+  const reduceMotion = useReducedMotion()
+  const latestGameplayAction = latestAcceptedGameplayAction(state.log)
   const loser = players.find(p => p.id === loserId)
   const meIsShithead = loserId !== null && loserId === meId
+  const resultsView = phase === 'gameOver' ? gameOverResults(state) : null
   const attentionAlertActive = useTurnAlertController({
     phase,
     currentPlayerId: current?.id ?? null,
+    turnCount,
+    latestGameplayActorId: latestGameplayAction?.actorId ?? null,
+    latestGameplayActionBurned: latestGameplayAction?.burned ?? false,
+    repeatTurnAlertDelayMs: burnCleanupDelay(reduceMotion),
     localHumanTurn: Boolean(current && !current.isAI && !current.isOut && !loserId),
     ...preferences,
   })
@@ -146,6 +166,8 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           onToggleSound={toggleSound}
           turnAlertsEnabled={preferences.turnAlertsEnabled}
           onToggleTurnAlerts={toggleTurnAlerts}
+          repeatTurnAlertsEnabled={preferences.repeatTurnAlertsEnabled}
+          onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
           adhdMode={preferences.adhdMode}
           onToggleAdhdMode={toggleAdhdMode}
           adhdSound={preferences.adhdSound}
@@ -176,6 +198,8 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           rules={nextRules}
           rulesEditable
           onRulesChange={setRules}
+          leaderboard={resultsView?.leaderboard}
+          statsNote={resultsView?.statsNote}
         />
       )}
 

@@ -2524,6 +2524,235 @@
 .game-over-card__title { color: var(--color-burgundy); }
 .game-over-card__rule { background: var(--color-burgundy); }
 .game-over-card .phase-action--quiet { border-color: rgba(23, 36, 29, 0.35); color: #8f3029; }
+.game-over-card {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.game-over-leaderboard,
+.game-over-voting {
+  margin-top: var(--s5);
+  text-align: left;
+}
+.game-over-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+.game-over-section-heading h2 {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1.1;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+.game-over-section-heading > span,
+.game-over-section-heading > strong {
+  flex: 0 0 auto;
+  color: var(--color-burgundy);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.game-over-stats-note,
+.game-over-empty-stats,
+.game-over-start-hint {
+  margin-bottom: var(--s2);
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.game-over-stats-note {
+  padding: var(--s2);
+  border-left: 3px solid var(--color-gold);
+  background: rgba(208, 166, 77, 0.12);
+}
+.game-over-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(23, 36, 29, 0.22);
+  border-radius: 6px;
+}
+.game-over-table-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-cream), inset 0 0 0 4px var(--color-ink);
+}
+.game-over-table {
+  width: 100%;
+  min-width: 500px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.game-over-table th,
+.game-over-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(23, 36, 29, 0.13);
+  text-align: right;
+  white-space: nowrap;
+}
+.game-over-table thead th {
+  color: var(--color-ink-soft);
+  background: rgba(23, 36, 29, 0.06);
+  font-size: 10px;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+.game-over-table th:nth-child(2),
+.game-over-table tbody th { text-align: left; }
+.game-over-table tbody tr:last-child th,
+.game-over-table tbody tr:last-child td { border-bottom: 0; }
+.game-over-table tbody tr[data-loser="true"] { background: rgba(180, 60, 50, 0.07); }
+.game-over-loser-tag,
+.game-over-offline-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: var(--color-cream);
+  background: var(--color-burgundy);
+  font-size: 9px;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.game-over-highlights {
+  margin-top: var(--s2);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.game-over-highlights li {
+  min-width: 0;
+  padding: var(--s2);
+  border: 1px solid rgba(23, 36, 29, 0.16);
+  border-radius: 6px;
+  background: rgba(23, 36, 29, 0.045);
+}
+.game-over-highlights span,
+.game-over-highlights strong { display: block; }
+.game-over-highlights span {
+  color: var(--color-burgundy);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+.game-over-highlights strong {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--color-ink);
+  font-size: 11px;
+  line-height: 1.25;
+}
+.game-over-voting {
+  padding-top: var(--s4);
+  border-top: 2px solid rgba(23, 36, 29, 0.14);
+}
+.game-over-vote-consequence,
+.game-over-vote-pending {
+  margin: 0 0 var(--s2);
+  color: var(--color-ink-soft);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.game-over-vote-pending {
+  margin-top: var(--s2);
+  margin-bottom: 0;
+  color: var(--color-burgundy);
+  font-weight: 800;
+  letter-spacing: 0.025em;
+}
+.game-over-vote-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s2);
+}
+.game-over-vote-button {
+  min-height: 44px;
+  border: 2px solid rgba(23, 36, 29, 0.28);
+  border-radius: var(--radius-button);
+  color: var(--color-ink);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: var(--tracking-button);
+  text-transform: uppercase;
+}
+.game-over-vote-button[data-selected="true"] {
+  border-color: var(--color-felt-deep);
+  color: var(--color-cream);
+  background: var(--color-felt-deep);
+}
+.game-over-vote-button:disabled { opacity: 0.55; }
+.game-over-vote-list {
+  margin-block: var(--s2);
+  display: grid;
+  gap: 4px;
+}
+.game-over-vote-list li {
+  min-height: 30px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  background: rgba(23, 36, 29, 0.045);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.game-over-vote-list li > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.game-over-vote-list li[data-connected="true"] .game-over-offline-tag { display: none; }
+.game-over-offline-tag {
+  color: var(--color-ink-soft);
+  background: rgba(23, 36, 29, 0.1);
+}
+.game-over-vote-tag {
+  margin-left: auto;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: var(--color-ink-soft);
+  background: rgba(23, 36, 29, 0.1);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.game-over-vote-tag--yes { color: #173d2f; background: rgba(146, 184, 154, 0.45); }
+.game-over-vote-tag--no { color: #7c2923; background: rgba(180, 60, 50, 0.16); }
+.game-over-start-button { margin-top: var(--s2); }
+.game-over-start-hint { margin: var(--s2) 0 0; text-align: center; }
+.game-over-vote-waiting {
+  min-height: 44px;
+  margin-top: var(--s2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-ink-soft);
+  font-size: 13px;
+  text-align: center;
+}
+@media (max-width: 520px) {
+  .game-over-card { padding: var(--s4); }
+  .game-over-highlights { grid-template-columns: 1fr; }
+  .game-over-highlights li {
+    display: grid;
+    grid-template-columns: minmax(90px, 0.6fr) 1fr;
+    align-items: baseline;
+    gap: var(--s2);
+  }
+  .game-over-highlights strong { margin-top: 0; }
+}
 .state-panel .phase-action--quiet { border-color: rgba(23, 36, 29, 0.35); color: #8f3029; }
 .state-panel .phase-action--primary {
   border: 2px solid #7c2923;

@@ -14,6 +14,8 @@ import {
   normalizeEasterEggEnabled,
   normalizeGameRules,
   normalizePersistedGameState,
+  normalizeRematchVotes,
+  normalizeRoundStats,
 } from '../../worker/migrateState'
 import { applyPlayerForfeit } from '../../worker/forfeit'
 
@@ -42,18 +44,81 @@ describe('legacy worker state migration', () => {
     expect(normalizeEasterEggEnabled(true)).toBe(true)
   })
 
+  it('restores only Boolean votes for current members of a finished round', () => {
+    const players = stateWithOutPlayers([]).players
+    expect(normalizeRematchVotes({ a: true, b: false, c: 'yes', forged: true }, players, 'gameOver'))
+      .toEqual({ a: true, b: false })
+    expect(normalizeRematchVotes({ a: true }, players, 'play')).toEqual({})
+    expect(normalizeRematchVotes(null, players, 'gameOver')).toEqual({})
+  })
+
   it('fills rule defaults and the new nullable fields', () => {
     const legacy = stateWithOutPlayers([]) as unknown as Record<string, unknown>
     delete legacy.rules
     delete legacy.winnerId
     delete legacy.pendingTribute
     delete legacy.pendingQuickFollowUp
+    delete legacy.roundStats
 
     const migrated = normalizePersistedGameState(legacy as never)
     expect(migrated?.rules).toEqual(DEFAULT_GAME_RULES)
     expect(migrated?.winnerId).toBeNull()
     expect(migrated?.pendingTribute).toBeNull()
     expect(migrated?.pendingQuickFollowUp).toBeNull()
+    expect(migrated?.roundStats).toMatchObject({ complete: false, finishOrder: [] })
+    expect(migrated?.roundStats?.players.map(player => player.playerName)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('never reconstructs missing counters from the capped display log', () => {
+    const state = stateWithOutPlayers(['a'], [
+      { type: 'PLAY_CARDS', playerId: 'a', cards: [{ id: 'ten', suit: '♠', rank: '10' }] },
+      { type: 'QUICK_FOLLOW_UP', playerId: 'a', cards: [{ id: 'ten', suit: '♠', rank: '10' }] },
+      { type: 'CLEAR_PILE', reason: 'ten' },
+      { type: 'PICK_UP_PILE', playerId: 'b' },
+    ])
+    const legacy = { ...state, roundStats: undefined }
+    const migrated = normalizePersistedGameState(legacy)!
+    expect(migrated.roundStats?.complete).toBe(false)
+    expect(migrated.roundStats?.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ playerId: 'a', cardsPlayed: 0, tensPlayed: 0, burns: 0 }),
+      expect.objectContaining({ playerId: 'b', pickups: 0, largestPickup: 0 }),
+    ]))
+  })
+
+  it('preserves coherent counters and rejects corrupt or incomplete snapshots safely', () => {
+    const state = stateWithOutPlayers([])
+    const coherent = {
+      complete: true,
+      finishOrder: ['a'],
+      players: state.players.map((player, index) => ({
+        playerId: player.id,
+        playerName: player.name,
+        cardsPlayed: index + 1,
+        tensPlayed: 0,
+        burns: 0,
+        pickups: 0,
+        largestPickup: 0,
+      })),
+    }
+    expect(normalizeRoundStats(coherent, state.players)).toEqual(coherent)
+    expect(normalizeRoundStats({ ...coherent, finishOrder: ['forged'] }, state.players).complete).toBe(false)
+    expect(normalizeRoundStats({
+      ...coherent,
+      players: coherent.players.slice(1),
+      finishOrder: [],
+    }, state.players)).toMatchObject({ complete: false })
+    expect(normalizeRoundStats({
+      ...coherent,
+      players: coherent.players.map((player, index) => index === 0
+        ? { ...player, cardsPlayed: 1, tensPlayed: 2 }
+        : player),
+    }, state.players)).toMatchObject({ complete: false })
+    expect(normalizeRoundStats({
+      ...coherent,
+      players: coherent.players.map((player, index) => index === 0
+        ? { ...player, cardsPlayed: Number.MAX_SAFE_INTEGER }
+        : player),
+    }, state.players)).toMatchObject({ complete: false })
   })
 
   it('derives an unambiguous sole player out', () => {
@@ -181,6 +246,7 @@ describe('worker forfeit semantics', () => {
     expect(next.phase).toBe('play')
     expect(next.players.map(player => player.id)).toEqual(['b', 'c'])
     expect(next.players[next.currentPlayerIdx].id).toBe('b')
+    expect(next.roundStats?.players.some(stats => stats.playerId === 'a' && stats.playerName === 'A')).toBe(true)
     expect(next.winnerId).toBe('a')
     expect(next.loserId).toBeNull()
     expect(next.seq).toBe(8)

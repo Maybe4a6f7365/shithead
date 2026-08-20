@@ -42,6 +42,8 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'SET_EASTER_EGG', enabled: false, version: PROTOCOL_VERSION })).toBe(true)
     expect(isClientMsg({ type: 'TRIBUTE_SWAP', winnerCardId: 'a', loserCardId: 'b' })).toBe(true)
     expect(isClientMsg({ type: 'TRIBUTE_SKIP' })).toBe(true)
+    expect(isClientMsg({ type: 'REMATCH_VOTE', vote: true })).toBe(true)
+    expect(isClientMsg({ type: 'REMATCH_VOTE', vote: false, version: PROTOCOL_VERSION })).toBe(true)
   })
 
   it('rejects malformed or oversized payloads', () => {
@@ -94,6 +96,10 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'SET_EASTER_EGG', enabled: 'false' })).toBe(false)
     expect(isClientMsg({ type: 'SET_EASTER_EGG', enabled: false, surprise: true })).toBe(false)
     expect(isClientMsg({ type: 'TRIBUTE_SWAP', winnerCardId: 'same', loserCardId: 'same' })).toBe(false)
+    expect(isClientMsg({ type: 'REMATCH_VOTE' })).toBe(false)
+    expect(isClientMsg({ type: 'REMATCH_VOTE', vote: 'yes' })).toBe(false)
+    expect(isClientMsg({ type: 'REMATCH_VOTE', vote: true, playerId: 'forged' })).toBe(false)
+    expect(isClientMsg({ type: 'REMATCH_VOTE', vote: true, version: PROTOCOL_VERSION + 1 })).toBe(false)
     expect(isClientMsg({ type: 'NOPE' })).toBe(false)
     expect(isClientMsg({})).toBe(false)
     expect(isClientMsg(null)).toBe(false)
@@ -109,8 +115,8 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'CHAT', text: 'Family 👨‍👩‍👧‍👦' })).toBe(true)
   })
 
-  it('pins protocol v6 reaction, broadcast, and system-event wire ids', () => {
-    expect(PROTOCOL_VERSION).toBe(6)
+  it('pins protocol v7 reaction, broadcast, and system-event wire ids', () => {
+    expect(PROTOCOL_VERSION).toBe(7)
     expect(EMOTE_IDS).toEqual([
       'thumbs-up', 'laugh', 'wow', 'fire', 'sad', 'cry', 'heart', 'clap',
       'angry', 'rage', 'middle-finger', 'clown', 'skull', 'poop', 'eyes', 'peach',

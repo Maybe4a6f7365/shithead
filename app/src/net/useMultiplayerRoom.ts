@@ -2,12 +2,12 @@
 // useMultiplayerRoom — room socket lifecycle, session resume, seq guard,
 // truthful connection states (§4.6, Appendix A.10).
 //
-// RESUME CONTRACT (protocol v6):
+// RESUME CONTRACT (protocol v7):
 //  - WELCOME carries `resumeToken` (per-player secret). We persist
 //    { roomCode, playerId, resumeToken, playerName } in localStorage.
 //  - RESUME_ROOM is sent as { type, roomCode, playerId, resumeToken }.
-//  - New server message RESUME_FAILED { reason } clears credentials and
-//    routes to the lobby with an explicit "session expired" state.
+//  - New server message RESUME_FAILED { reason } clears credentials, closes
+//    the invalid transport, and routes to an explicit "session expired" state.
 //  - On successful resume the server ROTATES the token; the WELCOME that
 //    answers RESUME_ROOM carries the new one and is stored.
 // ============================================================================
@@ -282,6 +282,11 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
                 clearSession()
                 setRecentCustomMessages([])
                 setError({ kind: 'session-expired', message: message.message })
+                // This is a terminal server decision (including a rematch seat
+                // release), not a transient disconnect. Stop the transport so
+                // it cannot reconnect with an invalidated token or retain an
+                // idle socket against the room cap.
+                clientRef.current?.close()
                 break
               case 'GAME_IN_PROGRESS':
                 if (authoritativeStateRef.current) showNotice(message.message)
@@ -300,9 +305,11 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
           case 'RESUME_FAILED': {
             // New worker: resume token rejected — clear and route to lobby
             // with an explicit session-expired state (never silently dump).
+            // This is terminal: do not retain or reconnect an invalid socket.
             sessionRef.current = null
             clearSession()
             setError({ kind: 'session-expired', message: message.reason || 'Your session has expired.' })
+            clientRef.current?.close()
             break
           }
           case 'EMOTE': {

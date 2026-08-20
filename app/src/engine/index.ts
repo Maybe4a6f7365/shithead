@@ -116,6 +116,31 @@ export interface PendingQuickFollowUp {
   sourceSeq: number
 }
 
+/** Public, server-authoritative counters for one player's current round. */
+export interface PlayerRoundStats {
+  playerId: string
+  /** Snapshot survives a player leaving after they have gone out. */
+  playerName: string
+  cardsPlayed: number
+  tensPlayed: number
+  burns: number
+  pickups: number
+  largestPickup: number
+}
+
+/**
+ * Round counters are accumulated at the action that mutates the game. They
+ * deliberately do not derive from the capped event ring: quick follow-ups
+ * have two display events, while pickup events do not retain their size.
+ */
+export interface RoundStats {
+  players: PlayerRoundStats[]
+  /** Players who emptied every zone, in the order they went out. */
+  finishOrder: string[]
+  /** False when an older persisted round began before counters existed. */
+  complete: boolean
+}
+
 export type Phase = 'lobby' | 'rearrange' | 'tribute' | 'play' | 'endgame' | 'roundEnd' | 'gameOver'
 
 export interface GameState {
@@ -131,6 +156,8 @@ export interface GameState {
   loserId: string | null  // player who is "shithead" (last with cards)
   pendingTribute: PendingTribute | null
   pendingQuickFollowUp: PendingQuickFollowUp | null
+  /** Optional for source compatibility; every new deal and migrated room has it. */
+  roundStats?: RoundStats
   log: GameEvent[]
   /**
    * Monotonic action sequence number, assigned by the engine: 0 at init,
@@ -355,6 +382,68 @@ function completesPhysicalBurn(state: GameState, cards: Card[]): boolean {
 
 // ---------- Internal helpers ----------
 
+/** Build zeroed counters from the immutable participant/name snapshot. */
+export function createRoundStats(players: readonly Player[], complete = true): RoundStats {
+  return {
+    players: players.map(player => ({
+      playerId: player.id,
+      playerName: player.name,
+      cardsPlayed: 0,
+      tensPlayed: 0,
+      burns: 0,
+      pickups: 0,
+      largestPickup: 0,
+    })),
+    finishOrder: [],
+    complete,
+  }
+}
+
+function currentRoundStats(state: GameState): RoundStats {
+  return state.roundStats ?? createRoundStats(state.players, false)
+}
+
+function updateRoundPlayer(
+  state: GameState,
+  playerId: string,
+  update: (stats: PlayerRoundStats) => PlayerRoundStats,
+): RoundStats {
+  const current = currentRoundStats(state)
+  const player = state.players.find(candidate => candidate.id === playerId)
+  let found = false
+  const players = current.players.map(stats => {
+    if (stats.playerId !== playerId) return stats
+    found = true
+    return update(stats)
+  })
+  if (!found && player) {
+    players.push(update({
+      playerId: player.id,
+      playerName: player.name,
+      cardsPlayed: 0,
+      tensPlayed: 0,
+      burns: 0,
+      pickups: 0,
+      largestPickup: 0,
+    }))
+  }
+  return { ...current, players }
+}
+
+function recordFinished(roundStats: RoundStats, playerId: string): RoundStats {
+  return roundStats.finishOrder.includes(playerId)
+    ? roundStats
+    : { ...roundStats, finishOrder: [...roundStats.finishOrder, playerId] }
+}
+
+function recordPickup(state: GameState, playerId: string, count: number): RoundStats {
+  return updateRoundPlayer(state, playerId, stats => ({
+    ...stats,
+    pickups: stats.pickups + 1,
+    largestPickup: Math.max(stats.largestPickup, count),
+  }))
+}
+
 /** Append events, keeping only the most recent MAX_LOG_ENTRIES (ring buffer). */
 function appendLog(log: GameEvent[], ...events: GameEvent[]): GameEvent[] {
   const next = [...log, ...events]
@@ -523,6 +612,7 @@ export function initGame(cfg: InitConfig): GameState {
     loserId: null,
     pendingTribute,
     pendingQuickFollowUp: null,
+    roundStats: createRoundStats(players),
     log: [{ type: 'PHASE_CHANGE', phase: 'rearrange' }],
     seq: 0,
   }
@@ -750,6 +840,14 @@ function applyAcceptedPlay(
     ? { playerId, rank: realCards[0].rank, eligibleCardIds, sourceSeq: nextSeq }
     : null
 
+  let roundStats = updateRoundPlayer(state, playerId, stats => ({
+    ...stats,
+    cardsPlayed: stats.cardsPlayed + realCards.length,
+    tensPlayed: stats.tensPlayed + realCards.filter(card => card.rank === '10').length,
+    burns: stats.burns + (cleared ? 1 : 0),
+  }))
+  if (wentOut) roundStats = recordFinished(roundStats, playerId)
+
   const events: GameEvent[] = [
     ...(zone === 'faceDown'
       ? [{ type: 'BLIND_REVEAL' as const, playerId, card: realCards[0], success: true }]
@@ -775,6 +873,7 @@ function applyAcceptedPlay(
     winnerId,
     loserId,
     pendingQuickFollowUp,
+    roundStats,
     log: appendLog(state.log, ...events),
     seq: nextSeq,
   })
@@ -855,6 +954,7 @@ export function playCards(state: GameState, playerId: string, cards: Card[]): Pl
         currentPlayerIdx: nextIdx,
         turnCount: state.turnCount + 1,
         pendingQuickFollowUp: null,
+        roundStats: recordPickup(state, playerId, collected.length),
         log: appendLog(
           state.log,
           { type: 'BLIND_REVEAL', playerId, card: revealed, success: false },
@@ -1061,6 +1161,7 @@ export function pickUpPile(state: GameState, playerId: string): PlayResult {
       phase,
       turnCount: state.turnCount + 1,
       pendingQuickFollowUp: null,
+      roundStats: recordPickup(state, playerId, collected.length),
       log: appendLog(state.log, { type: 'PICK_UP_PILE', playerId }),
       seq: (state.seq ?? 0) + 1,
     }),

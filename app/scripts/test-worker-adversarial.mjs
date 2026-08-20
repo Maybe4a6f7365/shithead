@@ -7,7 +7,7 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '')
 const wsBase = baseUrl.replace(/^http/, 'ws')
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-const PROTOCOL_VERSION = 6
+const PROTOCOL_VERSION = 7
 
 let passed = 0
 function ok(name) {
@@ -242,10 +242,11 @@ async function main() {
   const fail2 = await attacker.waitType('RESUME_FAILED')
   assert.equal(fail2.reason, 'invalid_token')
   await sleep(300)
+  assert.equal(attacker.closeCode, 4003, 'failed resume socket must be closed')
   assert.equal(host.closeCode, null, 'victim socket must not be closed by a failed hijack')
   host.send({ type: 'PING' })
   await host.waitType('PONG')
-  ok('T3 stolen playerId + wrong token -> RESUME_FAILED, victim seat intact')
+  ok('T3 stolen playerId + wrong token -> terminal RESUME_FAILED, victim seat intact')
 
   // ---- T4: resume happy path rotates the token; old token is single-use
   await host.close()
@@ -274,7 +275,9 @@ async function main() {
     resumeToken: hostToken1, version: PROTOCOL_VERSION,
   })
   await stale.waitType('RESUME_FAILED')
-  ok('T4 resume rotates token; old (rotated-out) token is rejected')
+  await sleep(150)
+  assert.equal(stale.closeCode, 4003, 'stale-token resume socket must be closed')
+  ok('T4 resume rotates token; old token gets a terminal rejection')
 
   // ---- T5: unknown room -> RESUME_FAILED room_not_found
   const stranger = await new Peer('stranger', `${wsBase}/api/room/ZZZZZ9/ws`).connect()
@@ -284,8 +287,9 @@ async function main() {
   })
   const fail3 = await stranger.waitType('RESUME_FAILED')
   assert.equal(fail3.reason, 'room_not_found')
-  await stranger.close()
-  ok('T5 RESUME in a nonexistent room -> RESUME_FAILED room_not_found')
+  await sleep(150)
+  assert.equal(stranger.closeCode, 4003, 'unknown-room resume socket must be closed')
+  ok('T5 RESUME in a nonexistent room -> terminal RESUME_FAILED room_not_found')
 
   // ---- T6: protocol version mismatch gets a clean error
   host.send({ type: 'PING', version: 1 })
@@ -300,9 +304,9 @@ async function main() {
   await host.waitType('ERROR', m => /invalid message/i.test(m.message))
   ok('T7 malformed payload -> ERROR, connection stays open')
 
-  // Rejected/unauthenticated sockets remain physically connected, but must
-  // never become passive spectators of room, chat, or game broadcasts.
-  const unauthenticated = [noToken, attacker, stale]
+  // A malformed non-resume socket remains connected but unauthenticated; it
+  // must never become a passive spectator of room, chat, or game broadcasts.
+  const unauthenticated = [noToken]
   const unauthLogStarts = new Map(unauthenticated.map(peer => [peer, peer.rawLog.length]))
   host.send({ type: 'CHAT', text: 'extra field', payload: {} })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
@@ -311,7 +315,7 @@ async function main() {
   host.send({ type: 'CHAT', text: 'not during a game' })
   await host.waitType('ERROR', isError('INVALID_MOVE'))
   const hostLogBeforeUnauthChat = host.rawLog.length
-  attacker.send({ type: 'CHAT', text: 'unauthenticated' })
+  noToken.send({ type: 'CHAT', text: 'unauthenticated' })
   await sleep(100)
   assert(
     !host.rawLog.slice(hostLogBeforeUnauthChat).some(raw => JSON.parse(raw).type === 'CHAT'),
@@ -321,7 +325,7 @@ async function main() {
 
   host.send({ type: 'EMOTE', emote: '<script>' })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
-  attacker.send({ type: 'EMOTE', emote: 'fire' })
+  noToken.send({ type: 'EMOTE', emote: 'fire' })
   host.send({ type: 'EMOTE', emote: 'thumbs-up' })
   const [hostEmote, guestEmote] = await Promise.all([
     host.waitType('EMOTE', message => message.emote === 'thumbs-up'),
@@ -348,7 +352,7 @@ async function main() {
   host.send({ type: 'BROADCAST', broadcast: '<script>' })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
   const hostLogBeforeUnauthBroadcast = host.rawLog.length
-  attacker.send({ type: 'BROADCAST', broadcast: 'shrug' })
+  noToken.send({ type: 'BROADCAST', broadcast: 'shrug' })
   await sleep(100)
   assert(
     !host.rawLog.slice(hostLogBeforeUnauthBroadcast).some(raw => JSON.parse(raw).type === 'BROADCAST'),
@@ -439,9 +443,11 @@ async function main() {
   await host.waitType('ERROR', isError('GAME_IN_PROGRESS'))
   host.send({ type: 'START_GAME' })
   await host.waitType('ERROR', isError('GAME_IN_PROGRESS'))
+  host.send({ type: 'REMATCH_VOTE', vote: true })
+  await host.waitType('ERROR', isError('INVALID_MOVE'))
   host.send({ type: 'PING' })
   await host.waitType('PONG')
-  ok('T8b active-round rules and duplicate START are nonfatal GAME_IN_PROGRESS errors')
+  ok('T8b active-round rules, duplicate START, and early rematch votes are rejected nonfatally')
 
   // The preceding security checks intentionally send close to the production
   // 20 msg/s cap. Let that rolling window expire so T8c observes BURN_IN
@@ -488,7 +494,7 @@ async function main() {
   }
 
   const hostLogBeforeActiveUnauthChat = host.rawLog.length
-  attacker.send({ type: 'CHAT', text: 'unauthenticated during play' })
+  noToken.send({ type: 'CHAT', text: 'unauthenticated during play' })
   await sleep(100)
   assert(
     !host.rawLog.slice(hostLogBeforeActiveUnauthChat).some(raw => JSON.parse(raw).type === 'CHAT'),
@@ -566,7 +572,7 @@ async function main() {
   idle.send({ type: 'BURN_IN', cards: [{ id: 'blind:down:0', rank: '3', suit: null }] })
   await idle.waitType('ERROR', isError('INVALID_MOVE'))
   const seqBeforeUnauthBurn = host.latestGameState.seq
-  attacker.send({ type: 'BURN_IN', cards: [{ id: idleHandForBurn[0].id }] })
+  noToken.send({ type: 'BURN_IN', cards: [{ id: idleHandForBurn[0].id }] })
   await sleep(150)
   assert.equal(host.latestGameState.seq, seqBeforeUnauthBurn, 'unauthenticated BURN_IN mutated the room')
   ok('T8c BURN_IN rejects current, insufficient, hidden, and unauthenticated attempts without mutation')
@@ -587,7 +593,7 @@ async function main() {
     expectedSeq: seqBeforeQuickForgery,
   })
   await current.waitType('ERROR', isError('INVALID_MOVE'))
-  attacker.send({
+  noToken.send({
     type: 'QUICK_FOLLOW_UP', cardId: currentHandForBurn[0].id,
     expectedSeq: seqBeforeQuickForgery,
   })
@@ -635,6 +641,9 @@ async function main() {
   const round1 = firstFinished.state
   assert.equal(round1.phase, 'gameOver')
   assert(round1.loserId, 'every terminal round must record the Shithead')
+  assert.equal(round1.roundStats?.complete, true, 'new rounds must accumulate complete stats')
+  assert.equal(round1.roundStats?.players.length, 2)
+  assert(round1.roundStats.players.some(stats => stats.cardsPlayed > 0), 'accepted plays were not counted')
   await sleep(100)
   for (const peer of [host, guest]) {
     const frames = peer.rawLog.slice(playTransitionLogStarts.get(peer)).map(raw => JSON.parse(raw))
@@ -660,6 +669,24 @@ async function main() {
   // merely so this integration test can enter the tribute branch. The engine
   // suite covers both one-shot outcomes (swap and skip) deterministically.
   if (round1.winnerId && round1.winnerId !== round1.loserId) {
+    host.send({ type: 'REMATCH_VOTE', vote: true })
+    const hostVote = await host.waitType('ROOM_STATE', m =>
+      m.room.rematchVotes?.find(vote => vote.playerId === hostId)?.vote === 'yes')
+    assert.equal(hostVote.room.rematchVotes.find(vote => vote.playerId === guestId)?.vote, 'pending')
+    const duplicateVoteLogStart = host.rawLog.length
+    host.send({ type: 'REMATCH_VOTE', vote: true })
+    await sleep(100)
+    assert(
+      !host.rawLog.slice(duplicateVoteLogStart).some(raw => JSON.parse(raw).type === 'ROOM_STATE'),
+      'an unchanged rematch vote caused another room broadcast',
+    )
+    guest.send({ type: 'REMATCH_VOTE', vote: true })
+    const [hostVotesReady, guestVotesReady] = await Promise.all([
+      host.waitType('ROOM_STATE', m => m.room.rematchVotes?.every(vote => vote.vote === 'yes')),
+      guest.waitType('ROOM_STATE', m => m.room.rematchVotes?.every(vote => vote.vote === 'yes')),
+    ])
+    assert.equal(hostVotesReady.room.rematchVotes.length, 2)
+    assert.equal(guestVotesReady.room.rematchVotes.length, 2)
     host.send({ type: 'START_GAME' })
     const [hostRematch] = await Promise.all([
       host.waitType('GAME_STATE', m => m.state.phase === 'rearrange'
@@ -670,6 +697,8 @@ async function main() {
         && faceUpSignature(m.state) !== initialDealSignature),
     ])
     assert.equal(hostRematch.state.rules.winnerSwapsFaceUp, true)
+    assert.equal(hostRematch.state.roundStats.complete, true)
+    assert(hostRematch.state.roundStats.players.every(stats => stats.cardsPlayed === 0))
     const rematchSignature = faceUpSignature(hostRematch.state)
     host.send({ type: 'READY' })
     guest.send({ type: 'READY' })
@@ -834,15 +863,100 @@ async function main() {
     new Set(rolled.room.players.map(player => player.id)),
     new Set([lateHostWelcome.playerId, lateGuestWelcome.playerId]),
   )
+
+  const sitter = await new Peer('rematch-no', lateUrl).connect()
+  sitter.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'Sits out' })
+  const sitterWelcome = await sitter.waitType('WELCOME')
+  await lateHost.waitType('ROOM_STATE', m => m.room.players.length === 3)
+
+  const absent = await new Peer('rematch-offline-pending', lateUrl).connect()
+  absent.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'Went offline' })
+  const absentWelcome = await absent.waitType('WELCOME')
+  await lateHost.waitType('ROOM_STATE', m => m.room.players.length === 4)
+  await absent.close()
+  await lateHost.waitType('ROOM_STATE', m =>
+    m.room.players.find(player => player.id === absentWelcome.playerId)?.connected === false)
+
   lateHost.send({ type: 'START_GAME' })
-  const lateFreshGame = await lateHost.waitType('GAME_STATE', m => m.state.phase === 'rearrange')
+  const pendingVoteError = await lateHost.waitType('ERROR', isError('INVALID_MOVE'))
+  assert.match(pendingVoteError.message, /every online player.*vote/i)
+
+  lateHost.send({ type: 'REMATCH_VOTE', vote: true })
+  await lateHost.waitType('ROOM_STATE', m =>
+    m.room.rematchVotes?.find(vote => vote.playerId === lateHostWelcome.playerId)?.vote === 'yes')
+  lateHost.send({ type: 'REMATCH_VOTE', vote: false })
+  const voteThrottle = await lateHost.waitType('ERROR', isError('RATE_LIMITED'))
+  assert.match(voteThrottle.message, /wait a moment.*vote/i)
+  lateGuest.send({ type: 'REMATCH_VOTE', vote: false })
+  sitter.send({ type: 'REMATCH_VOTE', vote: false })
+  await lateHost.waitType('ROOM_STATE', m =>
+    m.room.rematchVotes?.filter(vote => vote.playerId !== absentWelcome.playerId)
+      .every(vote => vote.vote !== 'pending'))
+  lateHost.send({ type: 'START_GAME' })
+  const tooFewVotes = await lateHost.waitType('ERROR', isError('INVALID_MOVE'))
+  assert.match(tooFewVotes.message, /two yes votes/i)
+
+  await sleep(800)
+  lateHost.send({ type: 'REMATCH_VOTE', vote: false })
+  lateGuest.send({ type: 'REMATCH_VOTE', vote: true })
+  await lateHost.waitType('ROOM_STATE', m =>
+    m.room.rematchVotes?.find(vote => vote.playerId === lateHostWelcome.playerId)?.vote === 'no' &&
+    m.room.rematchVotes?.find(vote => vote.playerId === lateGuestWelcome.playerId)?.vote === 'yes')
+  lateHost.send({ type: 'START_GAME' })
+  const hostNoError = await lateHost.waitType('ERROR', isError('INVALID_MOVE'))
+  assert.match(hostNoError.message, /host must vote yes/i)
+
+  await sleep(800)
+  lateHost.send({ type: 'REMATCH_VOTE', vote: true })
+  await lateHost.waitType('ROOM_STATE', m =>
+    m.room.rematchVotes?.filter(vote => vote.vote === 'yes').length === 2)
+  const sitterLogAtStart = sitter.rawLog.length
+  lateHost.send({ type: 'START_GAME' })
+  const [lateFreshGame, released, resetVotes] = await Promise.all([
+    lateHost.waitType('GAME_STATE', m => m.state.phase === 'rearrange'),
+    sitter.waitType('ERROR', isError('SESSION_EXPIRED')),
+    lateGuest.waitType('ROOM_STATE', m => m.room.players.length === 2 &&
+      m.room.rematchVotes?.every(vote => vote.vote === 'pending')),
+  ])
+  assert.match(released.message, /not to join this rematch/i)
   assert.deepEqual(
     new Set(lateFreshGame.state.players.map(player => player.id)),
     new Set([lateHostWelcome.playerId, lateGuestWelcome.playerId]),
   )
+  assert.deepEqual(
+    new Set(resetVotes.room.players.map(player => player.id)),
+    new Set([lateHostWelcome.playerId, lateGuestWelcome.playerId]),
+  )
   assert.equal(lateFreshGame.state.pendingTribute, null)
-  await Promise.all([oldHost.close(), surrender.close(), lateHost.close(), lateGuest.close()])
-  ok('T12c join is gameOver-only; late joiners inherit host and start with the current roster')
+  await sleep(150)
+  assert.equal(sitter.closeCode, 4003, 'released No voter socket was not closed')
+  assert(
+    !sitter.rawLog.slice(sitterLogAtStart).some(raw => {
+      const message = JSON.parse(raw)
+      return message.type === 'GAME_STATE' && message.state?.phase === 'rearrange'
+    }),
+    'a released No voter observed the next deal',
+  )
+
+  const releasedResume = await new Peer('released-resume', lateUrl).connect()
+  releasedResume.send({
+    type: 'RESUME_ROOM', roomCode: lateRoom,
+    playerId: sitterWelcome.playerId, resumeToken: sitterWelcome.resumeToken,
+  })
+  await releasedResume.waitType('RESUME_FAILED', message =>
+    message.reason === 'not_a_member' || message.reason === 'invalid_token')
+  const absentResume = await new Peer('offline-pending-resume', lateUrl).connect()
+  absentResume.send({
+    type: 'RESUME_ROOM', roomCode: lateRoom,
+    playerId: absentWelcome.playerId, resumeToken: absentWelcome.resumeToken,
+  })
+  await absentResume.waitType('RESUME_FAILED', message =>
+    message.reason === 'not_a_member' || message.reason === 'invalid_token')
+  await Promise.all([
+    oldHost.close(), surrender.close(), lateHost.close(), lateGuest.close(),
+    sitter.close(), releasedResume.close(), absentResume.close(),
+  ])
+  ok('T12c rematch votes are throttled; No/offline-pending seats are closed and released before a subset deal')
 
   // ---- T12d: 3P surrender before anyone is out must not invent a winner
   const threeRoom = await newRoom()

@@ -5,8 +5,8 @@ A mobile-first implementation of the Shithead shedding card game, built as an in
 - **Production (canonical):** <https://shead.online>
 - **Fallback/diagnostic endpoint:** <https://shithead.not4a6f7365.workers.dev>
 - **Application version:** `0.2.0`
-- **Wire protocol:** `6`
-- **Persistent room schema:** `3`
+- **Wire protocol:** `7`
+- **Persistent room schema:** `4`
 - **Runtime:** Node.js `>=22`, modern evergreen browsers, Cloudflare Workers
 
 This document is the technical source of truth for the shipped game. Rule behavior is defined by the pure engine in [`app/src/engine/index.ts`](app/src/engine/index.ts); multiplayer trust boundaries and wire validation are defined by [`app/src/engine/protocol.ts`](app/src/engine/protocol.ts) and [`app/src/worker/index.ts`](app/src/worker/index.ts).
@@ -221,6 +221,8 @@ The failed blind result is a legal action with a penalty, not a reducer error. O
 - If the round reaches `MAX_GAME_TURNS = 1000` accepted gameplay actions, the player holding the most total cards loses. Ties resolve to the earliest seat in array order.
 - The event log is a ring buffer retaining the latest `MAX_LOG_ENTRIES = 50` events.
 
+New rounds also accumulate bounded, server-authoritative results outside that display log: finishing order plus cards played, physical 10s played, burns, pile pickups, and largest pickup for every participant. Names are snapshotted with the counters so an already-out player remains on the final leaderboard after leaving. A restored legacy round is explicitly marked partial; the client never reconstructs totals from the capped log or double-counts quick-follow-up display events. Partial counters are shown as lower bounds, unknown placements remain blank, and the client suppresses “most”/“none” highlights unless the full round was observed.
+
 When winner exchange is enabled and the prior winner and loser both remain in the next-round roster, the next deal enters `tribute` after everyone finalizes their public row. Only the prior winner may swap exactly one of their three face-up cards with exactly one prior-loser face-up card, or skip. Hands and face-down cards are invalid. The opener is recalculated after the decision.
 
 ### AI policy
@@ -262,6 +264,7 @@ interface GameState {
     eligibleCardIds: string[]
     sourceSeq: number
   } | null
+  roundStats?: RoundStats
   log: GameEvent[]
   seq?: number
 }
@@ -271,9 +274,9 @@ Engine reducers are pure: they return a new state and optional error without per
 
 `turnCount` counts accepted gameplay actions—normal plays, quick follow-ups, burn-ins, pickups, and failed blind attempts—not setup rearrangements or readiness. The separate event ring feeds announcements, motion, and sound cursors without allowing the state snapshot to grow indefinitely.
 
-## Multiplayer protocol v6
+## Multiplayer protocol v7
 
-Every current client frame is centrally stamped with `version: 6`. A present but different version is rejected. Missing versions are still accepted for backward compatibility, so this is a compatibility boundary rather than a strict negotiation handshake.
+Every current client frame is centrally stamped with `version: 7`. A present but different version is rejected. Missing versions are still accepted for backward compatibility, so this is a compatibility boundary rather than a strict negotiation handshake.
 
 ### Client-to-server messages
 
@@ -284,6 +287,7 @@ Every current client frame is centrally stamped with `version: 6`. A present but
 | `RESUME_ROOM` | Room code, player ID, rotating secret token |
 | `LEAVE_ROOM` | Explicitly leave and invalidate the seat token |
 | `START_GAME` | Host-only initial deal/rematch |
+| `REMATCH_VOTE` | Exact Boolean Yes/No choice after `gameOver`; authenticated and never reconnect-queued |
 | `READY` | Finalize current rearrangement |
 | `REARRANGE` | Hand index and face-up index to swap |
 | `PLAY` | One to twelve unique card identifiers |
@@ -307,7 +311,7 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 |---|---|
 | `WELCOME` | Private player ID, room summary, fresh resume token, protocol version |
 | `RESUME_FAILED` | Explicit reason; invalidates local credentials |
-| `ROOM_STATE` | Lobby-safe roster, presence, host, rules, easter-egg status, phase, and card counts |
+| `ROOM_STATE` | Lobby-safe roster, presence, host, rules, easter-egg status, phase, card counts, and public rematch vote statuses |
 | `GAME_STATE` | Authoritative state serialized specifically for one viewer |
 | `ERROR` | Stable error code and contextual message |
 | `PLAYER_LEFT` | Explicit leave notification |
@@ -365,17 +369,19 @@ ABCDEFGHJKLMNPQRSTUVWXYZ23456789
 
 Ambiguous characters are excluded. Allocation uses `env.ROOM.idFromName(code)`, giving one authoritative Durable Object per code. `POST /api/room/new` atomically stores a two-minute claim; `CREATE_ROOM` must consume that claim, closing the direct-WebSocket creation and check-then-act races.
 
-Online rooms default to five maximum seats. Joining is allowed before a round or after `gameOver`, enabling new players to enter the next deal. Starting is host-only, needs at least two roster members, and requires every current seat to be online.
+Online rooms default to five maximum seats. Joining is allowed before a round or after `gameOver`, enabling new players to enter the next deal. An initial start is host-only, needs at least two roster members, and requires every current seat online. After `gameOver`, every online roster member must explicitly vote Yes or No; the host and at least one other connected player must vote Yes. Starting then deals only to online Yes voters. No voters and offline non-voters are released, while an offline Yes vote deliberately reserves its seat and blocks the deal until that player returns. Released tokens and spam buckets are cleared and any live released sockets receive a terminal notice and close before the new room/game broadcasts, so continuing with fewer players never creates an accidental spectator. Vote changes have an identity-scoped cooldown across reconnects, and the general socket limiter measures bursts before messages enter the serialized storage queue.
 
 ### Persistence and cleanup
 
-The persisted `RoomData.version = 5` snapshot contains roster, host, rules, the host-controlled `easterEggEnabled` flag, ready IDs, authoritative game state, hashed resume credentials, timestamps, and the optional private delayed table-event schedule. The schedule is validated against the restored roster and is never serialized into `ROOM_STATE` or `GAME_STATE`; only the public enabled/disabled flag appears in `ROOM_STATE`. This application schema is distinct from wire protocol v6 and Cloudflare Durable Object migration tag `v1`.
+The persisted `RoomData.version = 6` snapshot contains roster, host, rules, the host-controlled `easterEggEnabled` flag, ready IDs, authoritative game state and round counters, rematch votes, hashed resume credentials, timestamps, and the optional private delayed table-event schedule. The schedule is validated against the restored roster and is never serialized into `ROOM_STATE` or `GAME_STATE`; only the public enabled/disabled flag appears in `ROOM_STATE`. This application schema is distinct from wire protocol v7 and Cloudflare Durable Object migration tag `v1`.
 
 On restore, migration code:
 
 - supplies new rule defaults and clamps deck count to 1–3;
 - preserves an explicit easter-egg setting, defaults older or malformed snapshots to enabled, and discards a restored private schedule when the setting is off;
 - supplies missing ready/activity/token fields;
+- validates bounded round counters without replaying the event log, and marks missing or corrupt legacy counters incomplete;
+- keeps rematch votes only for Boolean values belonging to current members while the room is at `gameOver`;
 - validates loser and pending tribute references;
 - validates any pending quick-follow-up owner, rank, sequence, physical run, and exact owned card IDs, otherwise clearing it;
 - preserves an explicitly recorded departed winner;
@@ -388,14 +394,14 @@ The implementation uses `WebSocketPair` plus in-memory event listeners, not Dura
 ### Presence, leave, and forfeit
 
 - A network disconnect removes only the socket. Roster, cards, and resume credential remain; the seat becomes offline.
-- Any offline seat blocks initial start or rematch until it resumes or explicitly leaves.
+- Any offline seat blocks an initial start. For a rematch, offline non-voters may safely sit out, while an explicit Yes vote reserves the seat and must be online before the next deal.
 - Explicit leave removes the token, roster entry, and ready state.
 - A non-out leaver during an active round becomes the loser immediately. In a two-player forfeit the sole survivor is an unambiguous winner; in larger games with no prior finisher the winner may remain unknown.
 - A player who already went out may leave without overturning the winner; the remaining round continues.
 - If the host leaves, the first remaining roster player becomes host.
 - Removing the final roster member deletes the room snapshot.
 
-An offline client cannot confirm a leave frame, so it keeps the resume credential and reports that the seat is retained rather than pretending the server processed the leave.
+An offline client cannot confirm a leave frame, so it keeps the resume credential rather than pretending the server processed the leave. The reconnect screen also discloses the rematch exception: after a finished game, the host may start without an offline player who has not voted, which releases that undecided seat.
 
 ## Security model
 
@@ -407,6 +413,7 @@ An offline client cannot confirm a leave frame, so it keeps the resume credentia
 - Comparison is constant-time.
 - Every successful resume rotates the token and sends the replacement only in that socket's `WELCOME`.
 - Resuming closes any older socket attached to the same player with close code `4001`.
+- A failed resume clears the client credential and closes the rejected server and client transport with code `4003`, so stale tokens cannot retain anonymous room sockets.
 - Explicit leave deletes the credential.
 
 The token is stored in browser `localStorage`, so its security inherits the browser origin and XSS boundary. There are no accounts, passwords, external identity provider, or spectator role.
@@ -418,6 +425,7 @@ The token is stored in browser `localStorage`, so its security inherits the brow
 | Inbound WebSocket frame | Maximum 16,384 JavaScript string code units; oversize closes with code `1009` |
 | Message rate | 20 frames/second/socket sliding window |
 | Reaction cadence | One accepted `EMOTE` or `BROADCAST` per 700 ms/socket; the UI uses a shared 800 ms gate |
+| Rematch vote changes | One accepted changed vote per 750 ms/player identity; unchanged repeats are no-ops |
 | Socket cap | 12 simultaneous sockets per room, including unauthenticated/duplicate tabs |
 | Room allocation rate | 10 new rooms/minute/IP, best effort per Worker isolate |
 | Tracked room codes | 30/IP over the in-memory 24-hour window, best effort per isolate |
@@ -506,7 +514,7 @@ Cards and card backs are CSS-rendered. The shared system uses solid felt, printe
 
 Gameplay feedback is derived from the latest accepted action group, keyed by `GameState.seq` rather than log length. Reset 2, mirror 3, low 7, and skip 8 use distinct card-local landing choreography; reset/mirror/low additionally leave a persistent rule chip beside the pile, and stacked 8s attach a count badge to the played card. A burn temporarily reconstructs the card that caused the clear plus the full pre-clear pile depth, compresses the physical stack, and sweeps it from the table over 520 ms. A small 1.8-second receipt is secondary confirmation rather than the primary animation.
 
-Turn ownership uses one shared Framer Motion layout marker. It relocates between the active opponent seat and the local hand rail without changing document flow or hand geometry; the header retains only quiet orientation text. On constrained portrait and landscape viewports the marker collapses to a three-pixel inlay. Reduced-motion mode removes spatial travel and converts special-card feedback to short opacity transitions; burn cleanup is shortened to 140 ms. A newly entered local human turn produces one polite announcement and, when enabled, the selected sensory alert; retained state on refresh and same-player action updates do not retrigger it.
+Turn ownership uses one shared Framer Motion layout marker. It relocates between the active opponent seat and the local hand rail without changing document flow or hand geometry; the header retains only quiet orientation text. On constrained portrait and landscape viewports the marker collapses to a three-pixel inlay. Reduced-motion mode removes spatial travel and converts special-card feedback to short opacity transitions; burn cleanup is shortened to 140 ms. A newly entered local human turn produces one polite announcement and, when enabled, the selected sensory alert. The opt-in **Repeat-turn alerts** preference also repeats that sensory cue when one accepted action really leaves the same actor in control, such as a burn or wrapped skip. Any burn-derived local alert waits for its 560 ms cleanup (140 ms under reduced motion), including an interrupt or finishing burn that transfers ownership; other repeat turns alert immediately. Repeat detection requires a consecutive authoritative turn count and matching action actor, so retained refresh state, cosmetic phase updates, and another player's quick follow-up do not create false alerts; pending burn cues are canceled by a newer action or obsolete turn state.
 
 ### Accessibility
 
@@ -549,7 +557,7 @@ An explicit leave emits a typed table event for the playful departure line. Sepa
 
 The easter egg is enabled by default. Its current status appears in every player's menu, but only the host can change it. Turning it off at any time immediately cancels a not-yet-fired private schedule. Turning it back on during the same round does not roll a replacement mid-round; the next eligible transition into `play` schedules one normally.
 
-The menu exposes session-scoped sensory preferences shared by online and offline tables: **Turn alerts**, **Mute sounds**, **ADHD mode**, and an **ADHD sound** choice. A normal alert plays one short chime when unmuted and a stronger two-pulse vibration when ownership enters the local human player's turn. ADHD mode adds a persistent perimeter-light visualization and lets the player choose a single-play **Beat** (gabber) or **Chime** cue. Selecting either choice plays one non-looping preview when sound is unmuted, and the selected cue is used on the next ADHD-mode turn. Neither automatic cue loops, and the visual stops when the player presses the screen or another non-modifier key. Muting suppresses audio without disabling supported phone vibration; the visual ADHD cue can remain. Disabling turn alerts suppresses audio, visuals, and haptics. Every new browser session starts muted with turn alerts enabled, ADHD mode disabled, and **Beat** selected; changes last only for the current tab session. Web vibration is best-effort: it requires browser/device support and prior interaction with the page, and unsupported browsers simply omit the haptic cue.
+The menu exposes persistent sensory preferences shared by online and offline tables: **Turn alerts**, opt-in **Repeat-turn alerts**, **Mute sounds**, **ADHD mode**, and an **ADHD sound** choice. A normal alert plays one short chime when unmuted and a stronger two-pulse vibration when ownership enters the local human player's turn. Repeat-turn alerts apply the same cue when that player genuinely keeps the next turn. ADHD mode adds a persistent perimeter-light visualization and lets the player choose a single-play **Beat** (gabber) or **Chime** cue. Selecting either choice plays one non-looping preview when sound is unmuted, and the selected cue is used on the next ADHD-mode turn. Neither automatic cue loops, and the visual stops when the player presses the screen or another non-modifier key. Muting suppresses audio without disabling supported phone vibration; the visual ADHD cue can remain. Disabling turn alerts suppresses audio, visuals, and haptics. A fresh browser profile starts muted with turn alerts enabled, repeat-turn alerts and ADHD mode disabled, and **Beat** selected; later choices persist for this browser origin. Values from the former tab-scoped version migrate once when no durable choice exists. Web vibration is best-effort: it requires browser/device support and prior interaction with the page, and unsupported browsers simply omit the haptic cue.
 
 The two bundled recordings are shared between the normal and ADHD cues. **Beat** uses [gabber by f0rest15 (Freesound)](https://pixabay.com/sound-effects/musical-gabber-82562/) under the [Pixabay Content License](https://pixabay.com/service/license-summary/). The metadata-stripped **Chime** was supplied by the project owner, who states that its original recording is free to use; no standardized license identifier, original creator, or primary source was supplied. The MP3s are excluded from the repository's Apache-2.0 software license; full provenance, checksums, and asset notices are recorded in `app/public/audio/LICENSE.txt`.
 
@@ -558,10 +566,11 @@ The two bundled recordings are shared between the normal and ADHD cues. **Beat**
 | Storage | Contents | Lifecycle |
 |---|---|---|
 | `shithead:name` | Last nonempty player name | Reused for later setup |
-| Session Storage: `shithead:sound` | Sound preference | Current tab session; muted by default |
-| Session Storage: `shithead:turn-alerts` | Turn-alert preference | Current tab session; enabled by default |
-| Session Storage: `shithead:adhd-mode` | Attention-mode preference | Current tab session; disabled by default |
-| Session Storage: `shithead:adhd-sound` | Attention-mode sound (`Beat` or `Chime`) | Current tab session; `Beat` by default |
+| Local Storage: `shithead:sound` | Sound preference | Reused on this browser origin; muted by default |
+| Local Storage: `shithead:turn-alerts` | Turn-alert preference | Reused on this browser origin; enabled by default |
+| Local Storage: `shithead:repeat-turn-alerts` | Repeat-turn alert preference | Reused on this browser origin; disabled by default |
+| Local Storage: `shithead:adhd-mode` | Attention-mode preference | Reused on this browser origin; disabled by default |
+| Local Storage: `shithead:adhd-sound` | Attention-mode sound (`Beat` or `Chime`) | Reused on this browser origin; `Beat` by default |
 | `shithead:session` | Room code, player ID, resume token, player name | Replaced on `WELCOME`; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
 | Workbox Cache Storage | Versioned static app-shell files | Managed and cleaned by the generated service worker |
 | Offline match | Zustand memory only | Lost on refresh |
@@ -655,13 +664,13 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **420 tests across 36 Vitest files**:
+At this revision, the default suite contains **449 tests across 39 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
-| Engine | 11 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
-| Components/UI | 21 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, reaction accessibility/assets, gameplay feedback, tribute, sound cursor |
-| Network | 1 | Session validation, auth ordering, sequence guard, reconnect and queue semantics |
+| Engine | 12 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, round counters, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
+| Components/UI | 23 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
+| Network | 1 | Session validation, auth ordering, sequence guard, terminal release, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
 | Root routing | 1 | Invite-link and hard-refresh resume routing |
 
@@ -669,7 +678,7 @@ Configured V8 thresholds apply to engine source: 80% lines/functions/statements 
 
 ### Live local-Worker adversarial suite
 
-The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, state masking, token rotation/hijack rejection, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
+The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, state masking, token rotation/hijack rejection, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, authoritative round results, throttled rematch votes and secure subset deals, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
 
 ```bash
 cd app
@@ -769,7 +778,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   │   ├── components/                # Screens and shared game UI
 │   │   ├── engine/
 │   │   │   ├── index.ts               # Pure rules, reducers, deck and AI policy
-│   │   │   ├── protocol.ts            # Protocol-v6 types, validation and masking
+│   │   │   ├── protocol.ts            # Protocol-v7 types, validation and masking
 │   │   │   └── __tests__/             # Engine/protocol/Worker-boundary tests
 │   │   ├── net/
 │   │   │   ├── RoomClient.ts          # WebSocket transport and reconnect queue

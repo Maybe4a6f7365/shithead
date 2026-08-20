@@ -80,6 +80,8 @@ export interface TableScreenProps {
   onToggleSound: () => void
   turnAlertsEnabled?: boolean
   onToggleTurnAlerts?: () => void
+  repeatTurnAlertsEnabled?: boolean
+  onToggleRepeatTurnAlerts?: () => void
   adhdMode?: boolean
   onToggleAdhdMode?: () => void
   adhdSound?: AdhdAlertSound
@@ -204,6 +206,7 @@ export function TableScreen({
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
   soundOn, onToggleSound,
   turnAlertsEnabled = true, onToggleTurnAlerts,
+  repeatTurnAlertsEnabled = false, onToggleRepeatTurnAlerts,
   adhdMode = false, onToggleAdhdMode, adhdSound = 'beat', onSelectAdhdSound, attentionAlertActive = false,
   easterEggEnabled, onToggleEasterEgg,
   connectionBadge, seatOffline, latestEmote, onSendEmote,
@@ -841,6 +844,8 @@ export function TableScreen({
               onToggleSound={onToggleSound}
               turnAlertsEnabled={turnAlertsEnabled}
               onToggleTurnAlerts={onToggleTurnAlerts}
+              repeatTurnAlertsEnabled={repeatTurnAlertsEnabled}
+              onToggleRepeatTurnAlerts={onToggleRepeatTurnAlerts}
               adhdMode={adhdMode}
               onToggleAdhdMode={onToggleAdhdMode}
               adhdSound={adhdSound}

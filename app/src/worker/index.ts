@@ -24,7 +24,12 @@ import {
 import { BUILD_COMMIT } from './build-meta'
 import { applyPlayerForfeit } from './forfeit'
 import { applyInterruptBurnRequest, applyQuickFollowUpRequest, canonicalCards } from './gameActions'
-import { normalizeEasterEggEnabled, normalizeGameRules, normalizePersistedGameState } from './migrateState'
+import {
+  normalizeEasterEggEnabled,
+  normalizeGameRules,
+  normalizePersistedGameState,
+  normalizeRematchVotes,
+} from './migrateState'
 import {
   acceptedReactionAt,
   normalizeStoredPendingOndraEvent,
@@ -48,7 +53,7 @@ interface Session {
 }
 
 interface RoomData {
-  version: 5
+  version: 6
   code: string
   hostId: string
   maxPlayers: number
@@ -57,6 +62,8 @@ interface RoomData {
   state: GameState | null
   rules: GameRules
   readyPlayerIds: string[]
+  /** Authenticated playerId -> explicit yes/no vote for the finished round. */
+  rematchVotes: Record<string, boolean>
   /** playerId -> SHA-256 hex hash of the current resume token (secret). */
   resumeTokens: Record<string, string>
   /** Private delayed system event; never serialized into room/game views. */
@@ -65,12 +72,13 @@ interface RoomData {
   lastActivity: number
 }
 
-type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'easterEggEnabled' | 'readyPlayerIds' | 'lastActivity' | 'resumeTokens' | 'pendingTableEvent' | 'state'> & {
-  version?: 1 | 2 | 3 | 4 | 5
+type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'easterEggEnabled' | 'readyPlayerIds' | 'rematchVotes' | 'lastActivity' | 'resumeTokens' | 'pendingTableEvent' | 'state'> & {
+  version?: 1 | 2 | 3 | 4 | 5 | 6
   state: GameState | null
   rules?: Partial<GameRules>
   easterEggEnabled?: unknown
   readyPlayerIds?: string[]
+  rematchVotes?: unknown
   lastActivity?: number
   resumeTokens?: Record<string, string>
   pendingTableEvent?: PendingOndraEvent | null
@@ -82,6 +90,7 @@ const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_MESSAGES_PER_SECOND = 20
 const MAX_MESSAGE_CHARS = 16 * 1024 // per-socket WS message cap; oversize -> close 1009
 const MAX_SOCKETS_PER_ROOM = 12 // 5 players + spectator/duplicate-tab allowance
+const REMATCH_VOTE_COOLDOWN_MS = 750
 const ROOM_CODE_RE = /^[A-Z0-9]{6}$/
 const CLAIM_TTL_MS = 2 * 60 * 1000 // room-code reservation validity
 
@@ -147,6 +156,8 @@ export class Room {
   private readonly customMessageTimestamps = new Map<string, number[]>()
   /** Shared reaction cooldown follows the authenticated player across socket resumes. */
   private readonly lastReactionAtByPlayer = new Map<string, number>()
+  /** Vote changes are cheap for the UI but durable writes, so throttle by identity across resumes. */
+  private readonly lastRematchVoteAtByPlayer = new Map<string, number>()
   private data: RoomData | null = null
   private code = ''
   private operation: Promise<void> = Promise.resolve()
@@ -164,11 +175,16 @@ export class Room {
 
       this.data = {
         ...stored,
-        version: 5,
+        version: 6,
         rules,
         easterEggEnabled,
         state: normalizedState,
         readyPlayerIds: stored.readyPlayerIds ?? [],
+        rematchVotes: normalizeRematchVotes(
+          stored.rematchVotes,
+          stored.players,
+          normalizedState?.phase ?? null,
+        ),
         lastActivity: stored.lastActivity ?? stored.createdAt,
         resumeTokens: stored.resumeTokens ?? {},
         pendingTableEvent: easterEggEnabled && restoresTableEvent
@@ -238,6 +254,7 @@ export class Room {
       this.data = null
       this.customMessageTimestamps.clear()
       this.lastReactionAtByPlayer.clear()
+      this.lastRematchVoteAtByPlayer.clear()
       await this.state.storage.deleteAll()
       return
     }
@@ -266,6 +283,15 @@ export class Room {
         try { server.close(1009, 'Message too large') } catch {}
         return
       }
+      // Measure bursts when frames arrive, before they enter the serialized
+      // operation queue. Measuring later would let slow storage writes spread
+      // a burst across several apparent one-second windows.
+      const session = this.sessions.get(sessionId)
+      if (!session) return
+      if (!this.withinRateLimit(session)) {
+        this.send(session, { type: 'ERROR', code: 'RATE_LIMITED', message: 'Too many messages' })
+        return
+      }
       this.operation = this.operation
         .then(() => this.onMessage(sessionId, raw))
         .catch(error => {
@@ -283,11 +309,6 @@ export class Room {
   private async onMessage(sessionId: string, raw: string): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) return
-
-    if (!this.withinRateLimit(session)) {
-      this.send(session, { type: 'ERROR', code: 'RATE_LIMITED', message: 'Too many messages' })
-      return
-    }
 
     let parsed: unknown
     try {
@@ -331,6 +352,9 @@ export class Room {
         break
       case 'START_GAME':
         await this.startGame(session)
+        break
+      case 'REMATCH_VOTE':
+        await this.voteRematch(session, message.vote)
         break
       case 'READY':
         await this.markReady(session)
@@ -434,7 +458,7 @@ export class Room {
     const resumeToken = generateResumeToken()
     session.playerId = player.id
     this.data = {
-      version: 5,
+      version: 6,
       code: this.code,
       hostId: player.id,
       maxPlayers: Math.max(2, Math.min(5, requestedMaxPlayers)),
@@ -443,6 +467,7 @@ export class Room {
       state: null,
       rules: { ...DEFAULT_GAME_RULES },
       readyPlayerIds: [],
+      rematchVotes: {},
       resumeTokens: { [player.id]: await hashResumeToken(resumeToken) },
       pendingTableEvent: null,
       createdAt: Date.now(),
@@ -506,6 +531,13 @@ export class Room {
     const fail = (reason: string) => {
       logEvent('resume_failed', { code: this.code, reason })
       this.send(session, { type: 'RESUME_FAILED', reason, version: PROTOCOL_VERSION })
+      // Authentication failures are terminal for this transport. Keeping an
+      // anonymous failed-resume socket around would let stale clients consume
+      // the room's connection allowance indefinitely.
+      session.playerId = null
+      session.recentMessages = []
+      this.sessions.delete(sessionId)
+      try { session.webSocket.close(4003, 'Resume failed') } catch {}
     }
 
     const data = this.data
@@ -555,17 +587,48 @@ export class Room {
       this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' })
       return
     }
-    if (data.players.length < 2) {
-      this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'At least two players are required' })
-      return
-    }
-    if (data.players.some(player => !this.isConnected(player.id))) {
-      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'All players must be online before starting' })
-      return
+    const prior = data.state
+    let participants = [...data.players]
+    const releasedIds = new Set<string>()
+
+    if (prior?.phase === 'gameOver') {
+      const everyOnlinePlayerVoted = data.players.every(player =>
+        !this.isConnected(player.id) || Object.prototype.hasOwnProperty.call(data.rematchVotes, player.id)
+      )
+      if (!everyOnlinePlayerVoted) {
+        this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'Waiting for every online player to vote' })
+        return
+      }
+      if (data.rematchVotes[data.hostId] !== true) {
+        this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'The host must vote yes or leave the room' })
+        return
+      }
+      participants = data.players.filter(player => data.rematchVotes[player.id] === true)
+      if (participants.length < 2) {
+        this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'At least two yes votes are required' })
+        return
+      }
+      if (participants.some(player => !this.isConnected(player.id))) {
+        this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'Every yes voter must be online before starting' })
+        return
+      }
+      for (const player of data.players) {
+        // Explicit No voters and offline non-voters sit out. An offline Yes
+        // remains a deliberate reservation and is rejected by the online gate.
+        if (data.rematchVotes[player.id] !== true) releasedIds.add(player.id)
+      }
+    } else {
+      if (participants.length < 2) {
+        this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'At least two players are required' })
+        return
+      }
+      if (participants.some(player => !this.isConnected(player.id))) {
+        this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'All players must be online before starting' })
+        return
+      }
     }
 
-    const prior = data.state
-    const rosterIds = new Set(data.players.map(player => player.id))
+    const rosterIds = new Set(participants.map(player => player.id))
     const previousRound: PreviousRoundResult | null =
       prior?.phase === 'gameOver' && prior.winnerId && prior.loserId &&
       prior.winnerId !== prior.loserId &&
@@ -573,17 +636,74 @@ export class Room {
         ? { winnerId: prior.winnerId, loserId: prior.loserId }
         : null
 
+    for (const playerId of releasedIds) {
+      delete data.resumeTokens[playerId]
+      this.customMessageTimestamps.delete(playerId)
+      this.lastReactionAtByPlayer.delete(playerId)
+      this.lastRematchVoteAtByPlayer.delete(playerId)
+    }
+    data.players = participants
     data.state = initGame({
-      players: data.players.map(player => ({ id: player.id, name: player.name, isAI: false })),
+      players: participants.map(player => ({ id: player.id, name: player.name, isAI: false })),
       rules: data.rules,
       previousRound,
     })
     data.readyPlayerIds = []
+    data.rematchVotes = {}
+    this.lastRematchVoteAtByPlayer.clear()
     data.pendingTableEvent = null
 
     await this.save()
+
+    // A No vote is an explicit next-round seat release; offline non-voters are
+    // also omitted so an abandoned tab cannot block the table indefinitely.
+    // Notify any still-connected released clients, then remove and close their
+    // sessions before a room/game broadcast can expose the fresh deal.
+    for (const [sessionId, released] of [...this.sessions]) {
+      if (!released.playerId || !releasedIds.has(released.playerId)) continue
+      this.send(released, {
+        type: 'ERROR',
+        code: 'SESSION_EXPIRED',
+        message: 'You chose not to join this rematch.',
+      })
+      released.playerId = null
+      released.recentMessages = []
+      this.sessions.delete(sessionId)
+      try { released.webSocket.close(4003, 'Rematch seat released') } catch {}
+    }
     this.broadcastRoom()
     this.broadcastGame()
+  }
+
+  private async voteRematch(session: Session, vote: boolean): Promise<void> {
+    const data = this.data
+    const playerId = session.playerId
+    if (!data || !playerId || !data.players.some(player => player.id === playerId)) {
+      this.send(session, { type: 'ERROR', code: 'SESSION_EXPIRED', message: 'Join the room before voting' })
+      return
+    }
+    if (data.state?.phase !== 'gameOver') {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'Rematch voting opens after the round' })
+      return
+    }
+    if (Object.prototype.hasOwnProperty.call(data.rematchVotes, playerId) &&
+      data.rematchVotes[playerId] === vote) return
+
+    const now = Date.now()
+    const previousVoteAt = this.lastRematchVoteAtByPlayer.get(playerId)
+    if (previousVoteAt !== undefined && now - previousVoteAt < REMATCH_VOTE_COOLDOWN_MS) {
+      this.send(session, {
+        type: 'ERROR',
+        code: 'RATE_LIMITED',
+        message: 'Please wait a moment before changing your rematch vote',
+      })
+      return
+    }
+
+    this.lastRematchVoteAtByPlayer.set(playerId, now)
+    data.rematchVotes = { ...data.rematchVotes, [playerId]: vote }
+    await this.save()
+    this.broadcastRoom()
   }
 
   private async setRules(session: Session, patch: Partial<GameRules>): Promise<void> {
@@ -876,7 +996,7 @@ export class Room {
 
   private takeReactionSlot(session: Session): number | null {
     const playerId = session.playerId
-    if (!playerId) return null
+    if (!playerId || !this.data?.players.some(player => player.id === playerId)) return null
     const acceptedAt = acceptedReactionAt(this.lastReactionAtByPlayer.get(playerId) ?? null, Date.now())
     if (acceptedAt !== null) this.lastReactionAtByPlayer.set(playerId, acceptedAt)
     return acceptedAt
@@ -900,8 +1020,10 @@ export class Room {
     const leavingId = session.playerId
     this.customMessageTimestamps.delete(leavingId)
     this.lastReactionAtByPlayer.delete(leavingId)
+    this.lastRematchVoteAtByPlayer.delete(leavingId)
     const leavingPlayer = data.players.find(player => player.id === leavingId)
     delete data.resumeTokens[leavingId]
+    delete data.rematchVotes[leavingId]
     data.players = data.players.filter(player => player.id !== leavingId)
     data.readyPlayerIds = data.readyPlayerIds.filter(id => id !== leavingId)
     session.playerId = null
@@ -961,6 +1083,12 @@ export class Room {
       }),
       createdAt: data.createdAt,
       rules: data.rules,
+      rematchVotes: data.players.map(player => ({
+        playerId: player.id,
+        vote: !Object.prototype.hasOwnProperty.call(data.rematchVotes, player.id)
+          ? 'pending'
+          : data.rematchVotes[player.id] ? 'yes' : 'no',
+      })),
     }
   }
 
@@ -983,7 +1111,8 @@ export class Room {
 
   private sendGame(session: Session): void {
     const data = this.data
-    if (!data?.state || !session.playerId) return
+    if (!data?.state || !session.playerId ||
+      !data.players.some(player => player.id === session.playerId)) return
     // Per-recipient serialization: stock/opponent cards are masked for THIS
     // viewer; log is capped by the engine (MAX_LOG_ENTRIES ring buffer).
     this.send(session, {
@@ -1006,7 +1135,9 @@ export class Room {
     // Rejected late joins and idle unauthenticated sockets must not observe
     // roster, chat, or emote traffic (and sendGame independently applies this guard).
     for (const session of this.sessions.values()) {
-      if (session.playerId) this.send(session, message)
+      if (session.playerId && this.data?.players.some(player => player.id === session.playerId)) {
+        this.send(session, message)
+      }
     }
   }
 }

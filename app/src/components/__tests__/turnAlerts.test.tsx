@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import {
   TurnAttentionBeacon,
+  latestAcceptedGameplayAction,
   loadTurnAlertPreferences,
   useTurnAlertController,
   useTurnAlertPreferences,
@@ -34,6 +35,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   localStorage.clear()
   sessionStorage.clear()
   soundMocks.emitSound.mockClear()
@@ -60,19 +62,33 @@ function AlertHarness({ onPointerDown, onKeyDown, ...options }: AlertHarnessProp
 const waiting: TurnAlertControllerOptions = {
   phase: 'waiting',
   currentPlayerId: null,
+  turnCount: null,
+  latestGameplayActorId: null,
+  latestGameplayActionBurned: false,
   localHumanTurn: false,
   soundOn: true,
   turnAlertsEnabled: true,
+  repeatTurnAlertsEnabled: false,
   adhdMode: false,
   adhdSound: 'beat',
 }
 
 function PreferenceHarness() {
-  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
+  const {
+    preferences,
+    toggleSound,
+    toggleTurnAlerts,
+    toggleRepeatTurnAlerts,
+    toggleAdhdMode,
+    selectAdhdSound,
+  } = useTurnAlertPreferences()
   return (
     <>
       <button type="button" onClick={toggleSound}>Sound {preferences.soundOn ? 'on' : 'off'}</button>
       <button type="button" onClick={toggleTurnAlerts}>Alerts {preferences.turnAlertsEnabled ? 'on' : 'off'}</button>
+      <button type="button" onClick={toggleRepeatTurnAlerts}>
+        Repeat alerts {preferences.repeatTurnAlertsEnabled ? 'on' : 'off'}
+      </button>
       <button type="button" onClick={toggleAdhdMode}>ADHD {preferences.adhdMode ? 'on' : 'off'}</button>
       <button type="button" onClick={() => selectAdhdSound(preferences.adhdSound === 'beat' ? 'chime' : 'beat')}>
         ADHD sound {preferences.adhdSound}
@@ -86,10 +102,20 @@ function IntegratedAlertMenuHarness({
   currentPlayerId,
   localHumanTurn,
 }: Pick<TurnAlertControllerOptions, 'phase' | 'currentPlayerId' | 'localHumanTurn'>) {
-  const { preferences, toggleSound, toggleTurnAlerts, toggleAdhdMode, selectAdhdSound } = useTurnAlertPreferences()
+  const {
+    preferences,
+    toggleSound,
+    toggleTurnAlerts,
+    toggleRepeatTurnAlerts,
+    toggleAdhdMode,
+    selectAdhdSound,
+  } = useTurnAlertPreferences()
   const active = useTurnAlertController({
     phase,
     currentPlayerId,
+    turnCount: null,
+    latestGameplayActorId: null,
+    latestGameplayActionBurned: false,
     localHumanTurn,
     ...preferences,
   })
@@ -102,6 +128,8 @@ function IntegratedAlertMenuHarness({
         onToggleSound={toggleSound}
         turnAlertsEnabled={preferences.turnAlertsEnabled}
         onToggleTurnAlerts={toggleTurnAlerts}
+        repeatTurnAlertsEnabled={preferences.repeatTurnAlertsEnabled}
+        onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
         adhdMode={preferences.adhdMode}
         onToggleAdhdMode={toggleAdhdMode}
         adhdSound={preferences.adhdSound}
@@ -114,16 +142,11 @@ function IntegratedAlertMenuHarness({
 }
 
 describe('turn alert preferences', () => {
-  it('starts a fresh session muted with turn alerts on and ADHD mode off', async () => {
-    // Stale preferences from an older app version must not leak into a new
-    // browser session now that sensory settings are session-scoped.
-    localStorage.setItem('shithead:sound', 'off')
-    localStorage.setItem('shithead:turn-alerts', 'off')
-    localStorage.setItem('shithead:adhd-mode', 'on')
-
-    expect(loadTurnAlertPreferences(sessionStorage)).toEqual({
+  it('starts a fresh browser profile muted with repeat alerts and ADHD mode off', async () => {
+    expect(loadTurnAlertPreferences(localStorage, sessionStorage)).toEqual({
       soundOn: false,
       turnAlertsEnabled: true,
+      repeatTurnAlertsEnabled: false,
       adhdMode: false,
       adhdSound: 'beat',
     })
@@ -131,27 +154,63 @@ describe('turn alert preferences', () => {
     render(<PreferenceHarness />)
     expect(screen.getByRole('button', { name: 'Sound off' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Alerts on' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Repeat alerts off' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'ADHD off' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'ADHD sound beat' })).toBeTruthy()
     await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(true))
   })
 
-  it('restores explicitly saved choices', () => {
-    sessionStorage.setItem('shithead:sound', 'on')
-    sessionStorage.setItem('shithead:turn-alerts', 'off')
-    sessionStorage.setItem('shithead:adhd-mode', 'on')
-    sessionStorage.setItem('shithead:adhd-sound', 'chime')
-    expect(loadTurnAlertPreferences(sessionStorage)).toEqual({
+  it('restores explicitly saved durable choices', () => {
+    localStorage.setItem('shithead:sound', 'on')
+    localStorage.setItem('shithead:turn-alerts', 'off')
+    localStorage.setItem('shithead:repeat-turn-alerts', 'on')
+    localStorage.setItem('shithead:adhd-mode', 'on')
+    localStorage.setItem('shithead:adhd-sound', 'chime')
+    expect(loadTurnAlertPreferences(localStorage, sessionStorage)).toEqual({
       soundOn: true,
       turnAlertsEnabled: false,
+      repeatTurnAlertsEnabled: true,
       adhdMode: true,
       adhdSound: 'chime',
     })
   })
 
+  it('migrates current-session values once into local storage', () => {
+    sessionStorage.setItem('shithead:sound', 'on')
+    sessionStorage.setItem('shithead:turn-alerts', 'off')
+    sessionStorage.setItem('shithead:repeat-turn-alerts', 'on')
+    sessionStorage.setItem('shithead:adhd-mode', 'on')
+    sessionStorage.setItem('shithead:adhd-sound', 'chime')
+
+    expect(loadTurnAlertPreferences(localStorage, sessionStorage)).toEqual({
+      soundOn: true,
+      turnAlertsEnabled: false,
+      repeatTurnAlertsEnabled: true,
+      adhdMode: true,
+      adhdSound: 'chime',
+    })
+    expect(localStorage.getItem('shithead:sound')).toBe('on')
+    expect(localStorage.getItem('shithead:turn-alerts')).toBe('off')
+    expect(localStorage.getItem('shithead:repeat-turn-alerts')).toBe('on')
+    expect(localStorage.getItem('shithead:adhd-mode')).toBe('on')
+    expect(localStorage.getItem('shithead:adhd-sound')).toBe('chime')
+    expect(sessionStorage.getItem('shithead:sound')).toBeNull()
+    expect(sessionStorage.getItem('shithead:turn-alerts')).toBeNull()
+    expect(sessionStorage.getItem('shithead:repeat-turn-alerts')).toBeNull()
+    expect(sessionStorage.getItem('shithead:adhd-mode')).toBeNull()
+    expect(sessionStorage.getItem('shithead:adhd-sound')).toBeNull()
+  })
+
+  it('keeps an existing local choice ahead of a stale session value', () => {
+    localStorage.setItem('shithead:sound', 'off')
+    sessionStorage.setItem('shithead:sound', 'on')
+    expect(loadTurnAlertPreferences(localStorage, sessionStorage).soundOn).toBe(false)
+    expect(sessionStorage.getItem('shithead:sound')).toBeNull()
+  })
+
   it('migrates the former second ADHD choice to Chime', () => {
     sessionStorage.setItem('shithead:adhd-sound', 'blast')
-    expect(loadTurnAlertPreferences(sessionStorage).adhdSound).toBe('chime')
+    expect(loadTurnAlertPreferences(localStorage, sessionStorage).adhdSound).toBe('chime')
   })
 
   it('persists every menu choice and applies mute to the shared sound backend', async () => {
@@ -160,28 +219,30 @@ describe('turn alert preferences', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Sound off' }))
     fireEvent.click(screen.getByRole('button', { name: 'Alerts on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Repeat alerts off' }))
     fireEvent.click(screen.getByRole('button', { name: 'ADHD off' }))
     fireEvent.click(screen.getByRole('button', { name: 'ADHD sound beat' }))
 
-    expect(sessionStorage.getItem('shithead:sound')).toBe('on')
-    expect(sessionStorage.getItem('shithead:turn-alerts')).toBe('off')
-    expect(sessionStorage.getItem('shithead:adhd-mode')).toBe('on')
-    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('chime')
+    expect(localStorage.getItem('shithead:sound')).toBe('on')
+    expect(localStorage.getItem('shithead:turn-alerts')).toBe('off')
+    expect(localStorage.getItem('shithead:repeat-turn-alerts')).toBe('on')
+    expect(localStorage.getItem('shithead:adhd-mode')).toBe('on')
+    expect(localStorage.getItem('shithead:adhd-sound')).toBe('chime')
     await waitFor(() => expect(soundMocks.setSoundMuted).toHaveBeenLastCalledWith(false))
   })
 
   it('keeps previews silent while muted but still saves either selection', () => {
     render(<PreferenceHarness />)
     fireEvent.click(screen.getByRole('button', { name: 'ADHD sound beat' }))
-    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('chime')
+    expect(localStorage.getItem('shithead:adhd-sound')).toBe('chime')
     fireEvent.click(screen.getByRole('button', { name: 'ADHD sound chime' }))
-    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('beat')
+    expect(localStorage.getItem('shithead:adhd-sound')).toBe('beat')
     expect(soundMocks.emitSound).not.toHaveBeenCalled()
   })
 
   it('switches Chime back to Beat, previews gabber once, and uses it on the next ADHD turn', async () => {
-    sessionStorage.setItem('shithead:sound', 'on')
-    sessionStorage.setItem('shithead:adhd-mode', 'on')
+    localStorage.setItem('shithead:sound', 'on')
+    localStorage.setItem('shithead:adhd-mode', 'on')
     const { rerender } = render(
       <IntegratedAlertMenuHarness phase="waiting" currentPlayerId={null} localHumanTurn={false} />,
     )
@@ -193,7 +254,7 @@ describe('turn alert preferences', () => {
     await waitFor(() => {
       expect(screen.getByRole('menuitemradio', { name: 'ADHD sound: Chime' }).getAttribute('aria-checked')).toBe('true')
     })
-    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('chime')
+    expect(localStorage.getItem('shithead:adhd-sound')).toBe('chime')
     expect(soundMocks.emitSound).toHaveBeenCalledTimes(1)
     expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_attention_chime')
 
@@ -202,7 +263,7 @@ describe('turn alert preferences', () => {
     await waitFor(() => {
       expect(screen.getByRole('menuitemradio', { name: 'ADHD sound: Beat' }).getAttribute('aria-checked')).toBe('true')
     })
-    expect(sessionStorage.getItem('shithead:adhd-sound')).toBe('beat')
+    expect(localStorage.getItem('shithead:adhd-sound')).toBe('beat')
     expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_yours')
     expect(soundMocks.stopSound).toHaveBeenCalledWith('turn_attention_chime')
     expect(soundMocks.emitSound).toHaveBeenCalledTimes(1)
@@ -246,6 +307,346 @@ describe('turn alert transitions', () => {
     )
     expect(soundMocks.emitSound).toHaveBeenCalledTimes(1)
     expect(vibrateMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('alerts for an opted-in consecutive turn owned by the accepted actor', () => {
+    const { rerender } = render(<AlertHarness {...waiting} />)
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={4}
+        latestGameplayActorId="other"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    soundMocks.emitSound.mockClear()
+    vibrateMock.mockClear()
+
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={5}
+        latestGameplayActorId="me"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+
+    expect(soundMocks.emitSound).toHaveBeenCalledOnce()
+    expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_yours')
+    expect(vibrateMock).toHaveBeenCalledWith([80, 45, 80])
+  })
+
+  it.each([560, 140])('waits %i ms for burn cleanup before a repeat alert', (delay) => {
+    vi.useFakeTimers()
+    const { rerender } = render(<AlertHarness {...waiting} />)
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={4}
+        latestGameplayActorId="other"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    soundMocks.emitSound.mockClear()
+    vibrateMock.mockClear()
+
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={5}
+        latestGameplayActorId="me"
+        latestGameplayActionBurned
+        repeatTurnAlertDelayMs={delay}
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+
+    act(() => vi.advanceTimersByTime(delay - 1))
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+    expect(vibrateMock).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(1))
+    expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_yours')
+    expect(vibrateMock).toHaveBeenCalledWith([80, 45, 80])
+
+    // A burn that transfers ownership (for example, its actor went out) must
+    // also wait for cleanup instead of chiming over the pile animation.
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="other"
+        turnCount={6}
+        latestGameplayActorId="other"
+        localHumanTurn={false}
+        repeatTurnAlertsEnabled
+      />,
+    )
+    soundMocks.emitSound.mockClear()
+    vibrateMock.mockClear()
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={7}
+        latestGameplayActorId="other"
+        latestGameplayActionBurned
+        repeatTurnAlertDelayMs={delay}
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    act(() => vi.advanceTimersByTime(delay - 1))
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(1))
+    expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_yours')
+  })
+
+  it('cancels a pending burn repeat alert when a newer action changes owner', () => {
+    vi.useFakeTimers()
+    const { rerender } = render(<AlertHarness {...waiting} />)
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={9}
+        latestGameplayActorId="other"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    soundMocks.emitSound.mockClear()
+    vibrateMock.mockClear()
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={10}
+        latestGameplayActorId="me"
+        latestGameplayActionBurned
+        repeatTurnAlertDelayMs={560}
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="other"
+        turnCount={11}
+        latestGameplayActorId="other"
+        localHumanTurn={false}
+        repeatTurnAlertsEnabled
+      />,
+    )
+    act(() => vi.advanceTimersByTime(560))
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+    expect(vibrateMock).toHaveBeenCalledWith(0)
+    expect(vibrateMock).not.toHaveBeenCalledWith([80, 45, 80])
+  })
+
+  it('cancels pending burn alerts when alerts are disabled or the controller unmounts', () => {
+    vi.useFakeTimers()
+    const view = render(<AlertHarness {...waiting} />)
+    view.rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={1}
+        latestGameplayActorId="other"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    soundMocks.emitSound.mockClear()
+    vibrateMock.mockClear()
+    view.rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={2}
+        latestGameplayActorId="me"
+        latestGameplayActionBurned
+        repeatTurnAlertDelayMs={560}
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    view.rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={2}
+        latestGameplayActorId="me"
+        latestGameplayActionBurned
+        repeatTurnAlertDelayMs={560}
+        localHumanTurn
+        repeatTurnAlertsEnabled
+        turnAlertsEnabled={false}
+      />,
+    )
+    act(() => vi.advanceTimersByTime(560))
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+
+    view.rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={3}
+        latestGameplayActorId="me"
+        latestGameplayActionBurned
+        repeatTurnAlertDelayMs={560}
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    view.unmount()
+    act(() => vi.advanceTimersByTime(560))
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+  })
+
+  it('does not mistake another actor quick-following, a cosmetic update, or a skipped snapshot for a repeat turn', () => {
+    const { rerender } = render(<AlertHarness {...waiting} />)
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={7}
+        latestGameplayActorId="other"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    soundMocks.emitSound.mockClear()
+    vibrateMock.mockClear()
+
+    // Another player's authoritative quick follow-up changed the action count
+    // while the already-current local player remained the turn owner.
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={8}
+        latestGameplayActorId="other"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    // A phase-only render carries the same accepted-action cursor.
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="endgame"
+        currentPlayerId="me"
+        turnCount={8}
+        latestGameplayActorId="me"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    // A reconnect jump cannot prove that ownership was consecutive.
+    rerender(
+      <AlertHarness
+        {...waiting}
+        phase="endgame"
+        currentPlayerId="me"
+        turnCount={10}
+        latestGameplayActorId="me"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+    expect(vibrateMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the first already-live snapshot quiet even with repeat alerts enabled', () => {
+    render(
+      <AlertHarness
+        {...waiting}
+        phase="play"
+        currentPlayerId="me"
+        turnCount={12}
+        latestGameplayActorId="me"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    expect(soundMocks.emitSound).not.toHaveBeenCalled()
+    expect(vibrateMock).not.toHaveBeenCalledWith([80, 45, 80])
+    expect(vibrateMock).not.toHaveBeenCalledWith([120, 80, 120])
+  })
+
+  it('reuses the selected ADHD cue and beacon on an opted-in repeat turn', async () => {
+    const { rerender } = render(<AlertHarness {...waiting} adhdMode adhdSound="chime" />)
+    rerender(
+      <AlertHarness
+        {...waiting}
+        adhdMode
+        adhdSound="chime"
+        phase="play"
+        currentPlayerId="me"
+        turnCount={2}
+        latestGameplayActorId="other"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Table action' }))
+    await waitFor(() => expect(screen.queryByTestId('turn-attention-beacon')).toBeNull())
+    soundMocks.emitSound.mockClear()
+    vibrateMock.mockClear()
+
+    rerender(
+      <AlertHarness
+        {...waiting}
+        adhdMode
+        adhdSound="chime"
+        phase="play"
+        currentPlayerId="me"
+        turnCount={3}
+        latestGameplayActorId="me"
+        localHumanTurn
+        repeatTurnAlertsEnabled
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('turn-attention-beacon')).toBeTruthy())
+    expect(soundMocks.emitSound).toHaveBeenCalledWith('turn_attention_chime')
+    expect(vibrateMock).toHaveBeenCalledWith([120, 80, 120])
+  })
+
+  it('derives the accepted actor and burn flag from a play action group', () => {
+    expect(latestAcceptedGameplayAction([
+      { type: 'PLAY_CARDS', playerId: 'prior', cards: [{ id: 'c', rank: '6', suit: '♣' }] },
+      { type: 'QUICK_FOLLOW_UP', playerId: 'prior', cards: [{ id: 'd', rank: '6', suit: '♦' }] },
+      { type: 'CLEAR_PILE', reason: 'quartet' },
+      { type: 'DRAW', playerId: 'prior', count: 1 },
+    ])).toEqual({ actorId: 'prior', burned: true })
+    expect(latestAcceptedGameplayAction([{ type: 'PHASE_CHANGE', phase: 'endgame' }])).toBeNull()
   })
 
   it('keeps haptic turn alerts active when sound is muted', () => {
