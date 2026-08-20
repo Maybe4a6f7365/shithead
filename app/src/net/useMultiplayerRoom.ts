@@ -102,6 +102,21 @@ export function shouldAcceptGameState(incoming: GameState, lastSeq: number | nul
   return seq === 0 && incoming.turnCount === 0 && incoming.phase === 'rearrange'
 }
 
+/**
+ * The authoritative roster wins over a stale locally cached viewer role.
+ * Promotion is broadcast as ROOM_STATE membership rather than a second
+ * WELCOME, so a queued watcher whose id is now seated must immediately render
+ * the player flow even if a batched/stale role update still says spectator.
+ */
+export function resolveViewerRole(
+  role: ViewerRole | null,
+  playerId: string | null,
+  room: RoomSummary | null,
+): ViewerRole | null {
+  if (playerId && room?.players.some(player => player.id === playerId)) return 'player'
+  return role
+}
+
 // ---------- The hook ----------
 
 export interface UseMultiplayerRoomArgs {
@@ -500,7 +515,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
 
   return {
     status, attempt, maxAttempts: 5,
-    room, gameState, playerId, viewerRole,
+    room, gameState, playerId, viewerRole: resolveViewerRole(viewerRole, playerId, room),
     error, notice, clearNotice, latestEmote, latestBroadcast, latestChat, recentCustomMessages, latestSystemEvent,
     send, sendEmote, sendBroadcast, sendChat, quickFollowUp, retry, tryAgain, leave,
   }

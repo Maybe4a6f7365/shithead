@@ -9,7 +9,8 @@ import { DEFAULT_GAME_RULES, type Card, type GameState } from '../engine'
 import { PROTOCOL_VERSION, type RoomSummary } from '../engine/protocol'
 import { RoomClient } from './RoomClient'
 import {
-  shouldAcceptGameState, loadSession, loadRestoredRoomIntent, saveSession, clearSession, useMultiplayerRoom,
+  shouldAcceptGameState, resolveViewerRole, loadSession, loadRestoredRoomIntent, saveSession, clearSession,
+  useMultiplayerRoom,
 } from './useMultiplayerRoom'
 
 function gs(seq: number, turnCount = seq, phase: GameState['phase'] = 'play'): GameState {
@@ -44,6 +45,21 @@ describe('shouldAcceptGameState', () => {
     const legacy = gs(0)
     delete legacy.seq
     expect(shouldAcceptGameState(legacy, 42)).toBe(true)
+  })
+})
+
+describe('resolveViewerRole', () => {
+  it('treats authoritative seated membership as a promotion even if local role state is stale', () => {
+    const room = {
+      ...roomSummary('rearrange'),
+      players: [{
+        id: 'watcher-1', name: 'Mira', isAI: false, connected: true, isOut: false,
+        cardCount: { hand: 3, faceUp: 3, faceDown: 3 },
+      }],
+    }
+
+    expect(resolveViewerRole('spectator', 'watcher-1', room)).toBe('player')
+    expect(resolveViewerRole('spectator', 'queued-watcher', room)).toBe('spectator')
   })
 })
 
