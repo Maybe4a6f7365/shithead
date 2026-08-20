@@ -46,6 +46,7 @@ import {
 } from '../engine/protocol'
 import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
 import { TurnAttentionBeacon } from './turnAlerts'
+import { SpectatorIndicator } from './SpectatorIndicator'
 
 export interface TableScreenProps {
   state: GameState
@@ -54,6 +55,10 @@ export interface TableScreenProps {
   viewerId: string
   /** True when it is the viewer's turn AND the viewer may act (not AI). */
   viewerActive: boolean
+  /** Dedicated read-only view for an authenticated queued spectator. */
+  spectating?: boolean
+  /** Connected queued spectators; displayed only to seated players. */
+  spectatorCount?: number
   /** False while multiplayer is waiting for a fresh post-auth snapshot. */
   actionsEnabled?: boolean
   /** Synchronous transport-epoch guard for the disconnect transition before
@@ -200,7 +205,8 @@ function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }):
 }
 
 export function TableScreen({
-  state, viewerId, viewerActive, actionsEnabled = true, canSubmitAction = () => true,
+  state, viewerId, viewerActive, spectating = false, spectatorCount = 0,
+  actionsEnabled = true, canSubmitAction = () => true,
   initialSelectionDraft = [], onSelectionDraftChange,
   error, onPlay, onQuickFollowUp,
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
@@ -748,6 +754,7 @@ export function TableScreen({
   const seats: Seat[] = orderSeats(state.players, viewerId).map(p => ({
     player: p,
     faceUp: p.faceUp,
+    hideFaceUp: spectating,
     handCount: p.hand.length,
     faceDownCount: p.faceDown.length,
     offline: seatOffline?.(p.id) ?? false,
@@ -773,7 +780,7 @@ export function TableScreen({
     return () => document.removeEventListener('keydown', onKey)
   })
 
-  if (!viewer) return null
+  if (!viewer && !spectating) return null
 
   const endgameZoneLive = (
     viewerActive || canBurnIn || (canPreselectVisible && zone === 'faceUp')
@@ -796,6 +803,7 @@ export function TableScreen({
       className="app-viewport last-call-screen game-screen bg-felt text-cream flex flex-col table-select-none"
       data-game-phase={state.phase}
       data-viewer-active={viewerActive ? 'true' : 'false'}
+      data-viewer-role={spectating ? 'spectator' : 'player'}
       data-active-zone={zone ?? undefined}
       data-selection-count={effectiveSelection.length}
     >
@@ -813,7 +821,10 @@ export function TableScreen({
       <div className="game-shell table-shell">
       <header className="game-header table-header">
         <div className="game-topbar table-topbar">
-          <div className="game-connection table-connection">{connectionBadge}</div>
+          <div className="game-connection table-connection">
+            {connectionBadge}
+            {!spectating && <SpectatorIndicator count={spectatorCount} />}
+          </div>
           <div
             className="game-turn-label table-turn-label"
             data-my-turn={isViewerTurn && viewerActive ? 'true' : 'false'}
@@ -831,13 +842,15 @@ export function TableScreen({
             </span>
           </div>
           <div className="game-tools table-tools" aria-label="Table controls">
-            <EmoteButton
-              key={viewerId}
-              onSend={sendEmote}
-              onSendBroadcast={sendBroadcast}
-              onSendChat={sendChat}
-              recentCustomMessages={recentCustomMessages}
-            />
+            {!spectating && (
+              <EmoteButton
+                key={viewerId}
+                onSend={sendEmote}
+                onSendBroadcast={sendBroadcast}
+                onSendChat={sendChat}
+                recentCustomMessages={recentCustomMessages}
+              />
+            )}
             <QuietMenu
               onOpenRules={onOpenRules}
               soundOn={soundOn}
@@ -861,6 +874,7 @@ export function TableScreen({
           seats={seats}
           activeSeatId={current?.id ?? null}
           turnMarkerLayoutId={reduceMotion ? undefined : 'active-turn-marker'}
+          ariaLabel={spectating ? 'Players' : 'Opponents'}
         />
       </header>
 
@@ -893,20 +907,22 @@ export function TableScreen({
       </main>
 
       {/* Z3 — tableau well */}
-      <TableauWell
-        faceUp={viewer.faceUp}
-        faceDown={viewer.faceDown}
-        fullSize={endgameZoneLive}
-        faceUpStates={states}
-        faceUpHints={hints}
-        faceDownStates={downStates}
-        faceDownHints={downHints}
-        onActivateFaceUp={(viewerActive || canPreselectVisible) && zone === 'faceUp' ? onFaceUpId : undefined}
-        onActivateFaceDown={viewerActive && zone === 'faceDown' ? onFaceDownId : undefined}
-      />
+      {viewer && !spectating && (
+        <TableauWell
+          faceUp={viewer.faceUp}
+          faceDown={viewer.faceDown}
+          fullSize={endgameZoneLive}
+          faceUpStates={states}
+          faceUpHints={hints}
+          faceDownStates={downStates}
+          faceDownHints={downHints}
+          onActivateFaceUp={(viewerActive || canPreselectVisible) && zone === 'faceUp' ? onFaceUpId : undefined}
+          onActivateFaceDown={viewerActive && zone === 'faceDown' ? onFaceDownId : undefined}
+        />
+      )}
 
       {/* Z4 — ActionBar + hand fan, flush to safe-area bottom */}
-      <footer
+      {viewer && !spectating ? <footer
         className="app-bottom-zone game-footer table-hand-zone"
         data-hand-count={viewer.hand.length}
         data-active-zone={zone ?? undefined}
@@ -948,7 +964,15 @@ export function TableScreen({
             orderKey={viewerId}
           />
         </div>
-      </footer>
+      </footer> : (
+        <footer className="app-bottom-zone game-footer spectator-waiting-strip" role="status">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true" focusable="false">
+            <path d="M2.8 12s3.3-5.2 9.2-5.2S21.2 12 21.2 12s-3.3 5.2-9.2 5.2S2.8 12 2.8 12Z" />
+            <circle cx="12" cy="12" r="2.5" />
+          </svg>
+          <span>Watching this round · waiting for the next deal</span>
+        </footer>
+      )}
       </div>
       </LayoutGroup>
     </div>

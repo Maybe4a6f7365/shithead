@@ -17,6 +17,8 @@ import { RulesSheet } from './RulesSheet'
 import { TributeScreen } from './TributeScreen'
 import { SystemEventFeedback } from './EmoteButton'
 import type { SystemEvent } from '../engine/protocol'
+import { OfflinePlayerControls } from './OfflinePlayerControls'
+import { SpectatorIndicator } from './SpectatorIndicator'
 import {
   latestAcceptedGameplayAction,
   useTurnAlertController,
@@ -51,7 +53,7 @@ export interface MultiplayerGameTableProps {
 
 export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
   const {
-    status, attempt, maxAttempts, room, gameState, playerId,
+    status, attempt, maxAttempts, room, gameState, playerId, viewerRole,
     error, notice, latestEmote, latestBroadcast, latestChat, recentCustomMessages, latestSystemEvent,
     send, sendEmote, sendBroadcast, sendChat, quickFollowUp, retry, tryAgain, leave,
   } = useMultiplayerRoom({ roomId, playerName, intent })
@@ -144,7 +146,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         }
         copy={
           error.kind === 'invalid-room' ? 'Check the code and try again.'
-          : error.kind === 'room-full' ? 'This room already has all its players.'
+          : error.kind === 'room-full' ? error.message || 'This room has no open player or spectator places.'
           : error.kind === 'session-expired' ? error.message || 'This game has moved on.'
           : "It's us, not you."
         }
@@ -200,6 +202,24 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
     )
   }
 
+  const isSpectator = viewerRole === 'spectator'
+  const isHost = room.hostId === playerId
+  const canSendRoomAction = status === 'connected' || status === 'restored'
+  const offlineSeats = new Set(room.players.filter(player => !player.connected).map(player => player.id))
+  const offlineControls = (inline = false) => (
+    <OfflinePlayerControls
+      players={room.players}
+      isHost={isHost && canSendRoomAction}
+      inline={inline}
+      onKick={targetId => { send({ type: 'KICK_OFFLINE_PLAYER', playerId: targetId }) }}
+    />
+  )
+  const phaseSpectatorIndicator = !isSpectator && (room.spectatorCount ?? 0) > 0 ? (
+    <div className="phase-spectator-indicator">
+      <SpectatorIndicator count={room.spectatorCount} />
+    </div>
+  ) : null
+
   // ---- Waiting room (host branch driven by room.hostId === playerId) ----
   if (room.phase === 'waiting') {
     return (
@@ -212,6 +232,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
           onRulesChange={rules => send({ type: 'SET_RULES', rules })}
           onLeave={quit}
         />
+        {phaseSpectatorIndicator}
+        {offlineControls()}
       </>
     )
   }
@@ -223,7 +245,72 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         <main className="connection-screen__body flex-1 flex items-center justify-center">
           <p className="connection-screen__copy text-body text-cream-dim" role="status">Dealing…</p>
         </main>
+        {phaseSpectatorIndicator}
+        {offlineControls()}
       </div>
+    )
+  }
+
+  // ---- Authenticated watcher: public table only, queued for a future deal ----
+  if (isSpectator) {
+    const resultsView = gameOverResults(gameState)
+    const voteByPlayer = new Map((room.rematchVotes ?? []).map(vote => [vote.playerId, vote.vote] as const))
+    const spectatorRematchVotes = room.players.map(player => ({
+      playerId: player.id,
+      name: player.name,
+      vote: voteByPlayer.get(player.id) ?? 'pending' as const,
+      connected: player.connected,
+    }))
+    const spectatorGameOver = gameState.phase === 'gameOver' ? (
+      <GameOverOverlay
+        result="neutral"
+        shitheadName={gameState.players.find(player => player.id === gameState.loserId)?.name}
+        canRematch={false}
+        waitingForHost
+        waitingCopy={!canSendRoomAction
+          ? 'Reconnecting… your place in the next-round queue is kept.'
+          : 'You’re in the next-round queue. You’ll join automatically if a seat opens.'}
+        onLeave={quit}
+        rules={room.rules ?? gameState.rules}
+        leaderboard={resultsView.leaderboard}
+        statsNote={resultsView.statsNote}
+        rematchVotes={spectatorRematchVotes}
+      />
+    ) : null
+
+    return (
+      <>
+        <TableScreen
+          state={gameState}
+          viewerId={playerId}
+          viewerActive={false}
+          spectating
+          actionsEnabled={false}
+          error={notice}
+          onPlay={() => false}
+          onPickUp={() => false}
+          onLeave={quit}
+          onOpenRules={() => setRulesOpen(true)}
+          soundOn={preferences.soundOn}
+          onToggleSound={toggleSound}
+          turnAlertsEnabled={preferences.turnAlertsEnabled}
+          onToggleTurnAlerts={toggleTurnAlerts}
+          repeatTurnAlertsEnabled={preferences.repeatTurnAlertsEnabled}
+          onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
+          adhdMode={preferences.adhdMode}
+          onToggleAdhdMode={toggleAdhdMode}
+          adhdSound={preferences.adhdSound}
+          onSelectAdhdSound={selectAdhdSound}
+          connectionBadge={badge}
+          seatOffline={id => offlineSeats.has(id)}
+          latestEmote={latestEmote}
+          latestBroadcast={latestBroadcast}
+          latestChat={latestChat}
+          latestSystemEvent={latestSystemEvent}
+        />
+        {spectatorGameOver}
+        <RulesSheet open={rulesOpen} onClose={() => setRulesOpen(false)} />
+      </>
     )
   }
 
@@ -236,12 +323,16 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
       )
     }
     return (
-      <RearrangeScreen
-        player={me}
-        waitingForOthers={iAmReady}
-        onSwap={(h, u) => send({ type: 'REARRANGE', handIdx: h, upIdx: u })}
-        onReady={() => { send({ type: 'READY' }); setIAmReady(true) }}
-      />
+      <>
+        <RearrangeScreen
+          player={me}
+          waitingForOthers={iAmReady}
+          onSwap={(h, u) => send({ type: 'REARRANGE', handIdx: h, upIdx: u })}
+          onReady={() => { send({ type: 'READY' }); setIAmReady(true) }}
+        />
+        {phaseSpectatorIndicator}
+        {offlineControls()}
+      </>
     )
   }
 
@@ -250,22 +341,24 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
     const lastPlace = gameState.players.find(player => player.id === gameState.pendingTribute?.loserId)
     if (winner && lastPlace) {
       return (
-        <TributeScreen
-          winner={winner}
-          loser={lastPlace}
-          viewerId={playerId}
-          error={notice}
-          onSwap={(winnerCardId, loserCardId) => send({ type: 'TRIBUTE_SWAP', winnerCardId, loserCardId })}
-          onSkip={() => send({ type: 'TRIBUTE_SKIP' })}
-        />
+        <>
+          <TributeScreen
+            winner={winner}
+            loser={lastPlace}
+            viewerId={playerId}
+            error={notice}
+            onSwap={(winnerCardId, loserCardId) => send({ type: 'TRIBUTE_SWAP', winnerCardId, loserCardId })}
+            onSkip={() => send({ type: 'TRIBUTE_SKIP' })}
+          />
+          {phaseSpectatorIndicator}
+          {offlineControls()}
+        </>
       )
     }
   }
 
   const me = gameState.players.find(p => p.id === playerId)
-  const isHost = room.hostId === playerId
   const loser = gameState.players.find(p => p.id === gameState.loserId)
-  const offlineSeats = new Set(room.players.filter(p => !p.connected).map(p => p.id))
   const voteByPlayer = new Map((room.rematchVotes ?? []).map(vote => [vote.playerId, vote.vote] as const))
   const rematchVotes = room.players.map(player => ({
     playerId: player.id,
@@ -279,9 +372,13 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
   )
   const hostVotedYes = voteByPlayer.get(room.hostId) === 'yes'
   const everyYesVoterOnline = yesVotes.every(vote => vote.connected)
-  const canSendRoomAction = status === 'connected' || status === 'restored'
+  const connectedSpectatorCount = Math.max(0, Math.floor(room.spectatorCount ?? 0))
+  const rematchParticipantCount = yesVotes.length + Math.min(
+    connectedSpectatorCount,
+    Math.max(0, room.maxPlayers - yesVotes.length),
+  )
   const canStartRematch = isHost && canSendRoomAction && everyOnlinePlayerVoted && hostVotedYes &&
-    yesVotes.length >= 2 && everyYesVoterOnline
+    rematchParticipantCount >= 2 && everyYesVoterOnline
   const resultsView = gameOverResults(gameState)
   const startRematchHint = !canSendRoomAction
     ? 'Reconnecting… rematch controls will return when you are online.'
@@ -289,8 +386,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
       ? 'Waiting for every online player to vote.'
     : !hostVotedYes
       ? 'The host must vote Yes or leave the room.'
-      : yesVotes.length < 2
-        ? 'At least two Yes votes are needed.'
+      : rematchParticipantCount < 2
+        ? 'At least two players are needed, including connected next-round spectators.'
         : !everyYesVoterOnline
           ? 'Every Yes voter must be online.'
           : undefined
@@ -317,6 +414,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
       onStartRematch={isHost ? requestRematch : undefined}
       startRematchPending={rematchPending}
       startRematchHint={startRematchHint}
+      startRematchParticipantCount={rematchParticipantCount}
+      hostControls={isHost ? offlineControls(true) : undefined}
     />
   ) : null
 
@@ -344,6 +443,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
         state={gameState}
         viewerId={playerId}
         viewerActive={gameState.players[gameState.currentPlayerIdx]?.id === playerId && gameState.phase !== 'gameOver'}
+        spectatorCount={room.spectatorCount}
         actionsEnabled={status === 'connected' || status === 'restored'}
         error={notice}
         onPlay={cards => send({ type: 'PLAY', cards })}
@@ -380,6 +480,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
       />
 
       {gameOverOverlay}
+
+      {gameState.phase !== 'gameOver' && offlineControls()}
 
       <RulesSheet open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </>

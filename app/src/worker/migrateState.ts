@@ -15,6 +15,10 @@ import {
   type PlayerRoundStats,
   type RoundStats,
 } from '../engine'
+import {
+  MAX_SPECTATORS_PER_ROOM,
+  type SpectatorIdentity,
+} from '../engine/protocol'
 
 type LegacyState = Omit<GameState, 'rules' | 'winnerId' | 'pendingTribute' | 'pendingQuickFollowUp' | 'roundStats'> & {
   rules?: Partial<GameRules>
@@ -55,6 +59,58 @@ function validPlayerId(value: unknown, players: Player[]): value is string {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/**
+ * Restore only bounded, unique watcher identities that do not collide with a
+ * current player seat. Array order is the authoritative FIFO order; joinedAt
+ * is validated for display/auditing but never trusted to reorder the queue.
+ */
+export function normalizeSpectators(
+  value: unknown,
+  players: readonly Player[],
+  now = Date.now(),
+  resumeTokens?: Readonly<Record<string, unknown>>,
+): SpectatorIdentity[] {
+  if (!Array.isArray(value)) return []
+  const used = new Set(players.map(player => player.id))
+  const out: SpectatorIdentity[] = []
+  for (const candidate of value) {
+    if (out.length >= MAX_SPECTATORS_PER_ROOM) break
+    if (!isRecord(candidate) ||
+      typeof candidate.id !== 'string' || candidate.id.length === 0 || candidate.id.length > 128 ||
+      typeof candidate.name !== 'string' || candidate.name.trim().length === 0 || candidate.name.length > 32 ||
+      !Number.isSafeInteger(candidate.joinedAt) || Number(candidate.joinedAt) < 0 || Number(candidate.joinedAt) > now ||
+      (candidate.disconnectedAt !== undefined &&
+        (!Number.isSafeInteger(candidate.disconnectedAt) || Number(candidate.disconnectedAt) <= 0 ||
+          Number(candidate.disconnectedAt) > now)) ||
+      (resumeTokens !== undefined &&
+        (typeof resumeTokens[candidate.id] !== 'string' || !/^[0-9a-f]{64}$/.test(resumeTokens[candidate.id] as string))) ||
+      used.has(candidate.id)) continue
+    used.add(candidate.id)
+    out.push({
+      id: candidate.id,
+      name: candidate.name.trim(),
+      joinedAt: Number(candidate.joinedAt),
+      ...(candidate.disconnectedAt === undefined ? {} : { disconnectedAt: Number(candidate.disconnectedAt) }),
+    })
+  }
+  return out
+}
+
+/** Keep only plausible server timestamps belonging to current player seats. */
+export function normalizeOfflineSince(
+  value: unknown,
+  players: readonly Player[],
+  now = Date.now(),
+): Record<string, number> {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(players.flatMap(player => {
+    const timestamp = value[player.id]
+    return Number.isSafeInteger(timestamp) && Number(timestamp) > 0 && Number(timestamp) <= now
+      ? [[player.id, Number(timestamp)]]
+      : []
+  }))
+}
 
 /** Votes never survive into a live/new round and never retain unknown IDs. */
 export function normalizeRematchVotes(

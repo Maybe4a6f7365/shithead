@@ -18,6 +18,8 @@ function room(partial: Partial<RoomSummary> = {}): RoomSummary {
     hostId: 'host-1',
     maxPlayers: 5,
     easterEggEnabled: true,
+    spectatorCount: 0,
+    spectatorQueueSize: 0,
     createdAt: 0,
     rules: { ...DEFAULT_GAME_RULES },
     players: [

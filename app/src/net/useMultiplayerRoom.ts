@@ -2,7 +2,7 @@
 // useMultiplayerRoom — room socket lifecycle, session resume, seq guard,
 // truthful connection states (§4.6, Appendix A.10).
 //
-// RESUME CONTRACT (protocol v7):
+// RESUME CONTRACT (protocol v8):
 //  - WELCOME carries `resumeToken` (per-player secret). We persist
 //    { roomCode, playerId, resumeToken, playerName } in localStorage.
 //  - RESUME_ROOM is sent as { type, roomCode, playerId, resumeToken }.
@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   BroadcastEvent, BroadcastId, ChatEvent, ClientMsg, EmoteEvent, EmoteId, RoomSummary, ServerMsg, SystemEvent,
+  ViewerRole,
 } from '../engine/protocol'
 import type { GameState } from '../engine'
 import { addRecentCustomMessage } from '../customMessageHistory'
@@ -34,6 +35,8 @@ export interface StoredSession {
   playerId: string
   resumeToken?: string
   playerName: string
+  /** Optional for backwards compatibility with sessions stored before v8. */
+  role?: ViewerRole
 }
 
 const SESSION_KEY = 'shithead:session'
@@ -46,11 +49,12 @@ export function loadSession(): StoredSession | null {
     const validToken = parsed?.resumeToken === undefined || (
       typeof parsed.resumeToken === 'string' && parsed.resumeToken.length > 0 && parsed.resumeToken.length <= 256
     )
+    const validRole = parsed?.role === undefined || parsed.role === 'player' || parsed.role === 'spectator'
     if (
       typeof parsed?.roomCode === 'string' && /^[A-Z0-9]{6}$/.test(parsed.roomCode) &&
       typeof parsed?.playerId === 'string' && parsed.playerId.length > 0 && parsed.playerId.length <= 128 &&
       typeof parsed?.playerName === 'string' && parsed.playerName.trim().length > 0 && parsed.playerName.length <= 32 &&
-      validToken
+      validToken && validRole
     ) {
       return parsed as StoredSession
     }
@@ -112,6 +116,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const [room, setRoom] = useState<RoomSummary | null>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
+  const [viewerRole, setViewerRole] = useState<ViewerRole | null>(null)
   const [error, setError] = useState<RoomError | null>(null)
   const [notice, setNotice] = useState<string | null>(null) // in-game rejections → feed
   const [latestEmote, setLatestEmote] = useState<EmoteEvent | null>(null)
@@ -153,6 +158,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     setRoom(null)
     setGameState(null)
     setPlayerId(null)
+    setViewerRole(null)
     authoritativeStateRef.current = null
     lastSeqRef.current = null
     reconnectingRef.current = false
@@ -232,6 +238,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
               setRecentCustomMessages([])
             }
             setPlayerId(message.playerId)
+            setViewerRole(message.role)
             setRoom(message.room)
             setError(null)
             // Persist (and rotate) credentials.
@@ -240,6 +247,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
               playerId: message.playerId,
               resumeToken: message.resumeToken,
               playerName: playerName || sessionRef.current?.playerName || 'Player',
+              role: message.role,
             }
             sessionRef.current = session
             saveSession(session)
@@ -258,6 +266,17 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
             clearAuthoritativeNotice()
             const state = authoritativeStateRef.current
             setRoom(state ? { ...message.room, phase: state.phase } : message.room)
+            const currentSession = sessionRef.current
+            if (currentSession && message.room.players.some(player => player.id === currentSession.playerId)) {
+              // Promotion is authoritative in ROOM_STATE. Preserve the same
+              // identity/token and simply move the local viewer into a seat.
+              setViewerRole('player')
+              if (currentSession.role !== 'player') {
+                const promoted = { ...currentSession, role: 'player' as const }
+                sessionRef.current = promoted
+                saveSession(promoted)
+              }
+            }
             break
           }
           case 'GAME_STATE':
@@ -281,6 +300,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
                 sessionRef.current = null
                 clearSession()
                 setRecentCustomMessages([])
+                setViewerRole(null)
                 setError({ kind: 'session-expired', message: message.message })
                 // This is a terminal server decision (including a rematch seat
                 // release), not a transient disconnect. Stop the transport so
@@ -308,6 +328,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
             // This is terminal: do not retain or reconnect an invalid socket.
             sessionRef.current = null
             clearSession()
+            setViewerRole(null)
             setError({ kind: 'session-expired', message: message.reason || 'Your session has expired.' })
             clientRef.current?.close()
             break
@@ -471,6 +492,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     sessionRef.current = null
     clearSession()
     setRecentCustomMessages([])
+    setViewerRole(null)
     return true
   }, [])
 
@@ -478,7 +500,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
 
   return {
     status, attempt, maxAttempts: 5,
-    room, gameState, playerId,
+    room, gameState, playerId, viewerRole,
     error, notice, clearNotice, latestEmote, latestBroadcast, latestChat, recentCustomMessages, latestSystemEvent,
     send, sendEmote, sendBroadcast, sendChat, quickFollowUp, retry, tryAgain, leave,
   }

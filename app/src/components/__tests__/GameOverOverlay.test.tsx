@@ -170,10 +170,14 @@ describe('GameOverOverlay rematch voting', () => {
         onRematchVote={vi.fn()}
         canStartRematch
         onStartRematch={onStartRematch}
+        startRematchParticipantCount={2}
       />,
     )
-    const enabledStart = screen.getByRole('button', { name: /Start rematch/i }) as HTMLButtonElement
+    const enabledStart = screen.getByRole('button', {
+      name: 'Start rematch with 2 players',
+    }) as HTMLButtonElement
     expect(enabledStart.disabled).toBe(false)
+    expect(enabledStart.textContent).toBe('Start rematch · 2 players')
     fireEvent.click(enabledStart)
     expect(onStartRematch).toHaveBeenCalledTimes(1)
 

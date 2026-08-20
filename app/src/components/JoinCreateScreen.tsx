@@ -178,7 +178,9 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
               <span className="setup-card__suit" aria-hidden="true">♥</span>
               <div>
                 <h2 id="join-room-title" className="setup-card__title font-display text-body font-semibold">Join a table</h2>
-                <p className="setup-card__copy text-small text-cream-dim">Use the six-character invite code.</p>
+                <p className="setup-card__copy text-small text-cream-dim">
+                  Use the six-character invite code. If a round is live, you can watch safely and queue for the next deal.
+                </p>
               </div>
             </div>
             <div className="setup-field">

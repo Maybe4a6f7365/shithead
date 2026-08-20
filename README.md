@@ -5,8 +5,8 @@ A mobile-first implementation of the Shithead shedding card game, built as an in
 - **Production (canonical):** <https://shead.online>
 - **Fallback/diagnostic endpoint:** <https://shithead.not4a6f7365.workers.dev>
 - **Application version:** `0.2.0`
-- **Wire protocol:** `7`
-- **Persistent room schema:** `4`
+- **Wire protocol:** `8`
+- **Persistent room schema:** `7`
 - **Runtime:** Node.js `>=22`, modern evergreen browsers, Cloudflare Workers
 
 This document is the technical source of truth for the shipped game. Rule behavior is defined by the pure engine in [`app/src/engine/index.ts`](app/src/engine/index.ts); multiplayer trust boundaries and wire validation are defined by [`app/src/engine/protocol.ts`](app/src/engine/protocol.ts) and [`app/src/worker/index.ts`](app/src/worker/index.ts).
@@ -16,7 +16,7 @@ This document is the technical source of truth for the shipped game. Rule behavi
 | Area | Current implementation |
 |---|---|
 | Offline play | 2–5 seats on one device; any mix of humans and Easy/Medium/Hard AI |
-| Online play | Private rooms for 2–5 human players over WebSocket |
+| Online play | Private rooms for 2–5 human players, plus a five-person next-round spectator queue |
 | Round configuration | 1–3 decks, Jokers on/off, optional previous-winner face-up exchange |
 | Rules | 2 reset, 3 mirror, 7 low, stacked 8 skip, 10 burn except after 7, Joker burn, cumulative four-plus burn, out-of-turn burn-in, exact matching-card quick follow-up |
 | Refresh recovery | Online seats resume with a rotating secret token stored locally |
@@ -274,9 +274,9 @@ Engine reducers are pure: they return a new state and optional error without per
 
 `turnCount` counts accepted gameplay actions—normal plays, quick follow-ups, burn-ins, pickups, and failed blind attempts—not setup rearrangements or readiness. The separate event ring feeds announcements, motion, and sound cursors without allowing the state snapshot to grow indefinitely.
 
-## Multiplayer protocol v7
+## Multiplayer protocol v8
 
-Every current client frame is centrally stamped with `version: 7`. A present but different version is rejected. Missing versions are still accepted for backward compatibility, so this is a compatibility boundary rather than a strict negotiation handshake.
+Every current client frame is centrally stamped with `version: 8`. A present but different version is rejected. Missing versions are still accepted for backward compatibility, so this is a compatibility boundary rather than a strict negotiation handshake.
 
 ### Client-to-server messages
 
@@ -288,6 +288,7 @@ Every current client frame is centrally stamped with `version: 7`. A present but
 | `LEAVE_ROOM` | Explicitly leave and invalidate the seat token |
 | `START_GAME` | Host-only initial deal/rematch |
 | `REMATCH_VOTE` | Exact Boolean Yes/No choice after `gameOver`; authenticated and never reconnect-queued |
+| `KICK_OFFLINE_PLAYER` | Host-only target player ID; accepted only after 20 continuous server-measured offline seconds and never reconnect-queued |
 | `READY` | Finalize current rearrangement |
 | `REARRANGE` | Hand index and face-up index to swap |
 | `PLAY` | One to twelve unique card identifiers |
@@ -309,9 +310,9 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 
 | Message | Purpose |
 |---|---|
-| `WELCOME` | Private player ID, room summary, fresh resume token, protocol version |
+| `WELCOME` | Private member ID, server-assigned `player`/`spectator` role, room summary, fresh resume token, protocol version |
 | `RESUME_FAILED` | Explicit reason; invalidates local credentials |
-| `ROOM_STATE` | Lobby-safe roster, presence, host, rules, easter-egg status, phase, card counts, and public rematch vote statuses |
+| `ROOM_STATE` | Lobby-safe player roster, presence/offline timestamps, host, rules, phase, card counts, public rematch votes, connected spectator count, and total queue size |
 | `GAME_STATE` | Authoritative state serialized specifically for one viewer |
 | `ERROR` | Stable error code and contextual message |
 | `PLAYER_LEFT` | Explicit leave notification |
@@ -325,20 +326,21 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 
 ### Per-viewer masking
 
-| State area | Owning player | Other players | At `gameOver` |
-|---|---|---|---|
-| Hand | Real cards | Equal-length hidden placeholders | Revealed |
-| Face-up row | Real public cards | Real public cards | Revealed |
-| Face-down row | Synthetic blind aliases | Hidden placeholders | Revealed |
-| Stock | Equal-length hidden placeholders | Equal-length hidden placeholders | Still masked |
-| Pile | Real public cards | Real public cards | Revealed |
-| Pending quick follow-up | Exact entitlement and eligible IDs | `null`, including the fact that a match was drawn | `null` in terminal states |
+| State area | Seated owner | Other seated players | Spectator, including `gameOver` | Current-round participants at `gameOver` |
+|---|---|---|---|---|
+| Hand | Real cards | Equal-length hidden placeholders | Hidden placeholders for every player | Revealed |
+| Face-up row | Real cards | Real cards | Hidden placeholders for every player | Revealed |
+| Face-down row | Synthetic blind aliases | Hidden placeholders | Hidden placeholders for every player | Revealed |
+| Stock | Equal-length hidden placeholders | Equal-length hidden placeholders | Equal-length hidden placeholders | Still masked |
+| Pile | Real public cards | Real public cards | Real public cards | Revealed |
+| Pending quick follow-up | Exact owner-only entitlement | `null` | Always `null` | Terminal/irrelevant |
+| Action log | Present, subject to normal viewer masking | Present | Explicit safe-event allowlist only; card-bearing entries omitted | Present |
 
-Room summaries never contain private cards; they expose identities, connected/out status, and zone counts only. Unauthenticated or rejected sockets receive no roster, chat, reaction, preset-broadcast, system-event, or game broadcasts.
+Room summaries never contain cards or spectator identities. They expose current player identities, connected/out status, zone counts, public vote state, and aggregate spectator counts only. Unauthenticated or rejected sockets receive no roster, chat, reaction, preset-broadcast, system-event, or game broadcasts.
 
 ### Ordering and reconnect behavior
 
-On each socket connection the client sends `CREATE_ROOM`, `JOIN_ROOM`, or `RESUME_ROOM` first. Gameplay queued while unauthenticated flushes only after `WELCOME` calls `markAuthenticated()`. Authentication frames are never retained across reconnect, preventing replay of a token that may already have rotated. Offline custom messages, emotes, preset broadcasts, and sequence-bound quick follow-ups are dropped rather than replayed later.
+On each socket connection the client sends `CREATE_ROOM`, `JOIN_ROOM`, or `RESUME_ROOM` first. Gameplay queued while unauthenticated flushes only after `WELCOME` calls `markAuthenticated()`. Authentication frames are never retained across reconnect, preventing replay of a token that may already have rotated. Offline custom messages, emotes, preset broadcasts, rematch votes, host kick requests, and sequence-bound quick follow-ups are dropped rather than replayed later. Anonymous sockets that do not authenticate within ten seconds are closed.
 
 Clients accept only increasing `GAME_STATE.seq` values. The explicit rematch reset—`seq=0`, `turnCount=0`, `phase=rearrange`—is the one allowed sequence restart. Legacy states without a sequence remain accepted.
 
@@ -369,11 +371,13 @@ ABCDEFGHJKLMNPQRSTUVWXYZ23456789
 
 Ambiguous characters are excluded. Allocation uses `env.ROOM.idFromName(code)`, giving one authoritative Durable Object per code. `POST /api/room/new` atomically stores a two-minute claim; `CREATE_ROOM` must consume that claim, closing the direct-WebSocket creation and check-then-act races.
 
-Online rooms default to five maximum seats. Joining is allowed before a round or after `gameOver`, enabling new players to enter the next deal. An initial start is host-only, needs at least two roster members, and requires every current seat online. After `gameOver`, every online roster member must explicitly vote Yes or No; the host and at least one other connected player must vote Yes. Starting then deals only to online Yes voters. No voters and offline non-voters are released, while an offline Yes vote deliberately reserves its seat and blocks the deal until that player returns. Released tokens and spam buckets are cleared and any live released sockets receive a terminal notice and close before the new room/game broadcasts, so continuing with fewer players never creates an accidental spectator. Vote changes have an identity-scoped cooldown across reconnects, and the general socket limiter measures bursts before messages enter the serialized storage queue.
+Online rooms default to five maximum seats. Before a round, a join takes an open player seat. During `rearrange`, `tribute`, `play`, or `endgame`, a join becomes an authenticated read-only spectator without host approval. At `gameOver`, a newcomer may take an open seat only when no spectator is already queued; otherwise the newcomer joins the back of the spectator queue. This preserves FIFO admission. A direct-seat newcomer still receives the strict spectator-masked game-over snapshot until participating in the next deal. The queue is FIFO, capped at five, and preserves a disconnected watcher's position for two minutes before an admission/resume/start operation expires the abandoned identity and token. Spectators receive public table state and reactions but cannot send gameplay, chat, reactions, votes, rule changes, host actions, or kicks.
+
+An initial start is host-only, needs at least two roster members, and requires every current seat online. After `gameOver`, every online roster member must explicitly vote Yes or No and the host must vote Yes. Starting keeps connected Yes voters first, then promotes connected spectators in FIFO order until the room reaches its seat cap. A host plus one connected queued spectator therefore forms a valid two-player rematch. No voters and offline non-voters are released, while an offline Yes vote deliberately reserves its seat and blocks the deal until that player returns. Excess or briefly disconnected spectators remain queued. Released tokens and spam buckets are cleared and any live released sockets receive a terminal notice and close before the new room/game broadcasts. Vote changes have an identity-scoped cooldown across reconnects, and the general socket limiter measures bursts before messages enter the serialized storage queue.
 
 ### Persistence and cleanup
 
-The persisted `RoomData.version = 6` snapshot contains roster, host, rules, the host-controlled `easterEggEnabled` flag, ready IDs, authoritative game state and round counters, rematch votes, hashed resume credentials, timestamps, and the optional private delayed table-event schedule. The schedule is validated against the restored roster and is never serialized into `ROOM_STATE` or `GAME_STATE`; only the public enabled/disabled flag appears in `ROOM_STATE`. This application schema is distinct from wire protocol v7 and Cloudflare Durable Object migration tag `v1`.
+The persisted `RoomData.version = 7` snapshot contains the player roster, FIFO spectator queue, continuous player-offline timestamps, host, rules, the host-controlled `easterEggEnabled` flag, ready IDs, authoritative game state and round counters, rematch votes, hashed resume credentials, timestamps, and the optional private delayed table-event schedule. The schedule is validated against the restored roster and is never serialized into `ROOM_STATE` or `GAME_STATE`; only the public enabled/disabled flag appears in `ROOM_STATE`. This application schema is distinct from wire protocol v8 and Cloudflare Durable Object migration tag `v1`.
 
 On restore, migration code:
 
@@ -382,6 +386,8 @@ On restore, migration code:
 - supplies missing ready/activity/token fields;
 - validates bounded round counters without replaying the event log, and marks missing or corrupt legacy counters incomplete;
 - keeps rematch votes only for Boolean values belonging to current members while the room is at `gameOver`;
+- keeps at most five unique, token-backed spectator identities in persisted FIFO order and drops malformed/colliding entries;
+- keeps only plausible server timestamps for current offline seats and grants a fresh 20-second kick grace after object recreation;
 - validates loser and pending tribute references;
 - validates any pending quick-follow-up owner, rank, sequence, physical run, and exact owned card IDs, otherwise clearing it;
 - preserves an explicitly recorded departed winner;
@@ -394,6 +400,8 @@ The implementation uses `WebSocketPair` plus in-memory event listeners, not Dura
 ### Presence, leave, and forfeit
 
 - A network disconnect removes only the socket. Roster, cards, and resume credential remain; the seat becomes offline.
+- The server records the start of a player's continuous offline spell. After 20 seconds, the host gets a two-step remove control; the Worker rechecks host role, target membership, live socket presence, and elapsed server time before applying it.
+- A successful kick invalidates the target token, vote/readiness state, rate buckets, and pending private event. During an active round it uses the same forfeit rule as an explicit leave.
 - Any offline seat blocks an initial start. For a rematch, offline non-voters may safely sit out, while an explicit Yes vote reserves the seat and must be online before the next deal.
 - Explicit leave removes the token, roster entry, and ready state.
 - A non-out leaver during an active round becomes the loser immediately. In a two-player forfeit the sole survivor is an unambiguous winner; in larger games with no prior finisher the winner may remain unknown.
@@ -401,13 +409,13 @@ The implementation uses `WebSocketPair` plus in-memory event listeners, not Dura
 - If the host leaves, the first remaining roster player becomes host.
 - Removing the final roster member deletes the room snapshot.
 
-An offline client cannot confirm a leave frame, so it keeps the resume credential rather than pretending the server processed the leave. The reconnect screen also discloses the rematch exception: after a finished game, the host may start without an offline player who has not voted, which releases that undecided seat.
+An offline client cannot confirm a leave frame, so it keeps the resume credential rather than pretending the server processed the leave. The reconnect screen also discloses the rematch exception: after a finished game, the host may start without an offline player who has not voted, which releases that undecided seat. A kick removes the seat, not a globally authenticated person: because the game has no accounts, someone who still knows the room code can join again under a new room identity.
 
 ## Security model
 
 ### Seat authentication
 
-- Room codes authorize joining an open room; they do not authenticate an existing seat.
+- Room codes authorize a new player or spectator admission; they do not authenticate an existing identity. Anyone who learns a live code can observe the public pile, turn, names, and card counts, but the spectator serializer never sends player-owned cards.
 - Existing-seat control requires a 256-bit URL-safe resume token.
 - Only SHA-256 token hashes are persisted.
 - Comparison is constant-time.
@@ -416,7 +424,7 @@ An offline client cannot confirm a leave frame, so it keeps the resume credentia
 - A failed resume clears the client credential and closes the rejected server and client transport with code `4003`, so stale tokens cannot retain anonymous room sockets.
 - Explicit leave deletes the credential.
 
-The token is stored in browser `localStorage`, so its security inherits the browser origin and XSS boundary. There are no accounts, passwords, external identity provider, or spectator role.
+The token and server-assigned viewer role are stored in browser `localStorage`, so their security inherits the browser origin and XSS boundary. There are no accounts, passwords, or external identity provider.
 
 ### Validation and abuse controls
 
@@ -426,7 +434,10 @@ The token is stored in browser `localStorage`, so its security inherits the brow
 | Message rate | 20 frames/second/socket sliding window |
 | Reaction cadence | One accepted `EMOTE` or `BROADCAST` per 700 ms/socket; the UI uses a shared 800 ms gate |
 | Rematch vote changes | One accepted changed vote per 750 ms/player identity; unchanged repeats are no-ops |
-| Socket cap | 12 simultaneous sockets per room, including unauthenticated/duplicate tabs |
+| Player offline kick | Host only after 20,000 continuous server-measured milliseconds; reconnect resets the timer |
+| Spectator queue | Five identities; disconnected queue positions expire after a two-minute resume grace |
+| Socket cap | 12 simultaneous sockets per room: five players, five spectators, and two handshake/duplicate-tab slots |
+| Authentication timeout | Anonymous socket closes after ten seconds |
 | Room allocation rate | 10 new rooms/minute/IP, best effort per Worker isolate |
 | Tracked room codes | 30/IP over the in-memory 24-hour window, best effort per isolate |
 | Room claim | Atomic and valid for two minutes |
@@ -571,7 +582,7 @@ The two bundled recordings are shared between the normal and ADHD cues. **Beat**
 | Local Storage: `shithead:repeat-turn-alerts` | Repeat-turn alert preference | Reused on this browser origin; disabled by default |
 | Local Storage: `shithead:adhd-mode` | Attention-mode preference | Reused on this browser origin; disabled by default |
 | Local Storage: `shithead:adhd-sound` | Attention-mode sound (`Beat` or `Chime`) | Reused on this browser origin; `Beat` by default |
-| `shithead:session` | Room code, player ID, resume token, player name | Replaced on `WELCOME`; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
+| `shithead:session` | Room code, member ID, resume token, player name, server-assigned viewer role | Replaced on `WELCOME` or spectator promotion; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
 | Workbox Cache Storage | Versioned static app-shell files | Managed and cleaned by the generated service worker |
 | Offline match | Zustand memory only | Lost on refresh |
 
@@ -664,12 +675,12 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **449 tests across 39 Vitest files**:
+At this revision, the default suite contains **458 tests across 41 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
 | Engine | 12 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, round counters, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
-| Components/UI | 23 | Setup, waiting, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
+| Components/UI | 25 | Setup, waiting, spectator masking/indicator, offline-host controls, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
 | Network | 1 | Session validation, auth ordering, sequence guard, terminal release, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
 | Root routing | 1 | Invite-link and hard-refresh resume routing |
@@ -678,7 +689,7 @@ Configured V8 thresholds apply to engine source: 80% lines/functions/statements 
 
 ### Live local-Worker adversarial suite
 
-The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, state masking, token rotation/hijack rejection, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, authoritative round results, throttled rematch votes and secure subset deals, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
+The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, player and spectator state masking, token rotation/hijack rejection, read-only spectator authorization, queue promotion, offline-kick timing, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, authoritative round results, throttled rematch votes and secure subset deals, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
 
 ```bash
 cd app
@@ -693,7 +704,7 @@ cd app
 BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial
 ```
 
-The current script reports 35 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
+The current script reports 42 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
 
 ### Production smoke test
 
@@ -755,7 +766,8 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 - Room creation rate limits are per isolate and best effort, not globally strict.
 - The Worker does not use Durable Object WebSocket hibernation.
 - There is no automatic heartbeat timer; PING/PONG is available to tests/clients.
-- A stale offline roster seat blocks a new deal until resume/leave or eventual room cleanup.
+- Offline detection begins when the Worker observes the final WebSocket close/error. A half-open mobile connection can therefore take longer than 20 wall-clock seconds to become kickable because the browser transport has no automatic heartbeat timeout.
+- The room code is spectator admission. Treat it as an invite secret if public table state should remain private.
 - A resume token rotates before the replacement reaches browser storage; a connection failure in that narrow interval can make the saved token stale.
 - The reconnect attempt counter resets on WebSocket `open`, before `WELCOME`; repeated open-then-close failures may repeatedly report the first attempt.
 - The protocol accepts a missing version for legacy compatibility.
@@ -778,7 +790,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   │   ├── components/                # Screens and shared game UI
 │   │   ├── engine/
 │   │   │   ├── index.ts               # Pure rules, reducers, deck and AI policy
-│   │   │   ├── protocol.ts            # Protocol-v7 types, validation and masking
+│   │   │   ├── protocol.ts            # Protocol-v8 types, roles, validation and masking
 │   │   │   └── __tests__/             # Engine/protocol/Worker-boundary tests
 │   │   ├── net/
 │   │   │   ├── RoomClient.ts          # WebSocket transport and reconnect queue

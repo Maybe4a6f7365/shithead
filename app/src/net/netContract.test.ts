@@ -141,6 +141,8 @@ const roomSummary = (phase: RoomSummary['phase'] = 'waiting'): RoomSummary => ({
   maxPlayers: 5,
   easterEggEnabled: true,
   players: [],
+  spectatorCount: 0,
+  spectatorQueueSize: 0,
   createdAt: 1,
   rules: { ...DEFAULT_GAME_RULES },
 })
@@ -195,8 +197,10 @@ describe('RoomClient authentication ordering', () => {
     }])
     act(() => firstSocket.receive({
       type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1',
-      resumeToken: 'token-after-refresh', room: roomSummary('play'),
+      role: 'player', resumeToken: 'token-after-refresh', room: roomSummary('play'),
     }))
+    expect(first.result.current.viewerRole).toBe('player')
+    expect(loadSession()?.role).toBe('player')
     expect(loadSession()?.resumeToken).toBe('token-after-refresh')
     first.unmount()
 
@@ -210,6 +214,72 @@ describe('RoomClient authentication ordering', () => {
       roomCode: 'ABC123', playerId: 'p1', resumeToken: 'token-after-refresh',
     })
     second.unmount()
+  })
+
+  it('persists a spectator WELCOME and refreshes with RESUME_ROOM instead of taking another seat', () => {
+    saveSession({
+      roomCode: 'ABC123', playerId: 'watcher-1', playerName: 'Mira',
+      resumeToken: 'spectator-token-before-refresh', role: 'spectator',
+    })
+
+    const first = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Mira', intent: 'join',
+    }))
+    const firstSocket = FakeWebSocket.instances[0]
+    act(() => firstSocket.open())
+    expect(firstSocket.sent).toEqual([{
+      type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'watcher-1',
+      resumeToken: 'spectator-token-before-refresh', version: PROTOCOL_VERSION,
+    }])
+
+    act(() => firstSocket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'watcher-1', role: 'spectator',
+      resumeToken: 'spectator-token-after-refresh', room: roomSummary('play'),
+    }))
+    expect(first.result.current.viewerRole).toBe('spectator')
+    expect(loadSession()).toMatchObject({
+      playerId: 'watcher-1', role: 'spectator', resumeToken: 'spectator-token-after-refresh',
+    })
+    first.unmount()
+
+    const second = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Mira', intent: 'join',
+    }))
+    const secondSocket = FakeWebSocket.instances[1]
+    act(() => secondSocket.open())
+    expect(secondSocket.sent).toEqual([{
+      type: 'RESUME_ROOM', roomCode: 'ABC123', playerId: 'watcher-1',
+      resumeToken: 'spectator-token-after-refresh', version: PROTOCOL_VERSION,
+    }])
+    second.unmount()
+  })
+
+  it('promotes a spectator from ROOM_STATE membership without requiring another WELCOME', () => {
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Mira', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'watcher-1', role: 'spectator',
+      resumeToken: 'spectator-token', room: roomSummary('gameOver'),
+    }))
+    expect(result.current.viewerRole).toBe('spectator')
+
+    act(() => socket.receive({
+      type: 'ROOM_STATE', version: PROTOCOL_VERSION,
+      room: {
+        ...roomSummary('waiting'),
+        players: [{
+          id: 'watcher-1', name: 'Mira', isAI: false, connected: true, isOut: false,
+          cardCount: { hand: 0, faceUp: 0, faceDown: 0 },
+        }],
+      },
+    }))
+
+    expect(result.current.viewerRole).toBe('player')
+    expect(loadSession()?.role).toBe('player')
+    unmount()
   })
 
   it('keeps connecting cancel ordered JOIN then LEAVE', () => {
@@ -227,7 +297,7 @@ describe('RoomClient authentication ordering', () => {
     client.close()
   })
 
-  it('drops stale chat, reactions, broadcasts, and rematch votes instead of replaying them', () => {
+  it('drops stale chat, reactions, broadcasts, rematch votes, and offline kicks instead of replaying them', () => {
     let client!: RoomClient
     client = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
@@ -239,10 +309,12 @@ describe('RoomClient authentication ordering', () => {
     client.send({ type: 'EMOTE', emote: 'laugh' })
     client.send({ type: 'BROADCAST', broadcast: 'shrug' })
     expect(client.send({ type: 'REMATCH_VOTE', vote: true })).toBe(false)
+    expect(client.send({ type: 'KICK_OFFLINE_PLAYER', playerId: 'p2' })).toBe(false)
     socket.open()
     expect(client.send({ type: 'CHAT', text: 'stale before auth' })).toBe(false)
     client.send({ type: 'BROADCAST', broadcast: 'womp-womp' })
     expect(client.send({ type: 'REMATCH_VOTE', vote: false })).toBe(false)
+    expect(client.send({ type: 'KICK_OFFLINE_PLAYER', playerId: 'p2' })).toBe(false)
     client.markAuthenticated()
     expect(socket.sent.map(message => message.type)).toEqual(['JOIN_ROOM'])
 
@@ -252,6 +324,10 @@ describe('RoomClient authentication ordering', () => {
     expect(socket.sent.at(-1)).toEqual({ type: 'BROADCAST', broadcast: 'shrug', version: PROTOCOL_VERSION })
     expect(client.send({ type: 'CHAT', text: 'fresh' })).toBe(true)
     expect(socket.sent.at(-1)).toEqual({ type: 'CHAT', text: 'fresh', version: PROTOCOL_VERSION })
+    expect(client.send({ type: 'KICK_OFFLINE_PLAYER', playerId: 'p2' })).toBe(true)
+    expect(socket.sent.at(-1)).toEqual({
+      type: 'KICK_OFFLINE_PLAYER', playerId: 'p2', version: PROTOCOL_VERSION,
+    })
     client.close()
   })
 
@@ -294,7 +370,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
 
     act(() => socket.receive({
@@ -335,7 +412,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
     act(() => socket.receive({ type: 'GAME_STATE', version: PROTOCOL_VERSION, state: gs(1, 1, 'play') }))
     act(() => socket.receive({ type: 'ROOM_STATE', room: roomSummary('waiting') }))
@@ -350,7 +428,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
     act(() => socket.receive({ type: 'GAME_STATE', state: gs(1, 1, 'rearrange') }))
     act(() => socket.receive({ type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' }))
@@ -367,7 +446,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
 
     act(() => result.current.sendEmote('cry'))
@@ -389,7 +469,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
 
     let sent = false
@@ -418,7 +499,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
 
     // An attempted send and a peer relay are not this player's accepted echo.
@@ -438,7 +520,8 @@ describe('RoomClient authentication ordering', () => {
     // A replacement authenticated identity must never inherit the prior
     // player's private MRU list, and expiry clears the current identity too.
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p9', resumeToken: 'replacement-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p9', role: 'player',
+      resumeToken: 'replacement-token', room: roomSummary(),
     }))
     expect(result.current.recentCustomMessages).toEqual([])
     act(() => socket.receive({ type: 'CHAT', playerId: 'p9', text: 'Replacement message', ts: 104 }))
@@ -460,7 +543,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
 
     act(() => result.current.sendBroadcast('womp-womp'))
@@ -504,7 +588,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
     act(() => socket.receive({ type: 'BROADCAST', playerId: 'p2', broadcast: 'shrug', ts: 1 }))
     act(() => vi.advanceTimersByTime(3000))
@@ -523,7 +608,8 @@ describe('RoomClient authentication ordering', () => {
     const socket = FakeWebSocket.instances[0]
     act(() => socket.open())
     act(() => socket.receive({
-      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', resumeToken: 'new-token', room: roomSummary(),
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'p1', role: 'player',
+      resumeToken: 'new-token', room: roomSummary(),
     }))
 
     expect(result.current.quickFollowUp('drawn-five')).toBe(false)

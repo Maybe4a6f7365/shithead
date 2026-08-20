@@ -9,16 +9,26 @@ import {
   skipTribute,
   startPlay,
 } from '../engine'
-import type { ClientMsg, RoomSummary, ServerMsg } from '../engine/protocol'
+import type {
+  ClientMsg,
+  RoomSummary,
+  ServerMsg,
+  SpectatorIdentity,
+  ViewerRole,
+} from '../engine/protocol'
 import {
   acceptedCustomMessageBurst,
   CUSTOM_MESSAGE_BURST_LIMIT,
   CUSTOM_MESSAGE_BURST_WINDOW_MS,
   isClientMsg,
   normalizeChatText,
+  MAX_SPECTATORS_PER_ROOM,
+  OFFLINE_KICK_DELAY_MS,
   PLAYER_LEFT_MESSAGE_IDS,
   PROTOCOL_VERSION,
   serializeGameState,
+  serializeSpectatorGameState,
+  SPECTATOR_RECONNECT_GRACE_MS,
   toPlayerSummary,
 } from '../engine/protocol'
 import { BUILD_COMMIT } from './build-meta'
@@ -27,8 +37,10 @@ import { applyInterruptBurnRequest, applyQuickFollowUpRequest, canonicalCards } 
 import {
   normalizeEasterEggEnabled,
   normalizeGameRules,
+  normalizeOfflineSince,
   normalizePersistedGameState,
   normalizeRematchVotes,
+  normalizeSpectators,
 } from './migrateState'
 import {
   acceptedReactionAt,
@@ -53,17 +65,21 @@ interface Session {
 }
 
 interface RoomData {
-  version: 6
+  version: 7
   code: string
   hostId: string
   maxPlayers: number
   easterEggEnabled: boolean
   players: Player[]
+  /** FIFO identities watching the current round and waiting for an open seat. */
+  spectators: SpectatorIdentity[]
   state: GameState | null
   rules: GameRules
   readyPlayerIds: string[]
   /** Authenticated playerId -> explicit yes/no vote for the finished round. */
   rematchVotes: Record<string, boolean>
+  /** Player id -> start of the current continuous offline spell. */
+  offlineSince: Record<string, number>
   /** playerId -> SHA-256 hex hash of the current resume token (secret). */
   resumeTokens: Record<string, string>
   /** Private delayed system event; never serialized into room/game views. */
@@ -72,13 +88,15 @@ interface RoomData {
   lastActivity: number
 }
 
-type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'easterEggEnabled' | 'readyPlayerIds' | 'rematchVotes' | 'lastActivity' | 'resumeTokens' | 'pendingTableEvent' | 'state'> & {
-  version?: 1 | 2 | 3 | 4 | 5 | 6
+type StoredRoomData = Omit<RoomData, 'version' | 'rules' | 'easterEggEnabled' | 'readyPlayerIds' | 'rematchVotes' | 'offlineSince' | 'spectators' | 'lastActivity' | 'resumeTokens' | 'pendingTableEvent' | 'state'> & {
+  version?: 1 | 2 | 3 | 4 | 5 | 6 | 7
   state: GameState | null
   rules?: Partial<GameRules>
   easterEggEnabled?: unknown
   readyPlayerIds?: string[]
   rematchVotes?: unknown
+  offlineSince?: unknown
+  spectators?: unknown
   lastActivity?: number
   resumeTokens?: Record<string, string>
   pendingTableEvent?: PendingOndraEvent | null
@@ -89,7 +107,8 @@ type OutMsg = ServerMsg
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_MESSAGES_PER_SECOND = 20
 const MAX_MESSAGE_CHARS = 16 * 1024 // per-socket WS message cap; oversize -> close 1009
-const MAX_SOCKETS_PER_ROOM = 12 // 5 players + spectator/duplicate-tab allowance
+const MAX_SOCKETS_PER_ROOM = 12 // 5 players + 5 spectators + two handshake/duplicate-tab slots
+const AUTH_TIMEOUT_MS = 10_000
 const REMATCH_VOTE_COOLDOWN_MS = 750
 const ROOM_CODE_RE = /^[A-Z0-9]{6}$/
 const CLAIM_TTL_MS = 2 * 60 * 1000 // room-code reservation validity
@@ -172,12 +191,31 @@ export class Room {
       const normalizedState = normalizePersistedGameState(stored.state, rules)
       const restoresTableEvent = normalizedState?.phase === 'play' || normalizedState?.phase === 'endgame'
       const easterEggEnabled = normalizeEasterEggEnabled(stored.easterEggEnabled)
+      const restoredAt = Date.now()
+      const resumeTokens = stored.resumeTokens ?? {}
+      const restoredSpectators = normalizeSpectators(stored.spectators, stored.players, restoredAt, resumeTokens)
+      // Native socket presence does not survive a Durable Object recreation.
+      // Preserve a known offline spell; otherwise grant one fresh bounded
+      // resume window to a watcher whose live socket disappeared with it.
+      const spectators = restoredSpectators.map(spectator => ({
+        ...spectator,
+        disconnectedAt: spectator.disconnectedAt ?? restoredAt,
+      }))
+      const offlineSince = normalizeOfflineSince(stored.offlineSince, stored.players, restoredAt)
+      // Socket presence is intentionally not persisted. After an object
+      // recreation, any seat without a valid stored timestamp receives a
+      // fresh grace window and a reconnect clears it before it can be kicked.
+      for (const player of stored.players) {
+        if (offlineSince[player.id] === undefined) offlineSince[player.id] = restoredAt
+      }
 
       this.data = {
         ...stored,
-        version: 6,
+        version: 7,
         rules,
         easterEggEnabled,
+        spectators,
+        offlineSince,
         state: normalizedState,
         readyPlayerIds: stored.readyPlayerIds ?? [],
         rematchVotes: normalizeRematchVotes(
@@ -186,7 +224,7 @@ export class Room {
           normalizedState?.phase ?? null,
         ),
         lastActivity: stored.lastActivity ?? stored.createdAt,
-        resumeTokens: stored.resumeTokens ?? {},
+        resumeTokens,
         pendingTableEvent: easterEggEnabled && restoresTableEvent
           ? normalizeStoredPendingOndraEvent(
               stored.pendingTableEvent,
@@ -275,11 +313,26 @@ export class Room {
     })
 
     server.accept()
+    // Anonymous sockets receive no room data and get a short window to send
+    // CREATE/JOIN/RESUME. This prevents idle handshakes from holding the two
+    // connection-buffer slots indefinitely and blocking legitimate resumes.
+    const authTimeout = setTimeout(() => {
+      this.operation = this.operation
+        .then(() => {
+          const pending = this.sessions.get(sessionId)
+          if (!pending || pending.playerId) return
+          this.sessions.delete(sessionId)
+          try { pending.webSocket.close(4008, 'Authentication timeout') } catch {}
+        })
+        .catch(error => console.error('Room authentication timeout failed', error))
+    }, AUTH_TIMEOUT_MS)
     server.addEventListener('message', event => {
       const raw = String(event.data)
       if (raw.length > MAX_MESSAGE_CHARS) {
         logEvent('oversize_message', { code: this.code, size: raw.length })
-        this.sessions.delete(sessionId)
+        // Route every terminal socket path through the same presence update so
+        // an oversize-frame disconnect still starts the continuous offline timer.
+        this.closeSession(sessionId)
         try { server.close(1009, 'Message too large') } catch {}
         return
       }
@@ -300,8 +353,14 @@ export class Room {
           if (session) this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Room operation failed' })
         })
     })
-    server.addEventListener('close', () => this.closeSession(sessionId))
-    server.addEventListener('error', () => this.closeSession(sessionId))
+    server.addEventListener('close', () => {
+      clearTimeout(authTimeout)
+      this.closeSession(sessionId)
+    })
+    server.addEventListener('error', () => {
+      clearTimeout(authTimeout)
+      this.closeSession(sessionId)
+    })
 
     return new Response(null, { status: 101, webSocket: client })
   }
@@ -336,12 +395,34 @@ export class Room {
     }
     const message: ClientMsg = parsed
 
+    // Authentication is one-shot per socket. In particular, a seated player
+    // must not be able to submit a bad RESUME_ROOM and make the failure path
+    // detach their live session without recording an offline timestamp.
+    if (session.playerId && (message.type === 'CREATE_ROOM' || message.type === 'JOIN_ROOM' ||
+      message.type === 'RESUME_ROOM')) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'This connection is already authenticated' })
+      return
+    }
+
+    // A watcher is an authenticated read-only room member. Enforce that at
+    // one dispatcher boundary so future player actions cannot accidentally
+    // become available merely because a handler forgot its own roster check.
+    if (this.roleOf(session.playerId) === 'spectator' &&
+      message.type !== 'PING' && message.type !== 'LEAVE_ROOM') {
+      this.send(session, {
+        type: 'ERROR',
+        code: 'INVALID_MOVE',
+        message: 'Spectators can watch this round but cannot perform player actions',
+      })
+      return
+    }
+
     switch (message.type) {
       case 'CREATE_ROOM':
-        await this.createRoom(session, message.playerName, message.maxPlayers)
+        await this.createRoom(sessionId, session, message.playerName, message.maxPlayers)
         break
       case 'JOIN_ROOM':
-        await this.joinRoom(session, message.code, message.playerName)
+        await this.joinRoom(sessionId, session, message.code, message.playerName)
         break
       case 'RESUME_ROOM': {
         await this.resumeRoom(sessionId, session, message.roomCode, message.playerId, message.resumeToken)
@@ -355,6 +436,9 @@ export class Room {
         break
       case 'REMATCH_VOTE':
         await this.voteRematch(session, message.vote)
+        break
+      case 'KICK_OFFLINE_PLAYER':
+        await this.kickOfflinePlayer(session, message.playerId)
         break
       case 'READY':
         await this.markReady(session)
@@ -424,7 +508,12 @@ export class Room {
     await this.state.storage.setAlarm(Date.now() + ROOM_TTL_MS)
   }
 
-  private async createRoom(session: Session, rawName: string, requestedMaxPlayers = 5): Promise<void> {
+  private async createRoom(
+    sessionId: string,
+    session: Session,
+    rawName: string,
+    requestedMaxPlayers = 5,
+  ): Promise<void> {
     if (session.playerId) {
       this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Already connected to a room' })
       return
@@ -449,6 +538,9 @@ export class Room {
       await this.state.storage.delete('claim')
       return true
     })
+    // The claim transaction yields to storage. Do not create an unreachable
+    // one-player room if the unauthenticated socket closed in the meantime.
+    if (this.sessions.get(sessionId) !== session) return
     if (!claimOk) {
       this.send(session, { type: 'ERROR', code: 'INVALID_CODE', message: 'Room code not allocated; request a new room first' })
       return
@@ -458,16 +550,18 @@ export class Room {
     const resumeToken = generateResumeToken()
     session.playerId = player.id
     this.data = {
-      version: 6,
+      version: 7,
       code: this.code,
       hostId: player.id,
       maxPlayers: Math.max(2, Math.min(5, requestedMaxPlayers)),
       easterEggEnabled: true,
       players: [player],
+      spectators: [],
       state: null,
       rules: { ...DEFAULT_GAME_RULES },
       readyPlayerIds: [],
       rematchVotes: {},
+      offlineSince: {},
       resumeTokens: { [player.id]: await hashResumeToken(resumeToken) },
       pendingTableEvent: null,
       createdAt: Date.now(),
@@ -480,7 +574,7 @@ export class Room {
     this.broadcastRoom()
   }
 
-  private async joinRoom(session: Session, code: string, rawName: string): Promise<void> {
+  private async joinRoom(sessionId: string, session: Session, code: string, rawName: string): Promise<void> {
     if (session.playerId) {
       this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Already connected to a room' })
       return
@@ -496,20 +590,37 @@ export class Room {
       this.send(session, { type: 'ERROR', code: 'INTERNAL', message: 'Invalid player name' })
       return
     }
-    if (data.players.length >= data.maxPlayers) {
+    if (this.pruneExpiredSpectators()) {
+      await this.save()
+      // A close while pruning must not leave an identity with neither a live
+      // socket nor an offline/expiry timestamp.
+      if (this.sessions.get(sessionId) !== session) return
+    }
+    const activeRound = data.state !== null && data.state.phase !== 'gameOver'
+    // Once a watcher queue exists, later game-over joins cannot jump ahead of
+    // it merely because a seat opened. With no queue, a finished-round join
+    // may claim an open next-round seat directly.
+    const shouldSpectate = activeRound || data.spectators.length > 0 ||
+      (data.state?.phase === 'gameOver' && data.players.length >= data.maxPlayers)
+    if (!shouldSpectate && data.players.length >= data.maxPlayers) {
       this.send(session, { type: 'ERROR', code: 'ROOM_FULL', message: 'Room is full' })
       return
     }
-    if (data.state && data.state.phase !== 'gameOver') {
-      this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' })
+    if (shouldSpectate && data.spectators.length >= MAX_SPECTATORS_PER_ROOM) {
+      this.send(session, { type: 'ERROR', code: 'ROOM_FULL', message: 'The spectator queue is full' })
       return
     }
 
-    const player = makePlayer(name)
+    const identity = makePlayer(name)
     const resumeToken = generateResumeToken()
-    session.playerId = player.id
-    data.players.push(player)
-    data.resumeTokens[player.id] = await hashResumeToken(resumeToken)
+    session.playerId = identity.id
+    if (shouldSpectate) {
+      data.spectators.push({ id: identity.id, name, joinedAt: Date.now() })
+    } else {
+      data.players.push(identity)
+      delete data.offlineSince[identity.id]
+    }
+    data.resumeTokens[identity.id] = await hashResumeToken(resumeToken)
 
     await this.save()
     this.welcomeAndState(session, resumeToken)
@@ -528,6 +639,10 @@ export class Room {
     playerId: string,
     resumeToken: string,
   ): Promise<void> {
+    if (session.playerId) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'This connection is already authenticated' })
+      return
+    }
     const fail = (reason: string) => {
       logEvent('resume_failed', { code: this.code, reason })
       this.send(session, { type: 'RESUME_FAILED', reason, version: PROTOCOL_VERSION })
@@ -545,7 +660,11 @@ export class Room {
       fail('room_not_found')
       return
     }
-    if (!data.players.some(player => player.id === playerId)) {
+    if (this.pruneExpiredSpectators()) {
+      await this.save()
+      if (this.sessions.get(sessionId) !== session) return
+    }
+    if (!this.isMember(playerId)) {
       fail('not_a_member')
       return
     }
@@ -555,15 +674,20 @@ export class Room {
       return
     }
     const presentedHash = await hashResumeToken(resumeToken)
+    if (this.sessions.get(sessionId) !== session) return
     if (!constantTimeEqual(presentedHash, storedHash)) {
       fail('invalid_token')
       return
     }
 
     // Rotate: the presented token is single-use; the new one goes only to
-    // this socket in WELCOME.
+    // this socket in WELCOME. Hash before mutating the stored credential, and
+    // abandon the resume with the old token intact if the socket disappeared
+    // while either digest was pending.
     const nextToken = generateResumeToken()
-    data.resumeTokens[playerId] = await hashResumeToken(nextToken)
+    const nextHash = await hashResumeToken(nextToken)
+    if (this.sessions.get(sessionId) !== session) return
+    data.resumeTokens[playerId] = nextHash
 
     for (const [otherId, other] of this.sessions) {
       if (otherId === sessionId || other.playerId !== playerId) continue
@@ -572,6 +696,9 @@ export class Room {
     }
 
     session.playerId = playerId
+    if (this.roleOf(playerId) === 'player') delete data.offlineSince[playerId]
+    const resumedSpectator = data.spectators.find(spectator => spectator.id === playerId)
+    if (resumedSpectator) delete resumedSpectator.disconnectedAt
     await this.save()
     this.welcomeAndState(session, nextToken)
     this.broadcastRoom()
@@ -587,9 +714,11 @@ export class Room {
       this.send(session, { type: 'ERROR', code: 'GAME_IN_PROGRESS', message: 'Game already in progress' })
       return
     }
+    if (this.pruneExpiredSpectators()) await this.save()
     const prior = data.state
     let participants = [...data.players]
     const releasedIds = new Set<string>()
+    const promotedSpectatorIds = new Set<string>()
 
     if (prior?.phase === 'gameOver') {
       const everyOnlinePlayerVoted = data.players.every(player =>
@@ -604,12 +733,31 @@ export class Room {
         return
       }
       participants = data.players.filter(player => data.rematchVotes[player.id] === true)
-      if (participants.length < 2) {
-        this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'At least two yes votes are required' })
-        return
-      }
       if (participants.some(player => !this.isConnected(player.id))) {
         this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'Every yes voter must be online before starting' })
+        return
+      }
+
+      // Joining an active/full finished table expresses intent to play the
+      // next deal. Fill remaining seats from the connected FIFO queue; an
+      // offline or excess watcher remains queued for a later round.
+      const openSeats = Math.max(0, data.maxPlayers - participants.length)
+      const promoted = data.spectators
+        .filter(spectator => this.isConnected(spectator.id))
+        .slice(0, openSeats)
+      for (const spectator of promoted) {
+        promotedSpectatorIds.add(spectator.id)
+        participants.push({
+          ...makePlayer(spectator.name),
+          id: spectator.id,
+        })
+      }
+      if (participants.length < 2) {
+        this.send(session, {
+          type: 'ERROR',
+          code: 'INVALID_MOVE',
+          message: 'At least two online players or waiting spectators are required',
+        })
         return
       }
       for (const player of data.players) {
@@ -638,11 +786,14 @@ export class Room {
 
     for (const playerId of releasedIds) {
       delete data.resumeTokens[playerId]
+      delete data.offlineSince[playerId]
       this.customMessageTimestamps.delete(playerId)
       this.lastReactionAtByPlayer.delete(playerId)
       this.lastRematchVoteAtByPlayer.delete(playerId)
     }
     data.players = participants
+    data.spectators = data.spectators.filter(spectator => !promotedSpectatorIds.has(spectator.id))
+    for (const player of participants) delete data.offlineSince[player.id]
     data.state = initGame({
       players: participants.map(player => ({ id: player.id, name: player.name, isAI: false })),
       rules: data.rules,
@@ -704,6 +855,101 @@ export class Room {
     data.rematchVotes = { ...data.rematchVotes, [playerId]: vote }
     await this.save()
     this.broadcastRoom()
+  }
+
+  /** Host-only removal after one continuous, server-measured offline spell. */
+  private async kickOfflinePlayer(session: Session, targetId: string): Promise<void> {
+    const data = this.data
+    if (!data || session.playerId !== data.hostId) {
+      this.send(session, { type: 'ERROR', code: 'NOT_HOST', message: 'Only the host can kick an offline player' })
+      return
+    }
+    if (targetId === data.hostId) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'The host cannot kick their own seat' })
+      return
+    }
+    const target = data.players.find(player => player.id === targetId)
+    if (!target) {
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'That player is no longer at the table' })
+      return
+    }
+    if (this.isConnected(targetId)) {
+      delete data.offlineSince[targetId]
+      this.send(session, { type: 'ERROR', code: 'INVALID_MOVE', message: 'That player is online' })
+      return
+    }
+
+    const now = Date.now()
+    const since = data.offlineSince[targetId]
+    if (!Number.isSafeInteger(since) || Number(since) <= 0 || Number(since) > now) {
+      // Conservative recovery for a legacy/corrupt presence snapshot: begin a
+      // fresh server-side grace period rather than allowing an immediate kick.
+      data.offlineSince[targetId] = now
+      await this.save()
+      this.broadcastRoom()
+      this.send(session, {
+        type: 'ERROR', code: 'INVALID_MOVE', message: 'That player must be offline for 20 seconds first',
+      })
+      return
+    }
+    const offlineFor = now - since
+    if (offlineFor < OFFLINE_KICK_DELAY_MS) {
+      const remainingSeconds = Math.max(1, Math.ceil((OFFLINE_KICK_DELAY_MS - offlineFor) / 1000))
+      this.send(session, {
+        type: 'ERROR',
+        code: 'INVALID_MOVE',
+        message: `That player can be kicked in ${remainingSeconds} second${remainingSeconds === 1 ? '' : 's'}`,
+      })
+      return
+    }
+
+    delete data.resumeTokens[targetId]
+    delete data.rematchVotes[targetId]
+    delete data.offlineSince[targetId]
+    data.players = data.players.filter(player => player.id !== targetId)
+    data.readyPlayerIds = data.readyPlayerIds.filter(id => id !== targetId)
+    this.customMessageTimestamps.delete(targetId)
+    this.lastReactionAtByPlayer.delete(targetId)
+    this.lastRematchVoteAtByPlayer.delete(targetId)
+
+    if (data.state && data.state.phase !== 'gameOver') {
+      data.state = applyPlayerForfeit(data.state, targetId)
+    }
+    data.pendingTableEvent = pendingOndraEventAfterLeave(
+      data.pendingTableEvent,
+      targetId,
+      data.state?.phase ?? null,
+    )
+
+    await this.save()
+
+    // Re-check and terminate any anomalous/racing attachment before a fresh
+    // room or game view is broadcast. The serialized operation queue makes a
+    // concurrent RESUME deterministic: it either won earlier (and blocked the
+    // kick) or will fail later because the token/member record is gone.
+    for (const [sessionId, kicked] of [...this.sessions]) {
+      if (kicked.playerId !== targetId) continue
+      this.send(kicked, {
+        type: 'ERROR', code: 'SESSION_EXPIRED', message: 'The host removed your offline seat.',
+      })
+      kicked.playerId = null
+      kicked.recentMessages = []
+      this.sessions.delete(sessionId)
+      try { kicked.webSocket.close(4003, 'Offline seat removed') } catch {}
+    }
+
+    this.broadcast({
+      type: 'SYSTEM_EVENT',
+      event: {
+        kind: 'player-left',
+        playerId: target.id,
+        playerName: target.name,
+        message: PLAYER_LEFT_MESSAGE_IDS[0],
+        ts: Date.now(),
+      },
+    })
+    this.broadcastRoom()
+    this.broadcastGame()
   }
 
   private async setRules(session: Session, patch: Partial<GameRules>): Promise<void> {
@@ -1018,26 +1264,43 @@ export class Room {
     if (!data || !session.playerId) return
 
     const leavingId = session.playerId
+    const leavingRole = this.roleOf(leavingId)
     this.customMessageTimestamps.delete(leavingId)
     this.lastReactionAtByPlayer.delete(leavingId)
     this.lastRematchVoteAtByPlayer.delete(leavingId)
     const leavingPlayer = data.players.find(player => player.id === leavingId)
     delete data.resumeTokens[leavingId]
     delete data.rematchVotes[leavingId]
+    delete data.offlineSince[leavingId]
+    data.spectators = data.spectators.filter(spectator => spectator.id !== leavingId)
     data.players = data.players.filter(player => player.id !== leavingId)
     data.readyPlayerIds = data.readyPlayerIds.filter(id => id !== leavingId)
     session.playerId = null
 
-    if (data.state && data.state.phase !== 'gameOver') {
+    if (leavingRole === 'player' && data.state && data.state.phase !== 'gameOver') {
       data.state = applyPlayerForfeit(data.state, leavingId)
     }
-    data.pendingTableEvent = pendingOndraEventAfterLeave(
-      data.pendingTableEvent,
-      leavingId,
-      data.state?.phase ?? null,
-    )
+    if (leavingRole === 'player') {
+      data.pendingTableEvent = pendingOndraEventAfterLeave(
+        data.pendingTableEvent,
+        leavingId,
+        data.state?.phase ?? null,
+      )
+    }
 
     if (data.players.length === 0) {
+      // Spectators cannot inherit ownership of a room. Expire their sessions
+      // before deleting the final authoritative snapshot.
+      for (const [sessionId, watcher] of [...this.sessions]) {
+        if (!watcher.playerId || !data.spectators.some(item => item.id === watcher.playerId)) continue
+        this.send(watcher, {
+          type: 'ERROR', code: 'SESSION_EXPIRED', message: 'The table has closed.',
+        })
+        watcher.playerId = null
+        watcher.recentMessages = []
+        this.sessions.delete(sessionId)
+        try { watcher.webSocket.close(4003, 'Room closed') } catch {}
+      }
       this.data = null
     } else if (data.hostId === leavingId) {
       data.hostId = data.players[0].id
@@ -1061,12 +1324,65 @@ export class Room {
   }
 
   private closeSession(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const memberId = session.playerId
     this.sessions.delete(sessionId)
-    this.broadcastRoom()
+    this.operation = this.operation
+      .then(async () => {
+        const data = this.data
+        if (data && memberId) {
+          if (data.players.some(player => player.id === memberId)) {
+            if (this.isConnected(memberId)) delete data.offlineSince[memberId]
+            else if (data.offlineSince[memberId] === undefined) data.offlineSince[memberId] = Date.now()
+            await this.save()
+          } else {
+            const spectator = data.spectators.find(item => item.id === memberId)
+            if (spectator) {
+              if (this.isConnected(memberId)) delete spectator.disconnectedAt
+              else if (spectator.disconnectedAt === undefined) spectator.disconnectedAt = Date.now()
+              await this.save()
+            }
+          }
+        }
+        this.broadcastRoom()
+      })
+      .catch(error => console.error('Room close failed', error))
   }
 
   private isConnected(playerId: string): boolean {
     return [...this.sessions.values()].some(session => session.playerId === playerId)
+  }
+
+  private roleOf(memberId: string | null): ViewerRole | null {
+    if (!memberId || !this.data) return null
+    if (this.data.players.some(player => player.id === memberId)) return 'player'
+    if (this.data.spectators.some(spectator => spectator.id === memberId)) return 'spectator'
+    return null
+  }
+
+  private isMember(memberId: string): boolean {
+    return this.roleOf(memberId) !== null
+  }
+
+  /** Remove abandoned watcher identities without sacrificing brief reconnects. */
+  private pruneExpiredSpectators(now = Date.now()): boolean {
+    const data = this.data
+    if (!data) return false
+    const expired = data.spectators.filter(spectator =>
+      !this.isConnected(spectator.id) && spectator.disconnectedAt !== undefined &&
+      now - spectator.disconnectedAt >= SPECTATOR_RECONNECT_GRACE_MS)
+    if (expired.length === 0) return false
+
+    const expiredIds = new Set(expired.map(spectator => spectator.id))
+    data.spectators = data.spectators.filter(spectator => !expiredIds.has(spectator.id))
+    for (const id of expiredIds) {
+      delete data.resumeTokens[id]
+      this.customMessageTimestamps.delete(id)
+      this.lastReactionAtByPlayer.delete(id)
+      this.lastRematchVoteAtByPlayer.delete(id)
+    }
+    return true
   }
 
   private summary(): RoomSummary {
@@ -1079,8 +1395,11 @@ export class Room {
       easterEggEnabled: data.easterEggEnabled,
       players: data.players.map(lobbyPlayer => {
         const currentPlayer = data.state?.players.find(player => player.id === lobbyPlayer.id) ?? lobbyPlayer
-        return toPlayerSummary(currentPlayer, this.isConnected(lobbyPlayer.id))
+        const connected = this.isConnected(lobbyPlayer.id)
+        return toPlayerSummary(currentPlayer, connected, connected ? undefined : data.offlineSince[lobbyPlayer.id])
       }),
+      spectatorCount: data.spectators.filter(spectator => this.isConnected(spectator.id)).length,
+      spectatorQueueSize: data.spectators.length,
       createdAt: data.createdAt,
       rules: data.rules,
       rematchVotes: data.players.map(player => ({
@@ -1098,6 +1417,7 @@ export class Room {
     this.send(session, {
       type: 'WELCOME',
       playerId: session.playerId!,
+      role: this.roleOf(session.playerId)!,
       room: this.summary(),
       version: PROTOCOL_VERSION,
       resumeToken,
@@ -1111,13 +1431,19 @@ export class Room {
 
   private sendGame(session: Session): void {
     const data = this.data
-    if (!data?.state || !session.playerId ||
-      !data.players.some(player => player.id === session.playerId)) return
-    // Per-recipient serialization: stock/opponent cards are masked for THIS
-    // viewer; log is capped by the engine (MAX_LOG_ENTRIES ring buffer).
+    if (!data?.state || !session.playerId) return
+    const role = this.roleOf(session.playerId)
+    if (!role) return
+    // Per-recipient serialization: a seated participant gets their normal
+    // view. A player admitted only after gameOver has no cards in that
+    // finished round and receives the strict spectator mask until the deal in
+    // which they actually participate.
+    const participatedInCurrentRound = data.state.players.some(player => player.id === session.playerId)
     this.send(session, {
       type: 'GAME_STATE',
-      state: serializeGameState(data.state, session.playerId),
+      state: role === 'player' && participatedInCurrentRound
+        ? serializeGameState(data.state, session.playerId)
+        : serializeSpectatorGameState(data.state),
       version: PROTOCOL_VERSION,
     })
   }
@@ -1135,7 +1461,7 @@ export class Room {
     // Rejected late joins and idle unauthenticated sockets must not observe
     // roster, chat, or emote traffic (and sendGame independently applies this guard).
     for (const session of this.sessions.values()) {
-      if (session.playerId && this.data?.players.some(player => player.id === session.playerId)) {
+      if (session.playerId && this.isMember(session.playerId)) {
         this.send(session, message)
       }
     }

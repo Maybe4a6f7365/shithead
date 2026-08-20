@@ -4,7 +4,7 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'https://shithead.not4a6f7365.workers.dev').replace(/\/$/, '')
 const expectedCommit = process.env.EXPECTED_COMMIT || ''
 const deploymentTimeoutMs = Number(process.env.DEPLOYMENT_TIMEOUT_MS || 10 * 60 * 1000)
-const PROTOCOL_VERSION = 7
+const PROTOCOL_VERSION = 8
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const log = message => console.log(`[multiplayer-smoke] ${message}`)
@@ -240,12 +240,14 @@ async function run() {
   host.send({ type: 'CREATE_ROOM', playerName: 'Smoke Host' })
   const hostWelcome = await host.waitType('WELCOME')
   assert.equal(hostWelcome.version, PROTOCOL_VERSION)
+  assert.equal(hostWelcome.role, 'player')
   assert.equal(hostWelcome.room.code, roomId)
   assert.equal(hostWelcome.room.hostId, hostWelcome.playerId)
   const hostId = hostWelcome.playerId
 
   guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Smoke Guest' })
   const guestWelcome = await guest.waitType('WELCOME')
+  assert.equal(guestWelcome.role, 'player')
   const guestId = guestWelcome.playerId
   assert.notEqual(guestId, hostId)
 
@@ -263,6 +265,7 @@ async function run() {
   host.send({ type: 'RESUME_ROOM', roomCode: roomId, playerId: hostId, resumeToken: hostWelcome.resumeToken })
   const resumedWelcome = await host.waitType('WELCOME')
   assert.equal(resumedWelcome.playerId, hostId)
+  assert.equal(resumedWelcome.role, 'player')
   assert(resumedWelcome.resumeToken, 'resume did not rotate the resumeToken')
   const hostOnline = await guest.waitType('ROOM_STATE', message => connected(message.room, hostId) === true)
   assert.equal(hostOnline.room.hostId, hostId)

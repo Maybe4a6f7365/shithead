@@ -13,9 +13,11 @@ import {
   deriveLegacyWinnerId,
   normalizeEasterEggEnabled,
   normalizeGameRules,
+  normalizeOfflineSince,
   normalizePersistedGameState,
   normalizeRematchVotes,
   normalizeRoundStats,
+  normalizeSpectators,
 } from '../../worker/migrateState'
 import { applyPlayerForfeit } from '../../worker/forfeit'
 
@@ -36,6 +38,47 @@ function stateWithOutPlayers(outIds: string[], log: GameEvent[] = []): GameState
 }
 
 describe('legacy worker state migration', () => {
+  it('restores a bounded FIFO spectator queue without player-id collisions', () => {
+    const players = stateWithOutPlayers([]).players
+    const candidates = [
+      { id: 'watch-1', name: ' First ', joinedAt: 900 },
+      { id: 'a', name: 'Collides', joinedAt: 901 },
+      { id: 'watch-1', name: 'Duplicate', joinedAt: 902 },
+      { id: 'future', name: 'Future', joinedAt: 1001 },
+      { id: 'watch-2', name: 'Second', joinedAt: 100, disconnectedAt: 950 },
+      { id: 'watch-3', name: 'Third', joinedAt: 903 },
+      { id: 'watch-4', name: 'Fourth', joinedAt: 904 },
+      { id: 'watch-5', name: 'Fifth', joinedAt: 905 },
+      { id: 'watch-6', name: 'Over cap', joinedAt: 906 },
+    ]
+
+    expect(normalizeSpectators(candidates, players, 1000)).toEqual([
+      { id: 'watch-1', name: 'First', joinedAt: 900 },
+      // FIFO is persisted array order, not the untrusted joinedAt ordering.
+      { id: 'watch-2', name: 'Second', joinedAt: 100, disconnectedAt: 950 },
+      { id: 'watch-3', name: 'Third', joinedAt: 903 },
+      { id: 'watch-4', name: 'Fourth', joinedAt: 904 },
+      { id: 'watch-5', name: 'Fifth', joinedAt: 905 },
+    ])
+    expect(normalizeSpectators({ forged: true }, players, 1000)).toEqual([])
+    expect(normalizeSpectators([
+      { id: 'bad-offline', name: 'Bad', joinedAt: 1, disconnectedAt: 1001 },
+    ], players, 1000)).toEqual([])
+    expect(normalizeSpectators(candidates, players, 1000, {
+      'watch-1': 'a'.repeat(64),
+      'watch-3': 'not-a-sha256-hash',
+    })).toEqual([
+      { id: 'watch-1', name: 'First', joinedAt: 900 },
+    ])
+  })
+
+  it('keeps only plausible offline timestamps for current players', () => {
+    const players = stateWithOutPlayers([]).players
+    expect(normalizeOfflineSince({ a: 900, b: 0, c: 1001, forged: 500 }, players, 1000))
+      .toEqual({ a: 900 })
+    expect(normalizeOfflineSince(null, players, 1000)).toEqual({})
+  })
+
   it('defaults old or malformed easter-egg settings on and preserves explicit booleans', () => {
     expect(normalizeEasterEggEnabled(undefined)).toBe(true)
     expect(normalizeEasterEggEnabled(null)).toBe(true)

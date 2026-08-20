@@ -70,6 +70,10 @@ export interface GameOverOverlayProps {
   onStartRematch?: () => void
   startRematchPending?: boolean
   startRematchHint?: string
+  /** Includes connected queued spectators who will fill open rematch seats. */
+  startRematchParticipantCount?: number
+  /** Optional host-only room controls that remain reachable above the scrim. */
+  hostControls?: React.ReactNode
 }
 
 function safeCount(value: number): number {
@@ -139,7 +143,7 @@ export function GameOverOverlay({
   rules, rulesEditable = false, onRulesChange, rematchPending = false,
   leaderboard, statsNote, rematchVotes, viewerRematchVote = 'pending', onRematchVote,
   rematchVotePending = false, pendingRematchVote = null, canStartRematch = false, onStartRematch,
-  startRematchPending = false, startRematchHint,
+  startRematchPending = false, startRematchHint, startRematchParticipantCount, hostControls,
 }: GameOverOverlayProps) {
   const reduceMotion = useReducedMotion()
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -150,6 +154,9 @@ export function GameOverOverlay({
   const votingPendingId = useId()
   const hasVoteFlow = rematchVotes !== undefined
   const yesVotes = rematchVotes?.filter(row => row.vote === 'yes').length ?? 0
+  const rematchParticipants = startRematchParticipantCount === undefined
+    ? yesVotes
+    : safeCount(startRematchParticipantCount)
   const voteTotal = rematchVotes?.length ?? 0
   const displayedViewerVote = pendingRematchVote ?? viewerRematchVote
   const winnerCopy = shitheadName
@@ -367,10 +374,10 @@ export function GameOverOverlay({
                     disabled={!canStartRematch || startRematchPending}
                     aria-label={startRematchPending
                       ? 'Starting rematch'
-                      : `Start rematch with ${yesVotes} player${yesVotes === 1 ? '' : 's'}`}
+                      : `Start rematch with ${rematchParticipants} player${rematchParticipants === 1 ? '' : 's'}`}
                     className="phase-action phase-action--primary primary-action game-over-start-button w-full px-s5 text-button font-bold tracking-button uppercase disabled:opacity-50"
                   >
-                    {startRematchPending ? 'Starting…' : `Start rematch · ${yesVotes} player${yesVotes === 1 ? '' : 's'}`}
+                    {startRematchPending ? 'Starting…' : `Start rematch · ${rematchParticipants} player${rematchParticipants === 1 ? '' : 's'}`}
                   </button>
                   {!canStartRematch && !startRematchPending && (
                     <p className="game-over-start-hint" role="status">
@@ -397,6 +404,7 @@ export function GameOverOverlay({
           ) : !hasVoteFlow && waitingForHost ? (
             <p className="phase-card__waiting min-h-[48px] flex items-center justify-center text-body text-ink-soft" role="status">{waitingCopy ?? 'Waiting for host…'}</p>
           ) : null}
+          {hostControls}
           <button
             type="button"
             onClick={onLeave}

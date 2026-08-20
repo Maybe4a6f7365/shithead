@@ -117,7 +117,8 @@ export class RoomClient {
     // round. Never replay any after reconnect/auth the way durable game actions
     // are: the table or voting phase may already have moved on.
     if ((stamped.type === 'CHAT' || stamped.type === 'EMOTE' || stamped.type === 'BROADCAST' ||
-      stamped.type === 'QUICK_FOLLOW_UP' || stamped.type === 'REMATCH_VOTE') &&
+      stamped.type === 'QUICK_FOLLOW_UP' || stamped.type === 'REMATCH_VOTE' ||
+      stamped.type === 'KICK_OFFLINE_PLAYER') &&
       (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated)) return false
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       if (this.isAuthentication(stamped) || stamped.type === 'LEAVE_ROOM' || this.authenticated) {
@@ -149,7 +150,8 @@ export class RoomClient {
       // Defensive filtering also protects sessions created by older code or
       // tests that directly seeded the queue before authentication.
       if (msg.type === 'CHAT' || msg.type === 'EMOTE' || msg.type === 'BROADCAST' ||
-        msg.type === 'QUICK_FOLLOW_UP' || msg.type === 'REMATCH_VOTE') continue
+        msg.type === 'QUICK_FOLLOW_UP' || msg.type === 'REMATCH_VOTE' ||
+        msg.type === 'KICK_OFFLINE_PLAYER') continue
       this.ws.send(JSON.stringify({ ...msg, version: PROTOCOL_VERSION }))
     }
   }

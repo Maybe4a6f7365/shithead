@@ -11,8 +11,10 @@ import type { Card as CardT, Player } from '../engine'
 
 export interface Seat {
   player: Player
-  /** Face-up cards are public knowledge — real cards may be shown mini. */
+  /** Player views may show face-up cards; spectator views mask every owned card. */
   faceUp: CardT[]
+  /** Spectator views preserve only the count and render these as card backs. */
+  hideFaceUp?: boolean
   handCount: number
   faceDownCount: number
   offline?: boolean
@@ -83,7 +85,7 @@ export const OpponentSeat = memo(function OpponentSeat({
       data-out={player.isOut ? 'true' : 'false'}
       data-hand-count={seat.handCount}
       aria-current={active ? 'step' : undefined}
-      aria-label={`${player.name}: ${seat.handCount} in hand, ${seat.faceUp.length} face up, ${seat.faceDownCount} face down${active ? ', their turn' : ''}${seat.offline ? ', offline' : ''}${player.isOut ? ', out' : ''}`}
+      aria-label={`${player.name}: ${seat.handCount} in hand, ${seat.faceUp.length} face up${seat.hideFaceUp ? ' hidden' : ''}, ${seat.faceDownCount} face down${active ? ', their turn' : ''}${seat.offline ? ', offline' : ''}${player.isOut ? ', out' : ''}`}
     >
       <div className="opponent-seat__identity">
         <span
@@ -125,7 +127,13 @@ export const OpponentSeat = memo(function OpponentSeat({
                   ) : (
                     <span className="final-mini-card final-mini-card--empty final-mini-card--down" aria-hidden="true" />
                   )}
-                  {card ? (
+                  {card && seat.hideFaceUp ? (
+                    <span
+                      className="final-mini-card final-mini-card--up final-mini-card--hidden"
+                      role="img"
+                      aria-label={`Hidden face-up card ${index + 1} of ${seat.faceUp.length}`}
+                    />
+                  ) : card ? (
                     <span
                       className="final-mini-card final-mini-card--up"
                       role="img"
@@ -160,14 +168,20 @@ export interface OpponentStripProps {
   seats: Seat[]
   activeSeatId: string | null
   turnMarkerLayoutId?: string
+  ariaLabel?: string
 }
 
-export function OpponentStrip({ seats, activeSeatId, turnMarkerLayoutId }: OpponentStripProps) {
+export function OpponentStrip({
+  seats,
+  activeSeatId,
+  turnMarkerLayoutId,
+  ariaLabel = 'Opponents',
+}: OpponentStripProps) {
   return (
     <div
       className="opponent-strip"
       role="list"
-      aria-label="Opponents"
+      aria-label={ariaLabel}
       data-seat-count={seats.length}
     >
       {seats.map(s => (

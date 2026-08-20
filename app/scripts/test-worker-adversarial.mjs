@@ -7,7 +7,9 @@ import WebSocket from 'ws'
 const baseUrl = (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '')
 const wsBase = baseUrl.replace(/^http/, 'ws')
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-const PROTOCOL_VERSION = 7
+const PROTOCOL_VERSION = 8
+
+const CARD_BEARING_LOG_EVENTS = new Set(['PLAY_CARDS', 'QUICK_FOLLOW_UP', 'BLIND_REVEAL'])
 
 let passed = 0
 function ok(name) {
@@ -129,6 +131,41 @@ function faceUpSignature(state) {
     .join('|')
 }
 
+function assertHiddenSpectatorCard(card, label) {
+  assert.match(card.id, /^hidden:spectator:/, `${label} exposed a stable card id`)
+  assert.equal(card.rank, '3', `${label} exposed a card rank`)
+  assert.equal(card.suit, null, `${label} exposed a card suit`)
+}
+
+function assertSpectatorState(view, publicState, label) {
+  assert.equal(view.phase, publicState.phase, `${label} has the wrong phase`)
+  assert.equal(view.seq, publicState.seq, `${label} has the wrong sequence`)
+  assert.deepEqual(view.pile, publicState.pile, `${label} did not retain the public pile`)
+  assert.equal(view.pendingQuickFollowUp, null, `${label} leaked a quick-follow-up entitlement`)
+  assert.equal(view.stock.length, publicState.stock.length, `${label} has the wrong stock count`)
+  view.stock.forEach((card, index) => assertHiddenSpectatorCard(card, `${label} stock[${index}]`))
+
+  assert.equal(view.players.length, publicState.players.length, `${label} has the wrong player count`)
+  for (const publicPlayer of publicState.players) {
+    const maskedPlayer = view.players.find(player => player.id === publicPlayer.id)
+    assert(maskedPlayer, `${label} omitted player ${publicPlayer.id}`)
+    for (const zone of ['hand', 'faceUp', 'faceDown']) {
+      assert.equal(
+        maskedPlayer[zone].length,
+        publicPlayer[zone].length,
+        `${label} has the wrong ${zone} count for ${publicPlayer.id}`,
+      )
+      maskedPlayer[zone].forEach((card, index) =>
+        assertHiddenSpectatorCard(card, `${label} ${publicPlayer.id}.${zone}[${index}]`))
+    }
+  }
+
+  assert(
+    view.log.every(event => !CARD_BEARING_LOG_EVENTS.has(event.type)),
+    `${label} retained a card-bearing historical event`,
+  )
+}
+
 function effectiveTopRank(state) {
   for (let i = state.pile.length - 1; i >= 0; i--) {
     const entry = state.pile[i]
@@ -201,12 +238,14 @@ async function main() {
   host.send({ type: 'CREATE_ROOM', playerName: 'Ondřej', version: PROTOCOL_VERSION })
   const hostWelcome = await host.waitType('WELCOME')
   assert.equal(hostWelcome.version, PROTOCOL_VERSION, 'WELCOME must echo protocol version')
+  assert.equal(hostWelcome.role, 'player', 'room creator must be welcomed as a player')
   assert.match(hostWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/, 'WELCOME must carry a high-entropy resumeToken')
   const hostId = hostWelcome.playerId
   const hostToken1 = hostWelcome.resumeToken
 
   guest.send({ type: 'JOIN_ROOM', code: roomId, playerName: 'Guest', version: PROTOCOL_VERSION })
   const guestWelcome = await guest.waitType('WELCOME')
+  assert.equal(guestWelcome.role, 'player', 'lobby join must be welcomed as a player')
   assert.match(guestWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/)
   assert.notEqual(guestWelcome.resumeToken, hostToken1, 'tokens must be per-player unique')
   const guestId = guestWelcome.playerId
@@ -259,6 +298,7 @@ async function main() {
   const resumed = await host.waitType('WELCOME')
   assert.equal(resumed.playerId, hostId)
   assert.equal(resumed.version, PROTOCOL_VERSION)
+  assert.equal(resumed.role, 'player', 'resuming a seat must preserve the player role')
   assert.notEqual(resumed.resumeToken, hostToken1, 'resume must rotate the token')
   const hostToken2 = resumed.resumeToken
   await sleep(100)
@@ -278,6 +318,28 @@ async function main() {
   await sleep(150)
   assert.equal(stale.closeCode, 4003, 'stale-token resume socket must be closed')
   ok('T4 resume rotates token; old token gets a terminal rejection')
+
+  // ---- T4a: authentication is one-shot on a live socket. A bad RESUME
+  // submitted by an already attached player must be nonterminal and must not
+  // detach or downgrade the connection.
+  host.send({
+    type: 'RESUME_ROOM', roomCode: roomId, playerId: guestId,
+    resumeToken: 'B'.repeat(43), version: PROTOCOL_VERSION,
+  })
+  const attachedResumeError = await host.waitType('ERROR', isError('INVALID_MOVE'))
+  assert.match(attachedResumeError.message, /already authenticated/i)
+  assert.equal(host.closeCode, null, 'authenticated socket was closed by a second RESUME')
+  host.send({ type: 'SET_RULES', rules: { deckCount: 2 }, version: PROTOCOL_VERSION })
+  await Promise.all([
+    host.waitType('ROOM_STATE', message => message.room.rules.deckCount === 2),
+    guest.waitType('ROOM_STATE', message => message.room.rules.deckCount === 2),
+  ])
+  host.send({ type: 'SET_RULES', rules: { deckCount: 1 }, version: PROTOCOL_VERSION })
+  await Promise.all([
+    host.waitType('ROOM_STATE', message => message.room.rules.deckCount === 1),
+    guest.waitType('ROOM_STATE', message => message.room.rules.deckCount === 1),
+  ])
+  ok('T4a bad RESUME on an authenticated socket is nonterminal and leaves host authority attached')
 
   // ---- T5: unknown room -> RESUME_FAILED room_not_found
   const stranger = await new Peer('stranger', `${wsBase}/api/room/ZZZZZ9/ws`).connect()
@@ -631,6 +693,98 @@ async function main() {
   assert.equal(current.latestGameState.seq, applied.state.seq, 'duplicate PLAY must not apply twice')
   ok('T11 duplicate identical PLAY does not double-apply (ownership re-check)')
 
+  // ---- T11a: an authenticated mid-round join becomes a resumable,
+  // read-only spectator. The live pile/turn are public, but every card owned
+  // by a player stays masked -- including face-up cards and at game over.
+  assert(
+    applied.state.log.some(event => event.type === 'PLAY_CARDS'),
+    'spectator log-redaction test requires a real card-bearing history event',
+  )
+  let spectator = await new Peer('spectator', wsUrl).connect()
+  spectator.send({
+    type: 'JOIN_ROOM', code: roomId, playerName: 'Watcher', version: PROTOCOL_VERSION,
+  })
+  const spectatorWelcome = await spectator.waitType('WELCOME')
+  assert.equal(spectatorWelcome.role, 'spectator')
+  assert.equal(spectatorWelcome.version, PROTOCOL_VERSION)
+  assert.match(spectatorWelcome.resumeToken, /^[A-Za-z0-9_-]{40,}$/)
+  const spectatorId = spectatorWelcome.playerId
+  const spectatorToken1 = spectatorWelcome.resumeToken
+  const [hostEyeOn, guestEyeOn, spectatorInitial] = await Promise.all([
+    host.waitType('ROOM_STATE', message => message.room.spectatorCount === 1),
+    guest.waitType('ROOM_STATE', message => message.room.spectatorCount === 1),
+    spectator.waitType('GAME_STATE', message => message.state.seq === applied.state.seq),
+  ])
+  for (const message of [hostEyeOn, guestEyeOn]) {
+    assert.equal(message.room.spectatorCount, 1)
+    assert.equal(message.room.spectatorQueueSize, 1)
+    assert(!('spectators' in message.room), 'room summary exposed spectator identities')
+    assert(!message.room.players.some(player => player.id === spectatorId), 'spectator leaked into the seated roster')
+  }
+  assertSpectatorState(spectatorInitial.state, applied.state, 'initial spectator view')
+
+  const spectatorActionSeq = host.latestGameState.seq
+  const hostLogBeforeSpectatorActions = host.rawLog.length
+  const guestLogBeforeSpectatorActions = guest.rawLog.length
+  const rejectedSpectatorActions = [
+    { type: 'PLAY', cards: [{ id: 'spectator-forgery', rank: 'A', suit: '♠' }] },
+    { type: 'CHAT', text: 'spectator chat must not relay' },
+    { type: 'EMOTE', emote: 'fire' },
+    { type: 'BROADCAST', broadcast: 'shrug' },
+    { type: 'REMATCH_VOTE', vote: true },
+    { type: 'KICK_OFFLINE_PLAYER', playerId: guestId },
+  ]
+  for (const action of rejectedSpectatorActions) {
+    spectator.send({ ...action, version: PROTOCOL_VERSION })
+    const rejection = await spectator.waitType('ERROR', isError('INVALID_MOVE'))
+    assert.match(rejection.message, /spectator/i)
+  }
+  await sleep(150)
+  assert.equal(host.latestGameState.seq, spectatorActionSeq, 'spectator action mutated the game')
+  for (const [peer, logStart] of [
+    [host, hostLogBeforeSpectatorActions],
+    [guest, guestLogBeforeSpectatorActions],
+  ]) {
+    const relayed = peer.rawLog.slice(logStart).map(raw => JSON.parse(raw)).filter(message =>
+      (message.type === 'CHAT' && message.text === 'spectator chat must not relay') ||
+      (message.type === 'EMOTE' && message.playerId === spectatorId) ||
+      (message.type === 'BROADCAST' && message.playerId === spectatorId)
+    )
+    assert.deepEqual(relayed, [], `${peer.label} received a spectator reaction`)
+  }
+
+  await spectator.close()
+  const spectatorOffline = await host.waitType(
+    'ROOM_STATE', message => message.room.spectatorCount === 0 && message.room.spectatorQueueSize === 1,
+  )
+  assert(!spectatorOffline.room.players.some(player => player.id === spectatorId))
+  spectator = await new Peer('spectator-resumed', wsUrl).connect()
+  spectator.send({
+    type: 'RESUME_ROOM', roomCode: roomId, playerId: spectatorId,
+    resumeToken: spectatorToken1, version: PROTOCOL_VERSION,
+  })
+  const spectatorResumed = await spectator.waitType('WELCOME')
+  assert.equal(spectatorResumed.playerId, spectatorId)
+  assert.equal(spectatorResumed.role, 'spectator')
+  assert.notEqual(spectatorResumed.resumeToken, spectatorToken1, 'spectator resume must rotate its token')
+  const [eyeRestored, spectatorResumedState] = await Promise.all([
+    host.waitType('ROOM_STATE', message => message.room.spectatorCount === 1),
+    spectator.waitType('GAME_STATE', message => message.state.seq === applied.state.seq),
+  ])
+  assert.equal(eyeRestored.room.spectatorQueueSize, 1)
+  assertSpectatorState(spectatorResumedState.state, applied.state, 'resumed spectator view')
+
+  const staleSpectator = await new Peer('stale-spectator-token', wsUrl).connect()
+  staleSpectator.send({
+    type: 'RESUME_ROOM', roomCode: roomId, playerId: spectatorId,
+    resumeToken: spectatorToken1, version: PROTOCOL_VERSION,
+  })
+  const staleSpectatorFailure = await staleSpectator.waitType('RESUME_FAILED')
+  assert.equal(staleSpectatorFailure.reason, 'invalid_token')
+  await sleep(150)
+  assert.equal(staleSpectator.closeCode, 4003)
+  ok('T11a spectators see the live table with all player-owned cards masked and all actions rejected')
+
   // ---- T11b-c: finish a real round, then exercise the optional tribute
   // Opaque blind-id canonicalization is covered deterministically at the
   // worker boundary. Whether this random deal reaches a blind play before the
@@ -644,6 +798,22 @@ async function main() {
   assert.equal(round1.roundStats?.complete, true, 'new rounds must accumulate complete stats')
   assert.equal(round1.roundStats?.players.length, 2)
   assert(round1.roundStats.players.some(stats => stats.cardsPlayed > 0), 'accepted plays were not counted')
+  const spectatorGameOver = await spectator.waitType('GAME_STATE', message => message.state.phase === 'gameOver')
+  assertSpectatorState(spectatorGameOver.state, round1, 'game-over spectator view')
+  const realOwnedCardIds = round1.players.flatMap(player =>
+    [...player.hand, ...player.faceUp, ...player.faceDown].map(card => card.id)
+  ).filter(cardId => !cardId.startsWith('hidden:'))
+  const spectatorGameOverJson = JSON.stringify(spectatorGameOver.state)
+  for (const cardId of realOwnedCardIds) {
+    assert(!spectatorGameOverJson.includes(cardId), `game-over spectator view leaked owned card ${cardId}`)
+  }
+  spectator.send({ type: 'LEAVE_ROOM', version: PROTOCOL_VERSION })
+  const spectatorGone = await host.waitType(
+    'ROOM_STATE', message => message.room.spectatorCount === 0 && message.room.spectatorQueueSize === 0,
+  )
+  assert(!spectatorGone.room.players.some(player => player.id === spectatorId))
+  await Promise.all([spectator.close(), staleSpectator.close()])
+  ok('T11aa spectator card masking survives gameOver and explicit leave clears the queue')
   await sleep(100)
   for (const peer of [host, guest]) {
     const frames = peer.rawLog.slice(playTransitionLogStarts.get(peer)).map(raw => JSON.parse(raw))
@@ -806,7 +976,8 @@ async function main() {
   await reResume.close()
   ok('T12 explicit LEAVE_ROOM destroys the resume token')
 
-  // ---- T12b: offline seats block a fresh start
+  // ---- T12b: offline seats block a fresh start, and only become kickable
+  // after one continuous server-measured 20-second offline spell.
   const offlineRoom = await newRoom()
   const offlineUrl = `${wsBase}/api/room/${offlineRoom}/ws`
   const offlineHost = await new Peer('offline-host', offlineUrl).connect()
@@ -817,14 +988,156 @@ async function main() {
   const offlineGuestWelcome = await offlineGuest.waitType('WELCOME')
   await offlineHost.waitType('ROOM_STATE', m => m.room.players.length === 2)
   await offlineGuest.close()
-  await offlineHost.waitType('ROOM_STATE', m => m.room.players.some(p => p.id === offlineGuestWelcome.playerId && !p.connected))
+  const offlineState = await offlineHost.waitType('ROOM_STATE', m =>
+    m.room.players.some(p => p.id === offlineGuestWelcome.playerId && !p.connected))
+  const offlineSummary = offlineState.room.players.find(player => player.id === offlineGuestWelcome.playerId)
+  assert.equal(typeof offlineSummary.offlineSince, 'number', 'offline seat is missing its authoritative timestamp')
   offlineHost.send({ type: 'START_GAME' })
   const offlineStartError = await offlineHost.waitType('ERROR', isError('INVALID_MOVE'))
   assert.match(offlineStartError.message, /online/i)
-  await offlineHost.close()
-  ok('T12b an offline roster seat blocks start/rematch')
+  offlineHost.send({ type: 'KICK_OFFLINE_PLAYER', playerId: offlineGuestWelcome.playerId })
+  const earlyKick = await offlineHost.waitType('ERROR', isError('INVALID_MOVE'))
+  assert.match(earlyKick.message, /kicked in|offline for 20 seconds/i)
+  await sleep(Math.max(0, offlineSummary.offlineSince + 20_100 - Date.now()))
+  // CREATE_ROOM left an older one-seat ROOM_STATE in the generic queue. Drop
+  // old snapshots so only the post-kick roster can satisfy this assertion.
+  offlineHost.messages = offlineHost.messages.filter(message =>
+    message.type !== 'ROOM_STATE' && message.type !== 'SYSTEM_EVENT')
+  const kickEventPromise = offlineHost.waitType('SYSTEM_EVENT', message =>
+    message.event?.kind === 'player-left' && message.event.playerId === offlineGuestWelcome.playerId)
+  const kickedRosterPromise = offlineHost.waitType('ROOM_STATE', message =>
+    !message.room.players.some(player => player.id === offlineGuestWelcome.playerId))
+  offlineHost.send({ type: 'KICK_OFFLINE_PLAYER', playerId: offlineGuestWelcome.playerId })
+  const [, kickedRoster] = await Promise.all([kickEventPromise, kickedRosterPromise])
+  assert.equal(kickedRoster.room.players.length, 1)
 
-  // ---- T12c: active join refusal, 2P forfeit, then late-join host rollover
+  const kickedResume = await new Peer('kicked-resume', offlineUrl).connect()
+  kickedResume.send({
+    type: 'RESUME_ROOM', roomCode: offlineRoom, playerId: offlineGuestWelcome.playerId,
+    resumeToken: offlineGuestWelcome.resumeToken, version: PROTOCOL_VERSION,
+  })
+  const kickedResumeFailure = await kickedResume.waitType('RESUME_FAILED')
+  assert(['not_a_member', 'invalid_token'].includes(kickedResumeFailure.reason))
+  await kickedResume.close()
+  await offlineHost.close()
+  ok('T12b host kick is rejected before 20s, succeeds after 20s, and revokes resume')
+
+  // ---- T12c: connected spectators are promoted FIFO into seats that open
+  // for a rematch. The host plus one watcher satisfies the two-player floor;
+  // excess watchers remain in the masked queue.
+  const promotionRoom = await newRoom()
+  const promotionUrl = `${wsBase}/api/room/${promotionRoom}/ws`
+  const promotionHost = await new Peer('promotion-host', promotionUrl).connect()
+  const promotionVictim = await new Peer('promotion-old-seat', promotionUrl).connect()
+  promotionHost.send({
+    type: 'CREATE_ROOM', playerName: 'Promotion host', maxPlayers: 2, version: PROTOCOL_VERSION,
+  })
+  const promotionHostWelcome = await promotionHost.waitType('WELCOME')
+  assert.equal(promotionHostWelcome.role, 'player')
+  promotionVictim.send({
+    type: 'JOIN_ROOM', code: promotionRoom, playerName: 'Old seat', version: PROTOCOL_VERSION,
+  })
+  const promotionVictimWelcome = await promotionVictim.waitType('WELCOME')
+  assert.equal(promotionVictimWelcome.role, 'player')
+  await promotionHost.waitType('ROOM_STATE', message => message.room.players.length === 2)
+  promotionHost.send({ type: 'START_GAME', version: PROTOCOL_VERSION })
+  const [promotionRearrange] = await Promise.all([
+    promotionHost.waitType('GAME_STATE', message => message.state.phase === 'rearrange'),
+    promotionVictim.waitType('GAME_STATE', message => message.state.phase === 'rearrange'),
+  ])
+
+  const firstWatcher = await new Peer('first-watcher', promotionUrl).connect()
+  firstWatcher.send({
+    type: 'JOIN_ROOM', code: promotionRoom, playerName: 'First watcher', version: PROTOCOL_VERSION,
+  })
+  const firstWatcherWelcome = await firstWatcher.waitType('WELCOME')
+  assert.equal(firstWatcherWelcome.role, 'spectator')
+  const firstWatcherInitial = await firstWatcher.waitType('GAME_STATE', message => message.state.phase === 'rearrange')
+  assertSpectatorState(firstWatcherInitial.state, promotionRearrange.state, 'first queued watcher')
+
+  const secondWatcher = await new Peer('second-watcher', promotionUrl).connect()
+  secondWatcher.send({
+    type: 'JOIN_ROOM', code: promotionRoom, playerName: 'Second watcher', version: PROTOCOL_VERSION,
+  })
+  const secondWatcherWelcome = await secondWatcher.waitType('WELCOME')
+  assert.equal(secondWatcherWelcome.role, 'spectator')
+  await secondWatcher.waitType('GAME_STATE', message => message.state.phase === 'rearrange')
+  const twoWatchers = await promotionHost.waitType(
+    'ROOM_STATE', message => message.room.spectatorCount === 2 && message.room.spectatorQueueSize === 2,
+  )
+  assert.equal(twoWatchers.room.maxPlayers, 2)
+
+  promotionVictim.send({ type: 'LEAVE_ROOM', version: PROTOCOL_VERSION })
+  const [promotionOver, firstWatcherOver, secondWatcherOver] = await Promise.all([
+    promotionHost.waitType('GAME_STATE', message => message.state.phase === 'gameOver'),
+    firstWatcher.waitType('GAME_STATE', message => message.state.phase === 'gameOver'),
+    secondWatcher.waitType('GAME_STATE', message => message.state.phase === 'gameOver'),
+  ])
+  assertSpectatorState(firstWatcherOver.state, promotionOver.state, 'first watcher at game over')
+  assertSpectatorState(secondWatcherOver.state, promotionOver.state, 'second watcher at game over')
+
+  // A seat is open now, but the existing queue owns it. A new game-over join
+  // must append as another watcher instead of bypassing the FIFO.
+  const lateGameOverWatcher = await new Peer('late-game-over-watcher', promotionUrl).connect()
+  lateGameOverWatcher.send({
+    type: 'JOIN_ROOM', code: promotionRoom, playerName: 'Late watcher', version: PROTOCOL_VERSION,
+  })
+  const lateGameOverWelcome = await lateGameOverWatcher.waitType('WELCOME')
+  assert.equal(lateGameOverWelcome.role, 'spectator')
+  const lateGameOverView = await lateGameOverWatcher.waitType(
+    'GAME_STATE', message => message.state.phase === 'gameOver')
+  assertSpectatorState(lateGameOverView.state, promotionOver.state, 'late game-over watcher')
+  await promotionHost.waitType(
+    'ROOM_STATE', message => message.room.spectatorCount === 3 && message.room.spectatorQueueSize === 3,
+  )
+
+  promotionHost.send({ type: 'REMATCH_VOTE', vote: true, version: PROTOCOL_VERSION })
+  await promotionHost.waitType('ROOM_STATE', message =>
+    message.room.rematchVotes?.find(vote => vote.playerId === promotionHostWelcome.playerId)?.vote === 'yes')
+  promotionHost.send({ type: 'START_GAME', version: PROTOCOL_VERSION })
+  const [
+    promotedRoom, queuedRoom, lateQueuedRoom,
+    promotedDeal, queuedDeal, lateQueuedDeal, hostPromotionDeal,
+  ] = await Promise.all([
+    firstWatcher.waitType('ROOM_STATE', message =>
+      message.room.players.some(player => player.id === firstWatcherWelcome.playerId) &&
+      message.room.spectatorQueueSize === 2),
+    secondWatcher.waitType('ROOM_STATE', message =>
+      message.room.players.some(player => player.id === firstWatcherWelcome.playerId) &&
+      !message.room.players.some(player => player.id === secondWatcherWelcome.playerId) &&
+      message.room.spectatorCount === 2 && message.room.spectatorQueueSize === 2),
+    lateGameOverWatcher.waitType('ROOM_STATE', message =>
+      message.room.players.some(player => player.id === firstWatcherWelcome.playerId) &&
+      !message.room.players.some(player => player.id === lateGameOverWelcome.playerId) &&
+      message.room.spectatorCount === 2 && message.room.spectatorQueueSize === 2),
+    firstWatcher.waitType('GAME_STATE', message =>
+      message.state.phase === 'rearrange' &&
+      message.state.players.some(player => player.id === firstWatcherWelcome.playerId)),
+    secondWatcher.waitType('GAME_STATE', message =>
+      message.state.phase === 'rearrange' &&
+      message.state.players.some(player => player.id === firstWatcherWelcome.playerId)),
+    lateGameOverWatcher.waitType('GAME_STATE', message =>
+      message.state.phase === 'rearrange' &&
+      message.state.players.some(player => player.id === firstWatcherWelcome.playerId)),
+    promotionHost.waitType('GAME_STATE', message =>
+      message.state.phase === 'rearrange' &&
+      message.state.players.some(player => player.id === firstWatcherWelcome.playerId)),
+  ])
+  assert(promotedRoom.room.players.some(player => player.id === firstWatcherWelcome.playerId))
+  assert(!queuedRoom.room.players.some(player => player.id === secondWatcherWelcome.playerId))
+  assert(!lateQueuedRoom.room.players.some(player => player.id === lateGameOverWelcome.playerId))
+  const promotedSelf = promotedDeal.state.players.find(player => player.id === firstWatcherWelcome.playerId)
+  assert(promotedSelf.hand.every(card => !card.id.startsWith('hidden:')), 'promoted watcher did not receive their own hand')
+  assertSpectatorState(queuedDeal.state, hostPromotionDeal.state, 'excess queued watcher')
+  assertSpectatorState(lateQueuedDeal.state, hostPromotionDeal.state, 'late queued watcher')
+  await Promise.all([
+    promotionHost.close(), promotionVictim.close(), firstWatcher.close(), secondWatcher.close(),
+    lateGameOverWatcher.close(),
+  ])
+  ok('T12c rematch promotion is FIFO; late game-over joins stay queued and masked')
+
+  // ---- T12d: active join queues a spectator, then a 2P forfeit and
+  // late-join host rollover preserve the existing rematch subset behavior.
   const lateRoom = await newRoom()
   const lateUrl = `${wsBase}/api/room/${lateRoom}/ws`
   const oldHost = await new Peer('old-host', lateUrl).connect()
@@ -842,7 +1155,17 @@ async function main() {
 
   const activeJoin = await new Peer('active-join', lateUrl).connect()
   activeJoin.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'Too soon' })
-  await activeJoin.waitType('ERROR', isError('GAME_IN_PROGRESS'))
+  const activeJoinWelcome = await activeJoin.waitType('WELCOME')
+  assert.equal(activeJoinWelcome.role, 'spectator')
+  const activeJoinView = await activeJoin.waitType('GAME_STATE', message => message.state.phase === 'rearrange')
+  assert(activeJoinView.state.players.every(player =>
+    [...player.hand, ...player.faceUp, ...player.faceDown]
+      .every(card => card.id.startsWith('hidden:spectator:'))
+  ))
+  activeJoin.send({ type: 'LEAVE_ROOM', version: PROTOCOL_VERSION })
+  await oldHost.waitType(
+    'ROOM_STATE', message => message.room.spectatorCount === 0 && message.room.spectatorQueueSize === 0,
+  )
   await activeJoin.close()
 
   surrender.send({ type: 'LEAVE_ROOM' })
@@ -853,6 +1176,19 @@ async function main() {
   const lateHost = await new Peer('late-host', lateUrl).connect()
   lateHost.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'New host' })
   const lateHostWelcome = await lateHost.waitType('WELCOME')
+  assert.equal(lateHostWelcome.role, 'player', 'open game-over seat must be assigned as a player')
+  assert(
+    !forfeitOver.state.players.some(player => player.id === lateHostWelcome.playerId),
+    'direct game-over seat unexpectedly participated in the finished round',
+  )
+  const lateHostFinishedView = await lateHost.waitType(
+    'GAME_STATE', message => message.state.phase === 'gameOver')
+  assertSpectatorState(
+    lateHostFinishedView.state,
+    forfeitOver.state,
+    'direct game-over player before their first deal',
+  )
+  ok('T12da direct game-over seats receive a spectator-masked finished round despite player role')
   const lateGuest = await new Peer('late-guest', lateUrl).connect()
   lateGuest.send({ type: 'JOIN_ROOM', code: lateRoom, playerName: 'New guest' })
   const lateGuestWelcome = await lateGuest.waitType('WELCOME')
@@ -894,7 +1230,7 @@ async function main() {
       .every(vote => vote.vote !== 'pending'))
   lateHost.send({ type: 'START_GAME' })
   const tooFewVotes = await lateHost.waitType('ERROR', isError('INVALID_MOVE'))
-  assert.match(tooFewVotes.message, /two yes votes/i)
+  assert.match(tooFewVotes.message, /two yes votes|at least two online players or waiting spectators/i)
 
   await sleep(800)
   lateHost.send({ type: 'REMATCH_VOTE', vote: false })
@@ -956,9 +1292,9 @@ async function main() {
     oldHost.close(), surrender.close(), lateHost.close(), lateGuest.close(),
     sitter.close(), releasedResume.close(), absentResume.close(),
   ])
-  ok('T12c rematch votes are throttled; No/offline-pending seats are closed and released before a subset deal')
+  ok('T12d rematch votes are throttled; No/offline-pending seats are closed and released before a subset deal')
 
-  // ---- T12d: 3P surrender before anyone is out must not invent a winner
+  // ---- T12e: 3P surrender before anyone is out must not invent a winner
   const threeRoom = await newRoom()
   const threeUrl = `${wsBase}/api/room/${threeRoom}/ws`
   const threeHost = await new Peer('three-host', threeUrl).connect()
@@ -982,7 +1318,7 @@ async function main() {
   assert.equal(noWinner.state.loserId, threeCWelcome.playerId)
   assert.equal(noWinner.state.winnerId, null)
   await Promise.all([threeHost.close(), threeB.close(), threeC.close()])
-  ok('T12d a 3P pre-winner surrender records the loser without fabricating first place')
+  ok('T12e a 3P pre-winner surrender records the loser without fabricating first place')
 
   // ---- T13: per-room socket cap (13th connection rejected)
   const capUrl = `${wsBase}/api/room/CAPCAP/ws`

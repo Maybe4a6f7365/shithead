@@ -10,6 +10,7 @@
 //    LEAVE_ROOM {}                           leave (seat kept during a game)
 //    START_GAME {}                           host only; deals and enters rearrange
 //    REMATCH_VOTE {vote}                     yes/no vote after game over
+//    KICK_OFFLINE_PLAYER {playerId}           host removes a seat offline >=20s
 //    READY {}                                mark rearrange done; game starts when all ready
 //    REARRANGE {handIdx, upIdx}              swap one hand card with one face-up card
 //    PLAY {cards: Card[]}                    play matching cards (unique ids, one rank)
@@ -25,7 +26,7 @@
 //    BROADCAST {broadcast}                   authenticated preset text reaction
 //    PING {}                                 keepalive
 //  Server → Client:
-//    WELCOME {playerId, room, resumeToken}   seat assigned; token is secret
+//    WELCOME {playerId, role, room, resumeToken} identity assigned; token is secret
 //    RESUME_FAILED {reason}                  resume credential rejected
 //    ROOM_STATE {room}                       lobby state broadcast
 //    GAME_STATE {state, version?}            per-viewer game state broadcast
@@ -52,11 +53,19 @@
 //    with real card ids, and a constant placeholder rank/suit.
 // ============================================================================
 
-import type { Card, GameRules, GameState, Phase } from './index'
+import type { Card, GameEvent, GameRules, GameState, Phase } from './index'
 import { MAX_LOG_ENTRIES } from './index'
 
 /** Wire protocol version. Bump on any breaking message change. */
-export const PROTOCOL_VERSION = 7
+export const PROTOCOL_VERSION = 8
+
+/** A room keeps at most this many authenticated next-round watchers. */
+export const MAX_SPECTATORS_PER_ROOM = 5
+
+/** Queue position survives short transport drops, but abandoned slots expire. */
+export const SPECTATOR_RECONNECT_GRACE_MS = 2 * 60 * 1000
+/** Continuous server-measured absence required before a host removal. */
+export const OFFLINE_KICK_DELAY_MS = 20_000
 
 /** Maximum UTF-16 length accepted for one ephemeral player chat message. */
 export const MAX_CHAT_MESSAGE_LENGTH = 200
@@ -215,6 +224,7 @@ export type ClientMsg =
   | { type: 'LEAVE_ROOM'; version?: number }
   | { type: 'START_GAME'; version?: number }
   | { type: 'REMATCH_VOTE'; vote: boolean; version?: number }
+  | { type: 'KICK_OFFLINE_PLAYER'; playerId: string; version?: number }
   | { type: 'READY'; version?: number }
   | { type: 'REARRANGE'; handIdx: number; upIdx: number; version?: number }
   | { type: 'PLAY'; cards: Card[]; version?: number }
@@ -233,7 +243,14 @@ export type ClientMsg =
 // ---------- Server → Client ----------
 
 export type ServerMsg =
-  | { type: 'WELCOME'; playerId: string; room: RoomSummary; resumeToken: string; version: number }
+  | {
+      type: 'WELCOME'
+      playerId: string
+      role: ViewerRole
+      room: RoomSummary
+      resumeToken: string
+      version: number
+    }
   | { type: 'RESUME_FAILED'; reason: string; version: number }
   | { type: 'ROOM_STATE'; room: RoomSummary; version?: number }
   | { type: 'GAME_STATE'; state: GameState; version?: number }
@@ -253,6 +270,8 @@ export interface PlayerSummary {
   name: string
   isAI: boolean
   connected: boolean
+  /** Server timestamp for the start of the current continuous offline spell. */
+  offlineSince?: number
   isOut: boolean
   cardCount: { hand: number; faceUp: number; faceDown: number }
 }
@@ -264,10 +283,24 @@ export interface RoomSummary {
   maxPlayers: number
   easterEggEnabled: boolean
   players: PlayerSummary[]
+  /** Authenticated spectators with a live socket right now (eye indicator). */
+  spectatorCount: number
+  /** Total persisted FIFO queue size, including temporarily offline watchers. */
+  spectatorQueueSize: number
   createdAt: number
   rules: GameRules
   /** One public yes/no/pending status for each current roster member. */
   rematchVotes?: RematchVoteSummary[]
+}
+
+export type ViewerRole = 'player' | 'spectator'
+
+/** Persisted server-side identity for a watcher waiting on a future deal. */
+export interface SpectatorIdentity {
+  id: string
+  name: string
+  joinedAt: number
+  disconnectedAt?: number
 }
 
 export interface RematchVoteSummary {
@@ -356,6 +389,8 @@ export function isClientMsg(data: unknown): data is ClientMsg {
         Number.isSafeInteger(data.expectedSeq) && Number(data.expectedSeq) >= 0
     case 'REMATCH_VOTE':
       return hasOnlyKeys(data, ['type', 'vote', 'version']) && typeof data.vote === 'boolean'
+    case 'KICK_OFFLINE_PLAYER':
+      return hasOnlyKeys(data, ['type', 'playerId', 'version']) && isNonBlankShortString(data.playerId, 128)
     case 'CHAT':
       return hasOnlyKeys(data, ['type', 'text', 'version']) && isValidChatText(data.text)
     case 'EMOTE':
@@ -390,6 +425,21 @@ export function isClientMsg(data: unknown): data is ClientMsg {
  * card identities).
  */
 const hiddenCard = (id: string): Card => ({ id, suit: null, rank: '3' })
+
+/**
+ * Explicit allowlist for history sent to spectators. New event types stay
+ * private until deliberately reviewed, preventing a future card-bearing event
+ * from bypassing spectator masking by omission.
+ */
+const SPECTATOR_SAFE_LOG_EVENT_TYPES = new Set<GameEvent['type']>([
+  'PICK_UP_PILE',
+  'CLEAR_PILE',
+  'PLAYER_OUT',
+  'DRAW',
+  'PHASE_CHANGE',
+  'REARRANGE',
+  'GAME_OVER',
+])
 
 /**
  * Serialize a GameState for one viewer (unchanged signature).
@@ -433,13 +483,46 @@ export function serializeGameState(state: GameState, viewerId: string): GameStat
   }
 }
 
+/**
+ * Serialize the live table for an authenticated spectator.
+ *
+ * A spectator may see the currently public pile, turn/phase information,
+ * counts, names and aggregate round statistics, but never a card identity
+ * from any player's hand, face-up row, or face-down row. This remains true at
+ * gameOver. Card-bearing historical events are removed as well: a late
+ * watcher must not be able to reconstruct a pile that has since moved into a
+ * player's hand. `pendingQuickFollowUp` is always null because its exact ids
+ * reveal a newly available owned card.
+ */
+export function serializeSpectatorGameState(state: GameState): GameState {
+  return {
+    ...state,
+    pendingQuickFollowUp: null,
+    stock: state.stock.map((_, i) => hiddenCard(`hidden:spectator:stock:${i}`)),
+    players: state.players.map(player => ({
+      ...player,
+      hand: player.hand.map((_, i) => hiddenCard(`hidden:spectator:${player.id}:hand:${i}`)),
+      faceUp: player.faceUp.map((_, i) => hiddenCard(`hidden:spectator:${player.id}:up:${i}`)),
+      faceDown: player.faceDown.map((_, i) => hiddenCard(`hidden:spectator:${player.id}:down:${i}`)),
+    })),
+    log: state.log
+      .filter(event => SPECTATOR_SAFE_LOG_EVENT_TYPES.has(event.type))
+      .slice(-MAX_LOG_ENTRIES),
+  }
+}
+
 /** Build a lobby-safe player summary with no card details. */
-export function toPlayerSummary(p: import('./index').Player, connected = true): PlayerSummary {
+export function toPlayerSummary(
+  p: import('./index').Player,
+  connected = true,
+  offlineSince?: number,
+): PlayerSummary {
   return {
     id: p.id,
     name: p.name,
     isAI: !!p.isAI,
     connected,
+    ...(connected || offlineSince === undefined ? {} : { offlineSince }),
     isOut: p.isOut,
     cardCount: { hand: p.hand.length, faceUp: p.faceUp.length, faceDown: p.faceDown.length },
   }

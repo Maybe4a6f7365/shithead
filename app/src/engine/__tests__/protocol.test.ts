@@ -13,6 +13,7 @@ import {
   isClientMsg,
   normalizeChatText,
   serializeGameState,
+  serializeSpectatorGameState,
   toPlayerSummary,
   PROTOCOL_VERSION,
   type ServerMsg,
@@ -44,6 +45,7 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'TRIBUTE_SKIP' })).toBe(true)
     expect(isClientMsg({ type: 'REMATCH_VOTE', vote: true })).toBe(true)
     expect(isClientMsg({ type: 'REMATCH_VOTE', vote: false, version: PROTOCOL_VERSION })).toBe(true)
+    expect(isClientMsg({ type: 'KICK_OFFLINE_PLAYER', playerId: 'offline-player' })).toBe(true)
   })
 
   it('rejects malformed or oversized payloads', () => {
@@ -100,6 +102,8 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'REMATCH_VOTE', vote: 'yes' })).toBe(false)
     expect(isClientMsg({ type: 'REMATCH_VOTE', vote: true, playerId: 'forged' })).toBe(false)
     expect(isClientMsg({ type: 'REMATCH_VOTE', vote: true, version: PROTOCOL_VERSION + 1 })).toBe(false)
+    expect(isClientMsg({ type: 'KICK_OFFLINE_PLAYER', playerId: '' })).toBe(false)
+    expect(isClientMsg({ type: 'KICK_OFFLINE_PLAYER', playerId: 'p', elapsed: 20_000 })).toBe(false)
     expect(isClientMsg({ type: 'NOPE' })).toBe(false)
     expect(isClientMsg({})).toBe(false)
     expect(isClientMsg(null)).toBe(false)
@@ -115,8 +119,8 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'CHAT', text: 'Family 👨‍👩‍👧‍👦' })).toBe(true)
   })
 
-  it('pins protocol v7 reaction, broadcast, and system-event wire ids', () => {
-    expect(PROTOCOL_VERSION).toBe(7)
+  it('pins protocol v8 reaction, broadcast, and system-event wire ids', () => {
+    expect(PROTOCOL_VERSION).toBe(8)
     expect(EMOTE_IDS).toEqual([
       'thumbs-up', 'laugh', 'wow', 'fire', 'sad', 'cry', 'heart', 'clap',
       'angry', 'rage', 'middle-finger', 'clown', 'skull', 'poop', 'eyes', 'peach',
@@ -286,6 +290,46 @@ describe('serializeGameState (security)', () => {
   })
 })
 
+describe('serializeSpectatorGameState (security)', () => {
+  it('masks every owned zone even at game over while preserving the public pile', () => {
+    const state = initGame({
+      players: [{ id: 'a', name: 'Alice' }, { id: 'b', name: 'Bob' }],
+      rng: seededRng(91),
+    })
+    const ownedIds = state.players.flatMap(player =>
+      [...player.hand, ...player.faceUp, ...player.faceDown].map(card => card.id))
+    const stockIds = state.stock.map(card => card.id)
+    const publicCard = c('K', '♣', 'public-pile-card')
+    const secret = state.players[0].hand[0]
+    const gameOver = {
+      ...state,
+      phase: 'gameOver' as const,
+      pile: [{ cards: [publicCard], cleared: false }],
+      pendingQuickFollowUp: {
+        playerId: 'a', rank: secret.rank, eligibleCardIds: [secret.id], sourceSeq: state.seq ?? 0,
+      },
+      log: [
+        { type: 'PLAY_CARDS' as const, playerId: 'a', cards: [secret] },
+        { type: 'QUICK_FOLLOW_UP' as const, playerId: 'a', cards: [secret] },
+        { type: 'BLIND_REVEAL' as const, playerId: 'a', card: secret, success: false },
+        { type: 'PICK_UP_PILE' as const, playerId: 'a' },
+      ],
+    }
+
+    const serialized = serializeSpectatorGameState(gameOver)
+    const payload = JSON.stringify(serialized)
+    for (const id of [...ownedIds, ...stockIds]) expect(payload).not.toContain(id)
+    expect(serialized.players.every(player =>
+      [...player.hand, ...player.faceUp, ...player.faceDown]
+        .every(card => card.suit === null && card.id.startsWith('hidden:spectator:'))
+    )).toBe(true)
+    expect(serialized.pendingQuickFollowUp).toBeNull()
+    expect(serialized.log.map(event => event.type)).toEqual(['PICK_UP_PILE'])
+    expect(serialized.pile).toEqual(gameOver.pile)
+    expect(payload).toContain(publicCard.id)
+  })
+})
+
 describe('toPlayerSummary', () => {
   it('produces lobby-safe summary (no card details)', () => {
     const state = initGame({
@@ -301,5 +345,9 @@ describe('toPlayerSummary', () => {
     expect(summary.cardCount.faceUp).toBe(3)
     expect(summary.cardCount.faceDown).toBe(3)
     expect((summary as any).hand).toBeUndefined()
+
+    const offline = toPlayerSummary(p, false, 1234)
+    expect(offline.connected).toBe(false)
+    expect(offline.offlineSince).toBe(1234)
   })
 })
