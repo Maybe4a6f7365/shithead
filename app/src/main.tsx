@@ -4,22 +4,31 @@ import { registerSW } from 'virtual:pwa-register'
 import { App } from './App'
 import { installBrowserAudioBackend } from './components/soundManager'
 import './styles/index.css'
+import './styles/performance.css'
 
 const UPDATE_CHECK_MS = 60 * 60 * 1000
 
 // Android browser chrome can leave CSS viewport units taller than the area a
 // player can actually see and tap. Keep the clipped app shell tied to the live
 // visual viewport so the hand never falls behind the bottom browser controls.
+let viewportSyncFrame = 0
 const syncAppViewportHeight = () => {
   const height = window.visualViewport?.height ?? window.innerHeight
   if (height > 0) {
     document.documentElement.style.setProperty('--app-viewport-height', `${Math.floor(height)}px`)
   }
 }
+const scheduleAppViewportHeightSync = () => {
+  if (viewportSyncFrame) return
+  viewportSyncFrame = window.requestAnimationFrame(() => {
+    viewportSyncFrame = 0
+    syncAppViewportHeight()
+  })
+}
 
 syncAppViewportHeight()
-window.addEventListener('resize', syncAppViewportHeight)
-window.visualViewport?.addEventListener('resize', syncAppViewportHeight)
+window.addEventListener('resize', scheduleAppViewportHeightSync, { passive: true })
+window.visualViewport?.addEventListener('resize', scheduleAppViewportHeightSync, { passive: true })
 
 installBrowserAudioBackend()
 

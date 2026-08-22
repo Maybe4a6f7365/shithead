@@ -1,0 +1,92 @@
+/* Performance-focused motion overrides. Keep repeated UI motion on compositor-friendly
+   properties and avoid animating layout/paint-heavy properties on mobile GPUs. */
+
+:root {
+  --dur-1: 160ms;
+  --dur-2: 190ms;
+  --dur-3: 240ms;
+  --dur-4: 320ms;
+}
+
+/* The game-over rule historically animated width. Keep its fixed geometry and
+   reveal it with a compositor transform instead; the important width inline
+   style from Framer Motion is deliberately overridden so it cannot trigger
+   layout during the animation. */
+.game-over-card__rule {
+  width: 48px !important;
+  transform-origin: 50% 50%;
+  animation: game-over-rule-reveal 180ms var(--ease-standard) both;
+  contain: layout paint;
+}
+
+@keyframes game-over-rule-reveal {
+  from { opacity: 0; transform: scaleX(0); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+/* Burning already animates the card with transform/opacity. Do not animate a
+   box-shadow on every frame; use a static border and fade the whole halo. */
+.game-screen .waste-pile__burn-stack + span {
+  box-shadow: none !important;
+  border: 2px solid var(--color-gold-bright);
+  animation: burn-halo-fade 520ms var(--ease-standard) both;
+  will-change: opacity;
+}
+
+@keyframes burn-halo-fade {
+  0% { opacity: 1; transform: scale(1); }
+  55% { opacity: 0.72; transform: scale(1.015); }
+  100% { opacity: 0; transform: scale(1.03); }
+}
+
+/* ADHD attention: keep the cue visible but remove continuously repainted
+   conic gradients, blur and hue rotation. A static rail with opacity motion
+   gives the same peripheral signal at a much lower paint cost. */
+.game-screen .turn-attention-beacon {
+  background: transparent;
+  box-shadow: none;
+}
+.game-screen .turn-attention-beacon::before {
+  display: block;
+  inset: 0;
+  padding: 0;
+  border: 2px solid hsl(43 70% 68% / 0.48);
+  background: transparent;
+  -webkit-mask: none;
+  mask: none;
+  filter: none;
+  animation: turn-attention-opacity 1800ms ease-in-out infinite alternate;
+  will-change: opacity;
+}
+.game-screen .turn-attention-beacon::after {
+  display: none !important;
+  animation: none !important;
+  filter: none !important;
+}
+
+@keyframes turn-attention-opacity {
+  from { opacity: 0.42; }
+  to { opacity: 1; }
+}
+
+/* Menus should grow from their trigger rather than appearing from nowhere. */
+.game-screen .emote-picker.reaction-picker,
+.game-screen .reaction-picker {
+  transform-origin: top right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 1ms;
+    --dur-2: 1ms;
+    --dur-3: 1ms;
+    --dur-4: 1ms;
+  }
+  .game-over-card__rule,
+  .game-screen .waste-pile__burn-stack + span,
+  .game-screen .turn-attention-beacon::before {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
