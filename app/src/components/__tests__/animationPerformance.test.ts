@@ -1,9 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-
-const css = readFileSync(resolve(process.cwd(), 'src/styles/performance.css'), 'utf8')
-const main = readFileSync(resolve(process.cwd(), 'src/main.tsx'), 'utf8')
+import css from '../../styles/performance.css?raw'
+import main from '../../main.tsx?raw'
 
 describe('animation performance contracts', () => {
   it('keeps frequent motion on compositor-friendly properties', () => {
