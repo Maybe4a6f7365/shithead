@@ -23,16 +23,25 @@ describe('landing legal information', () => {
     expect(screen.getByRole('dialog', { name: 'Impressum' })).toBeTruthy()
     expect(screen.getByText(/angaben gemäß § 5 ddg/i)).toBeTruthy()
     expect(screen.getAllByText(/josé manuel matas villavicencio/i).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText(/muffendorferstr\s*32/i)).toBeTruthy()
-    expect(screen.getByText(/53177 bonn/i)).toBeTruthy()
-    expect(screen.getByText(/deutschland/i)).toBeTruthy()
-    expect(screen.getByText(/verantwortlich nach § 18/i)).toBeTruthy()
+    expect(screen.getAllByText(/muffendorferstr\s*32/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/53177 bonn/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/deutschland/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/verantwortlich für den inhalt nach § 18 abs\. 2 mstv/i)).toBeTruthy()
+    expect(screen.getByText(/verbraucherschlichtungsstelle/i)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'kontakt@schalt-werk.com' }).getAttribute('href')).toBe('mailto:kontakt@schalt-werk.com')
     expect(screen.getAllByRole('link', { name: /schalt-werk\.com/i }).map((a) => a.getAttribute('href'))).toContain('https://schalt-werk.com')
 
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Impressum' })).toBeNull())
     expect(trigger).toBe(document.activeElement)
+  })
+
+  it('credits Schaltwerk in the footer as a plain wordmark link', () => {
+    const { container } = render(<LandingScreen onPlayOnline={() => {}} onPassAndPlay={() => {}} />)
+    const credit = screen.getByRole('link', { name: 'Schaltwerk' })
+    expect(credit.getAttribute('href')).toBe('https://schalt-werk.com')
+    expect(credit.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(container.querySelector('.landing-built-by svg')).toBeNull()
   })
 
   it('keeps keyboard focus inside the legal dialog', () => {

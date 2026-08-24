@@ -141,18 +141,47 @@ function Imprint() {
       <h3>Angaben gemäß § 5 DDG</h3>
       <p>
         José Manuel Matas Villavicencio<br />
+        Einzelunternehmen<br />
         Muffendorferstr 32<br />
         53177 Bonn<br />
         Deutschland
       </p>
+
+      <h3>Kontakt</h3>
       <p>
         E-Mail: <a href="mailto:kontakt@schalt-werk.com">kontakt@schalt-werk.com</a><br />
         Webseite:{' '}
         <a href="https://schalt-werk.com" target="_blank" rel="noreferrer">schalt-werk.com</a>
       </p>
 
-      <h3>Verantwortlich nach § 18 Abs. 2 MStV</h3>
-      <p>José Manuel Matas Villavicencio, Anschrift wie oben.</p>
+      <h3>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h3>
+      <p>
+        José Manuel Matas Villavicencio<br />
+        Muffendorferstr 32<br />
+        53177 Bonn<br />
+        Deutschland
+      </p>
+
+      <h3>Verbraucherstreitbeilegung</h3>
+      <p>
+        Wir sind nicht bereit und nicht verpflichtet, an Streitbeilegungsverfahren vor einer
+        Verbraucherschlichtungsstelle teilzunehmen (§ 36 VSBG).
+      </p>
+
+      <h3>Haftung für Inhalte und Links</h3>
+      <p>
+        Für die eigenen Inhalte dieses Angebots sind wir nach den allgemeinen Gesetzen verantwortlich.
+        Für die Inhalte verlinkter externer Seiten ist deren jeweiliger Anbieter verantwortlich; zum
+        Zeitpunkt der Verlinkung waren dort keine Rechtsverstöße erkennbar. Werden uns Rechtsverstöße
+        bekannt, entfernen wir die betreffenden Inhalte oder Links umgehend.
+      </p>
+
+      <h3>Urheberrecht</h3>
+      <p>
+        Die durch uns erstellten Inhalte dieses Angebots unterliegen dem deutschen Urheberrecht.
+        Vervielfältigung, Bearbeitung und Verbreitung außerhalb der Grenzen des Urheberrechts bedürfen
+        unserer schriftlichen Zustimmung.
+      </p>
     </div>
   )
 }
