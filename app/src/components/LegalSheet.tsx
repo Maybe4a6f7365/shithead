@@ -138,11 +138,6 @@ function PrivacyNotice() {
 function Imprint() {
   return (
     <div className="legal-copy mt-s4 text-body text-ink-soft">
-      <div className="demo-notice">
-        <strong>Demo notice</strong>
-        <p>This is not a production website or commercial service. It is a demo tool provided solely for internal fun.</p>
-      </div>
-
       <h3>Angaben gemäß § 5 DDG</h3>
       <p>
         José Manuel Matas Villavicencio<br />

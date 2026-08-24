@@ -21,7 +21,6 @@ describe('landing legal information', () => {
     trigger.focus()
     fireEvent.click(trigger)
     expect(screen.getByRole('dialog', { name: 'Impressum' })).toBeTruthy()
-    expect(screen.getByText(/not a production website or commercial service/i)).toBeTruthy()
     expect(screen.getByText(/angaben gemäß § 5 ddg/i)).toBeTruthy()
     expect(screen.getAllByText(/josé manuel matas villavicencio/i).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/muffendorferstr\s*32/i)).toBeTruthy()
