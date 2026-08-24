@@ -15,19 +15,21 @@ describe('landing legal information', () => {
     expect(screen.getByRole('link', { name: /cloudflare privacy policy/i })).toBeTruthy()
   })
 
-  it('identifies the internal demo without publishing a postal contact block', async () => {
+  it('publishes a DDG-conform Impressum with the operator and a postal contact block', async () => {
     render(<LandingScreen onPlayOnline={() => {}} onPassAndPlay={() => {}} />)
     const trigger = screen.getByRole('button', { name: 'Impressum' })
     trigger.focus()
     fireEvent.click(trigger)
     expect(screen.getByRole('dialog', { name: 'Impressum' })).toBeTruthy()
     expect(screen.getByText(/not a production website or commercial service/i)).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: 'Contact' })).toBeNull()
-    expect(screen.queryByText(/muffendorfer straße 32/i)).toBeNull()
-    expect(screen.queryByText(/53177 bonn/i)).toBeNull()
-    expect(screen.queryByText(/^deutschland$/i)).toBeNull()
-    expect(screen.getByText(/josé manuel matas villavicencio/i)).toBeTruthy()
+    expect(screen.getByText(/angaben gemäß § 5 ddg/i)).toBeTruthy()
+    expect(screen.getAllByText(/josé manuel matas villavicencio/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/muffendorferstr\s*32/i)).toBeTruthy()
+    expect(screen.getByText(/53177 bonn/i)).toBeTruthy()
+    expect(screen.getByText(/deutschland/i)).toBeTruthy()
+    expect(screen.getByText(/verantwortlich nach § 18/i)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'kontakt@schalt-werk.com' }).getAttribute('href')).toBe('mailto:kontakt@schalt-werk.com')
+    expect(screen.getAllByRole('link', { name: /schalt-werk\.com/i }).map((a) => a.getAttribute('href'))).toContain('https://schalt-werk.com')
 
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Impressum' })).toBeNull())

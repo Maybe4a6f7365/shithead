@@ -101,11 +101,17 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
         </section>
       </main>
       <footer className="app-bottom-zone landing-footer">
-        <nav className="landing-links" aria-label="Information">
-          <button ref={aboutTriggerRef} type="button" onClick={() => setAboutOpen(true)}>About</button>
-          <button type="button" onClick={() => setLegalOpen('privacy')}>Privacy</button>
-          <button type="button" onClick={() => setLegalOpen('imprint')}>Impressum</button>
-        </nav>
+        <div className="landing-footer-stack">
+          <nav className="landing-links" aria-label="Information">
+            <button ref={aboutTriggerRef} type="button" onClick={() => setAboutOpen(true)}>About</button>
+            <button type="button" onClick={() => setLegalOpen('privacy')}>Privacy</button>
+            <button type="button" onClick={() => setLegalOpen('imprint')}>Impressum</button>
+          </nav>
+          <div className="landing-built-by" aria-label="Built by Schaltwerk">
+            <span aria-hidden="true">built by</span>
+            <a href="https://schalt-werk.com" target="_blank" rel="noopener noreferrer">Schaltwerk</a>
+          </div>
+        </div>
       </footer>
 
       <RulesSheet open={rulesOpen} onClose={() => setRulesOpen(false)} />

@@ -143,11 +143,21 @@ function Imprint() {
         <p>This is not a production website or commercial service. It is a demo tool provided solely for internal fun.</p>
       </div>
 
-      <p>Represented by José Manuel Matas Villavicencio</p>
+      <h3>Angaben gemäß § 5 DDG</h3>
       <p>
-        <a href="mailto:kontakt@schalt-werk.com">kontakt@schalt-werk.com</a><br />
+        José Manuel Matas Villavicencio<br />
+        Muffendorferstr 32<br />
+        53177 Bonn<br />
+        Deutschland
+      </p>
+      <p>
+        E-Mail: <a href="mailto:kontakt@schalt-werk.com">kontakt@schalt-werk.com</a><br />
+        Webseite:{' '}
         <a href="https://schalt-werk.com" target="_blank" rel="noreferrer">schalt-werk.com</a>
       </p>
+
+      <h3>Verantwortlich nach § 18 Abs. 2 MStV</h3>
+      <p>José Manuel Matas Villavicencio, Anschrift wie oben.</p>
     </div>
   )
 }
