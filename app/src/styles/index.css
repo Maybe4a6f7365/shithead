@@ -1522,6 +1522,18 @@
   background: linear-gradient(145deg, #e64d69, #9f2943);
   border: 1px solid rgba(255, 255, 255, 0.13);
   box-shadow: var(--shadow-card-rest);
+  transition:
+    background var(--dur-2) var(--ease-standard),
+    border-color var(--dur-2) var(--ease-standard),
+    box-shadow var(--dur-2) var(--ease-standard),
+    opacity var(--dur-2) var(--ease-standard);
+}
+/* Hand spent: the card fades to the same dashed empty slot the final rail uses. */
+.opponent-hand-count[data-empty="true"] {
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: none;
+  box-shadow: none;
+  opacity: 0.5;
 }
 
 /* Local and opponent final cards: three overlaid stacks, six visible cards. */
@@ -2369,6 +2381,11 @@
   border-radius: 3px;
   background: var(--color-burgundy);
   box-shadow: 2px 2px 0 rgba(6, 25, 18, 0.4);
+}
+.opponent-hand-count[data-empty="true"] {
+  border: 1px dashed rgba(241, 229, 199, 0.18);
+  background: transparent;
+  box-shadow: none;
 }
 .final-mini-card--down {
   border-color: rgba(241, 229, 199, 0.62);
@@ -3377,6 +3394,11 @@
   border-radius: 4px;
   background: var(--color-burgundy);
   box-shadow: 0 3px 8px rgba(6, 25, 18, 0.28);
+}
+.game-screen .opponent-hand-count[data-empty="true"] {
+  border: 1px dashed rgba(241, 229, 199, 0.18);
+  background: transparent;
+  box-shadow: none;
 }
 .game-screen .table-turn-marker {
   min-height: 18px;

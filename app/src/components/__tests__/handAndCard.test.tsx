@@ -103,6 +103,26 @@ describe('opponent final-card information', () => {
     expect(screen.getByRole('img', { name: /17 cards in hand/i })).toBeTruthy()
     expect(container.querySelectorAll('.final-mini-card')).toHaveLength(6)
     expect(container.querySelectorAll('[data-final-stack]')).toHaveLength(3)
+    expect(container.querySelector('.opponent-hand-count')?.getAttribute('data-empty')).toBe('false')
+  })
+
+  it('drops the hand card silhouette once the opponent holds nothing', () => {
+    const player: Player = {
+      id: 'p', name: 'Greta', hand: [], faceDown: [],
+      faceUp: [card(1, '2')], isOut: false,
+    }
+    const { container } = render(
+      <OpponentSeat
+        seat={{ player, faceUp: player.faceUp, handCount: 0, faceDownCount: 2 }}
+        active={false}
+      />,
+    )
+    const count = container.querySelector('.opponent-hand-count')
+    expect(count?.getAttribute('data-empty')).toBe('true')
+    expect(count?.textContent).toBe('')
+    // The slot itself stays so seats keep their geometry when a hand empties.
+    expect(count).toBeTruthy()
+    expect(screen.getByRole('img', { name: /0 cards in hand/i })).toBeTruthy()
   })
 })
 

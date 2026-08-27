@@ -72,6 +72,9 @@ export const OpponentSeat = memo(function OpponentSeat({
 }) {
   const { player } = seat
   const name = player.name.length > 10 ? `${player.name.slice(0, 10)}…` : player.name
+  // An emptied hand keeps its slot for stable seat geometry, but drops the card
+  // silhouette so a spent opponent never reads as still holding one.
+  const handEmpty = seat.handCount === 0
   return (
     <div
       className={clsx(
@@ -108,10 +111,18 @@ export const OpponentSeat = memo(function OpponentSeat({
       </div>
       <div className="opponent-seat__cards">
         <div className="opponent-seat__hand">
-          <div className="opponent-hand-count" role="img" aria-label={`${seat.handCount} cards in hand`} data-count={seat.handCount}>
-            <span className="absolute inset-0 flex items-center justify-center text-micro font-semibold text-cream" aria-hidden="true">
-              {seat.handCount}
-            </span>
+          <div
+            className={clsx('opponent-hand-count', handEmpty && 'opponent-hand-count--empty')}
+            role="img"
+            aria-label={`${seat.handCount} cards in hand`}
+            data-count={seat.handCount}
+            data-empty={handEmpty ? 'true' : 'false'}
+          >
+            {!handEmpty && (
+              <span className="absolute inset-0 flex items-center justify-center text-micro font-semibold text-cream" aria-hidden="true">
+                {seat.handCount}
+              </span>
+            )}
           </div>
         </div>
         {/* Stable public final-card rail below the username. */}
