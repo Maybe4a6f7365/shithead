@@ -2079,6 +2079,15 @@
 
 .setup-card__action { margin-top: 4px; }
 .setup-card__error { margin-top: 8px; color: #9b2f28 !important; font-weight: 750; }
+/* Android-only hand-off to the installed app, below the primary Join button. */
+.setup-card__handoff { margin-top: 12px; }
+.setup-card__handoff .secondary-action {
+  min-height: 46px;
+  color: var(--color-ink);
+  border-color: rgba(23, 36, 29, 0.45);
+  background: #fff8e8;
+  text-decoration: none;
+}
 
 .join-create-divider {
   height: 28px;

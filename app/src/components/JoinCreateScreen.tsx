@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoom } from '../net/useMultiplayerRoom'
 import { loadSavedName, saveName } from './NameField'
+import { androidIntentUrl, canHandOffToAndroidApp } from './openInApp'
+import { inviteUrl } from './WaitingRoom'
 
 export interface JoinCreateScreenProps {
   onEnterRoom: (roomId: string, playerName: string, intent: 'create' | 'join') => void
@@ -18,6 +20,10 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
   const [nameError, setNameError] = useState<string | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
   const [joinError, setJoinError] = useState<string | null>(null)
+  // An invite opened inside an in-app browser can still be handed to the
+  // installed Android app; the button is pointless anywhere else.
+  const [linkedRoom, setLinkedRoom] = useState<string | null>(null)
+  const [canHandOff] = useState(() => canHandOffToAndroidApp())
   const nameRef = useRef<HTMLInputElement>(null)
   const joinRef = useRef<HTMLInputElement>(null)
   const requestId = useRef(0)
@@ -30,6 +36,7 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
     const room = params.get('room')
     if (room && /^[A-Za-z0-9]{6}$/.test(room)) {
       setCode(room.toUpperCase())
+      setLinkedRoom(room.toUpperCase())
       joinRef.current?.focus()
     }
   }, [])
@@ -211,6 +218,19 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
             >
               Join room
             </button>
+            {linkedRoom && canHandOff && (
+              <div className="setup-card__handoff">
+                <a
+                  href={androidIntentUrl(inviteUrl(linkedRoom))}
+                  className="secondary-action setup-card__action flex items-center justify-center w-full px-s5 text-button font-bold tracking-button uppercase"
+                >
+                  Open in app
+                </a>
+                <p className="setup-card__copy text-small text-cream-dim">
+                  Full screen, no address bar — if Shithead is installed on this phone.
+                </p>
+              </div>
+            )}
           </form>
         </div>
       </main>
