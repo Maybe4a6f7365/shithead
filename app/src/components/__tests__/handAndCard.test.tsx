@@ -106,6 +106,29 @@ describe('opponent final-card information', () => {
     expect(container.querySelector('.opponent-hand-count')?.getAttribute('data-empty')).toBe('false')
   })
 
+  it('marks each unplayed slot with one silhouette that spans a stacked pair', () => {
+    const player: Player = {
+      id: 'p', name: 'Greta', hand: [], faceDown: [],
+      faceUp: [card(1, '9')], isOut: false,
+    }
+    const { container } = render(
+      <OpponentSeat
+        seat={{ player, faceUp: player.faceUp, handCount: 3, faceDownCount: 2 }}
+        active={false}
+      />,
+    )
+    const [covered, lone, empty] = Array.from(container.querySelectorAll('[data-final-stack]'))
+    // A complete pair hides the slot entirely; the other two states each show
+    // exactly one silhouette, never a second outline drawn over a card.
+    expect(covered.querySelectorAll('.final-mini-card--slot')).toHaveLength(0)
+    expect(covered.querySelector('.final-mini-card--up')).toBeTruthy()
+    expect(lone.querySelectorAll('.final-mini-card--slot')).toHaveLength(1)
+    expect(lone.querySelector('.final-mini-card--down')).toBeTruthy()
+    expect(lone.querySelector('.final-mini-card--up')).toBeNull()
+    expect(empty.querySelectorAll('.final-mini-card')).toHaveLength(1)
+    expect(empty.querySelector('.final-mini-card--slot')).toBeTruthy()
+  })
+
   it('drops the hand card silhouette once the opponent holds nothing', () => {
     const player: Player = {
       id: 'p', name: 'Greta', hand: [], faceDown: [],

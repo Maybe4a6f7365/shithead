@@ -133,10 +133,14 @@ export const OpponentSeat = memo(function OpponentSeat({
               const hasHidden = index < seat.faceDownCount
               return (
                 <span className="final-mini-stack" key={index} data-final-stack={index + 1}>
-                  {hasHidden ? (
+                  {/* One slot silhouette spans both card positions and sits behind
+                      them, so a lone face-down card still shows the empty space
+                      above it without a second outline drawn over the card. */}
+                  {(!hasHidden || !card) && (
+                    <span className="final-mini-card final-mini-card--slot" aria-hidden="true" />
+                  )}
+                  {hasHidden && (
                     <span className="final-mini-card final-mini-card--down" role="img" aria-label={`Face-down final card ${index + 1} of ${seat.faceDownCount}`} />
-                  ) : (
-                    <span className="final-mini-card final-mini-card--empty final-mini-card--down" aria-hidden="true" />
                   )}
                   {card && seat.hideFaceUp ? (
                     <span
@@ -154,9 +158,7 @@ export const OpponentSeat = memo(function OpponentSeat({
                         {card.rank === 'JOKER' ? 'JK' : card.rank}
                       </span>
                     </span>
-                  ) : (
-                    <span className="final-mini-card final-mini-card--empty final-mini-card--up" aria-hidden="true" />
-                  )}
+                  ) : null}
                 </span>
               )
             })}

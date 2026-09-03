@@ -22,7 +22,7 @@ describe('Last Call visual system contract', () => {
   it('keeps state indicators truthful after the global cascade', () => {
     expect(css).toContain('.opponent-seat[data-active="true"] .opponent-seat__turn-marker')
     expect(css).not.toMatch(/^\.opponent-seat__turn-marker\s*\{[^}]*background:\s*var\(--color-cream\)\s*!important/m)
-    expect(css).toContain('.final-mini-card--empty.final-mini-card--down')
+    expect(css).toContain('.final-mini-card--slot')
     expect(css).toContain('.state-panel .phase-action--quiet')
   })
 
