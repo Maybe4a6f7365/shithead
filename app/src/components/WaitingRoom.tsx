@@ -6,9 +6,35 @@
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
-import type { RoomSummary } from '../engine/protocol'
+import type {
+  BroadcastEvent,
+  BroadcastId,
+  ChatEvent,
+  EmoteEvent,
+  EmoteId,
+  RoomSummary,
+  SystemEvent,
+} from '../engine/protocol'
 import { DEFAULT_GAME_RULES, type GameRules } from '../engine'
 import { RoundRulesControl } from './RoundRulesControl'
+import {
+  BroadcastFeedback,
+  ChatFeedback,
+  EmoteButton,
+  EmoteFeedback,
+  SystemEventFeedback,
+} from './EmoteButton'
+
+/** Resolve a display name for a reaction event from authoritative roster state. */
+function playerNameForEvent(
+  event: { playerId: string } | null | undefined,
+  room: Pick<RoomSummary, 'players'>,
+  fallbackId: string,
+): string | undefined {
+  if (!event) return undefined
+  const found = room.players.find(p => p.id === event.playerId)
+  return found?.name ?? (event.playerId === fallbackId ? 'You' : undefined)
+}
 
 /** The one rule that decides what you see. Exported for the regression test. */
 export function waitingRoomRole(room: Pick<RoomSummary, 'hostId'>, myPlayerId: string): 'host' | 'guest' {
@@ -22,6 +48,15 @@ export interface WaitingRoomProps {
   onLeave: () => void
   onRulesChange?: (patch: Partial<GameRules>) => void
   heading?: string
+  // Reaction channel (all optional — old renders still work).
+  onSendEmote?: (emote: EmoteId) => void
+  onSendBroadcast?: (broadcast: BroadcastId) => void
+  onSendChat?: (text: string) => void | boolean
+  recentCustomMessages?: readonly string[]
+  latestEmote?: EmoteEvent | null
+  latestBroadcast?: BroadcastEvent | null
+  latestChat?: ChatEvent | null
+  latestSystemEvent?: SystemEvent | null
 }
 
 export function inviteUrl(roomCode: string, origin = window.location.origin): string {
@@ -52,7 +87,22 @@ async function copyText(value: string): Promise<boolean> {
   return copied
 }
 
-export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange, heading }: WaitingRoomProps) {
+export function WaitingRoom({
+  room,
+  myPlayerId,
+  onStart,
+  onLeave,
+  onRulesChange,
+  heading,
+  onSendEmote,
+  onSendBroadcast,
+  onSendChat,
+  recentCustomMessages,
+  latestEmote,
+  latestBroadcast,
+  latestChat,
+  latestSystemEvent,
+}: WaitingRoomProps) {
   const [shareStatus, setShareStatus] = useState<{ message: string; failed?: boolean } | null>(null)
   const [startHint, setStartHint] = useState<string | null>(null)
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -106,7 +156,7 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
   }
 
   return (
-    <div className="app-viewport pregame-screen pregame-screen--waiting bg-felt text-cream flex flex-col">
+    <div className="app-viewport pregame-screen pregame-screen--waiting bg-felt text-cream flex flex-col" style={{ position: 'relative' }}>
       <main className="waiting-room-main screen-content pregame-shell flex-1 overflow-y-auto w-full max-w-[440px] mx-auto px-s4 py-s5 flex flex-col justify-start">
         <header className="pregame-header waiting-room-header">
           <p className="pregame-kicker">
@@ -222,6 +272,23 @@ export function WaitingRoom({ room, myPlayerId, onStart, onLeave, onRulesChange,
           Leave
         </button>
       </main>
+      {onSendEmote && (
+        <div className="waiting-room__reaction-control" style={{ position: 'absolute', right: 16, bottom: 16, zIndex: 5 }}>
+          <EmoteButton
+            key={myPlayerId}
+            onSend={onSendEmote}
+            onSendBroadcast={onSendBroadcast ?? (() => undefined)}
+            onSendChat={onSendChat ?? (() => undefined)}
+            recentCustomMessages={recentCustomMessages ?? []}
+          />
+        </div>
+      )}
+      <div className="waiting-room__feedback-stack" aria-label="Table reactions">
+        <EmoteFeedback event={latestEmote ?? null} playerName={playerNameForEvent(latestEmote, room, myPlayerId)} />
+        <BroadcastFeedback event={latestBroadcast ?? null} playerName={playerNameForEvent(latestBroadcast, room, myPlayerId)} />
+        <ChatFeedback event={latestChat ?? null} playerName={playerNameForEvent(latestChat, room, myPlayerId)} />
+        <SystemEventFeedback event={latestSystemEvent ?? null} />
+      </div>
     </div>
   )
 }

@@ -1175,24 +1175,16 @@ export class Room {
     return resolution.frame
   }
 
-  /** Relay one canonical, authenticated custom message as an ephemeral reaction. */
+  /**
+   * Relay one canonical, authenticated custom message as an ephemeral reaction.
+   * Allowed in any pre-game or active phase (waiting, rearrange, tribute, play,
+   * endgame) so the waiting room can host table talk. Cooldown and burst limit
+   * apply uniformly.
+   */
   private chat(session: Session, rawText: string): void {
     const playerId = session.playerId
     const data = this.data
     if (!playerId || !data?.players.some(player => player.id === playerId)) return
-    const gameState = data.state
-    if (
-      !gameState ||
-      (gameState.phase !== 'play' && gameState.phase !== 'endgame') ||
-      !gameState.players.some(player => player.id === playerId)
-    ) {
-      this.send(session, {
-        type: 'ERROR',
-        code: 'INVALID_MOVE',
-        message: 'Custom messages are only available during active games',
-      })
-      return
-    }
     const text = normalizeChatText(rawText)
     if (!text) return
     const ts = acceptedReactionAt(this.lastReactionAtByPlayer.get(playerId) ?? null, Date.now())

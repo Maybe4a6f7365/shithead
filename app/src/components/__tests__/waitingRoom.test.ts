@@ -146,3 +146,47 @@ describe('WaitingRoom', () => {
     expect(screen.getByText(/everyone must be online/i)).toBeTruthy()
   })
 })
+
+// ============================================================================
+// Reactions in the waiting room: picker trigger mounts only when a send fn is
+// supplied, and a click on the first emoji forwards the canonical EmoteId.
+// ============================================================================
+import { REACTION_OPTIONS } from '../reactionCatalog'
+
+describe('reactions in waiting room', () => {
+  it('renders the reaction picker trigger when onSendEmote is provided', () => {
+    render(createElement(WaitingRoom, {
+      room: room(),
+      myPlayerId: 'host-1',
+      onStart: noop,
+      onLeave: noop,
+      onSendEmote: vi.fn(),
+    }))
+    const trigger = screen.getByRole('button', { name: /open reactions/i }) as HTMLButtonElement
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('forwards an emote click to onSendEmote', () => {
+    const onSendEmote = vi.fn()
+    render(createElement(WaitingRoom, {
+      room: room(),
+      myPlayerId: 'host-1',
+      onStart: noop,
+      onLeave: noop,
+      onSendEmote,
+    }))
+    fireEvent.click(screen.getByRole('button', { name: /open reactions/i }))
+    const first = REACTION_OPTIONS[0]
+    const matches = screen.getAllByRole('button', { name: first.label })
+    expect(matches.length).toBeGreaterThan(0)
+    fireEvent.click(matches[0])
+    expect(onSendEmote).toHaveBeenCalledWith(first.id)
+  })
+
+  it('does not render the reaction picker when onSendEmote is omitted', () => {
+    render(createElement(WaitingRoom, { room: room(), myPlayerId: 'host-1', onStart: noop, onLeave: noop }))
+    expect(screen.queryByRole('button', { name: /open reactions/i })).toBeNull()
+  })
+})

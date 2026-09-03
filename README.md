@@ -17,6 +17,7 @@ This document is the technical source of truth for the shipped game. Rule behavi
 |---|---|
 | Offline play | 2–5 seats on one device; any mix of humans and Easy/Medium/Hard AI |
 | Online play | Private rooms for 2–5 human players, plus a five-person next-round spectator queue |
+| Waiting room | Authenticated players can react with emojis, preset broadcasts, and custom messages before the deal starts, subject to the same 3-per-10s custom-message burst limit and shared reaction cooldown used during play |
 | Round configuration | 1–3 decks, Jokers on/off, optional previous-winner face-up exchange |
 | Rules | 2 reset, 3 mirror, 7 low, stacked 8 skip, 10 burn except after 7, Joker burn, cumulative four-plus burn, out-of-turn burn-in, exact matching-card quick follow-up |
 | Refresh recovery | Online seats resume with a rotating secret token stored locally |

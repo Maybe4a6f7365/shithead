@@ -231,6 +231,14 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
           onStart={() => send({ type: 'START_GAME' })}
           onRulesChange={rules => send({ type: 'SET_RULES', rules })}
           onLeave={quit}
+          onSendEmote={sendEmote}
+          onSendBroadcast={sendBroadcast}
+          onSendChat={sendChat}
+          recentCustomMessages={recentCustomMessages}
+          latestEmote={latestEmote}
+          latestBroadcast={latestBroadcast}
+          latestChat={latestChat}
+          latestSystemEvent={latestSystemEvent}
         />
         {phaseSpectatorIndicator}
         {offlineControls()}
