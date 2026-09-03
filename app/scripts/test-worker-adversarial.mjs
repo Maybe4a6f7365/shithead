@@ -374,8 +374,6 @@ async function main() {
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
   host.send({ type: 'CHAT', text: '   ' })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
-  host.send({ type: 'CHAT', text: 'not during a game' })
-  await host.waitType('ERROR', isError('INVALID_MOVE'))
   const hostLogBeforeUnauthChat = host.rawLog.length
   noToken.send({ type: 'CHAT', text: 'unauthenticated' })
   await sleep(100)
@@ -383,7 +381,24 @@ async function main() {
     !host.rawLog.slice(hostLogBeforeUnauthChat).some(raw => JSON.parse(raw).type === 'CHAT'),
     'unauthenticated CHAT was relayed',
   )
-  ok('T7a CHAT is strict, authenticated, and restricted to active games')
+
+  // Table talk is allowed before the deal: the waiting room relays the same
+  // canonical, ephemeral CHAT frame to every seated player and nobody else.
+  host.send({ type: 'CHAT', text: '  waiting\troom talk  ' })
+  const [hostLobbyChat, guestLobbyChat] = await Promise.all([
+    host.waitType('CHAT', message => message.text === 'waiting room talk'),
+    guest.waitType('CHAT', message => message.text === 'waiting room talk'),
+  ])
+  for (const message of [hostLobbyChat, guestLobbyChat]) {
+    assert.equal(message.playerId, hostId)
+    assert.equal(message.version, PROTOCOL_VERSION)
+    assert.equal(typeof message.ts, 'number')
+    assert(!('state' in message), 'ephemeral CHAT must not include room/game state')
+  }
+  // A lobby message takes the same reaction slot as an emote; drain the shared
+  // cooldown so the next block measures emote validation, not this message.
+  await sleep(750)
+  ok('T7a CHAT is strict, authenticated, and relayed in the waiting room')
 
   host.send({ type: 'EMOTE', emote: '<script>' })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
