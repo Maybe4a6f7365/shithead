@@ -107,10 +107,6 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
             <button type="button" onClick={() => setLegalOpen('privacy')}>Privacy</button>
             <button type="button" onClick={() => setLegalOpen('imprint')}>Impressum</button>
           </nav>
-          <div className="landing-built-by">
-            <span>built by</span>
-            <a href="https://schalt-werk.com" target="_blank" rel="noopener noreferrer">Schaltwerk</a>
-          </div>
         </div>
       </footer>
 

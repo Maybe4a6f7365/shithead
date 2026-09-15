@@ -29,19 +29,22 @@ describe('landing legal information', () => {
     expect(screen.getByText(/verantwortlich für den inhalt nach § 18 abs\. 2 mstv/i)).toBeTruthy()
     expect(screen.getByText(/verbraucherschlichtungsstelle/i)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'kontakt@schalt-werk.com' }).getAttribute('href')).toBe('mailto:kontakt@schalt-werk.com')
-    expect(screen.getAllByRole('link', { name: /schalt-werk\.com/i }).map((a) => a.getAttribute('href'))).toContain('https://schalt-werk.com')
+    // The schalt-werk.com site is no longer hosted, so the Impressum carries no
+    // link to it; the DDG-required contact stays.
+    expect(screen.queryByRole('link', { name: 'schalt-werk.com' })).toBeNull()
 
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Impressum' })).toBeNull())
     expect(trigger).toBe(document.activeElement)
   })
 
-  it('credits Schaltwerk in the footer as a plain wordmark link', () => {
+  it('carries no built-by credit now that schalt-werk.com is offline', () => {
     const { container } = render(<LandingScreen onPlayOnline={() => {}} onPassAndPlay={() => {}} />)
-    const credit = screen.getByRole('link', { name: 'Schaltwerk' })
-    expect(credit.getAttribute('href')).toBe('https://schalt-werk.com')
-    expect(credit.getAttribute('rel')).toBe('noopener noreferrer')
-    expect(container.querySelector('.landing-built-by svg')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Schaltwerk' })).toBeNull()
+    expect(container.querySelector('.landing-built-by')).toBeNull()
+    expect(container.textContent).not.toContain('built by')
+    // The information nav is the footer's whole job now.
+    expect(screen.getByRole('navigation', { name: 'Information' })).toBeTruthy()
   })
 
   it('keeps keyboard focus inside the legal dialog', () => {

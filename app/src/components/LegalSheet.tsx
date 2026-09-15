@@ -149,9 +149,7 @@ function Imprint() {
 
       <h3>Kontakt</h3>
       <p>
-        E-Mail: <a href="mailto:kontakt@schalt-werk.com">kontakt@schalt-werk.com</a><br />
-        Webseite:{' '}
-        <a href="https://schalt-werk.com" target="_blank" rel="noreferrer">schalt-werk.com</a>
+        E-Mail: <a href="mailto:kontakt@schalt-werk.com">kontakt@schalt-werk.com</a>
       </p>
 
       <h3>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h3>
