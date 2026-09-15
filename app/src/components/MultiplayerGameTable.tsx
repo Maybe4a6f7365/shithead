@@ -294,6 +294,8 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
           viewerActive={false}
           spectating
           actionsEnabled={false}
+          reactionsEnabled={canSendRoomAction}
+          viewerName={playerName}
           error={notice}
           onPlay={() => false}
           onPickUp={() => false}
@@ -312,8 +314,12 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
           connectionBadge={badge}
           seatOffline={id => offlineSeats.has(id)}
           latestEmote={latestEmote}
+          onSendEmote={sendEmote}
           latestBroadcast={latestBroadcast}
+          onSendBroadcast={sendBroadcast}
           latestChat={latestChat}
+          onSendChat={sendChat}
+          recentCustomMessages={recentCustomMessages}
           latestSystemEvent={latestSystemEvent}
         />
         {spectatorGameOver}

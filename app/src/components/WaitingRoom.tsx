@@ -25,15 +25,19 @@ import {
   SystemEventFeedback,
 } from './EmoteButton'
 
-/** Resolve a display name for a reaction event from authoritative roster state. */
+/**
+ * Resolve a display name for a reaction event from authoritative roster state,
+ * falling back to the server's stamp for a speaker who is not on the roster —
+ * a queued watcher never appears in a room summary.
+ */
 function playerNameForEvent(
-  event: { playerId: string } | null | undefined,
+  event: { playerId: string; playerName?: string } | null | undefined,
   room: Pick<RoomSummary, 'players'>,
   fallbackId: string,
 ): string | undefined {
   if (!event) return undefined
   const found = room.players.find(p => p.id === event.playerId)
-  return found?.name ?? (event.playerId === fallbackId ? 'You' : undefined)
+  return found?.name ?? event.playerName ?? (event.playerId === fallbackId ? 'You' : undefined)
 }
 
 /** The one rule that decides what you see. Exported for the regression test. */

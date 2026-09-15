@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Card, GameState, Player } from '../../engine'
+import { REACTION_OPTIONS } from '../reactionCatalog'
 import { TableScreen } from '../TableScreen'
 
 beforeAll(() => {
@@ -154,6 +155,89 @@ describe('spectator table', () => {
       expect(screen.queryByRole('img', { name: privateLabel })).toBeNull()
     }
     expect(screen.getAllByRole('img', { name: /hidden face-up card/i })).toHaveLength(2)
+  })
+
+  it('lets a queued watcher react without opening any play affordance', async () => {
+    const onSendEmote = vi.fn()
+    const { container } = render(
+      <TableScreen
+        state={spectatorState()}
+        viewerId="queued-spectator"
+        viewerActive={false}
+        spectating
+        actionsEnabled={false}
+        reactionsEnabled
+        viewerName="Watcher"
+        onSendEmote={onSendEmote}
+        soundOn={false}
+        {...tableCallbacks}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Open reactions' })
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByRole('button', { name: REACTION_OPTIONS[0].label }))
+    expect(onSendEmote).toHaveBeenCalledWith(REACTION_OPTIONS[0].id)
+
+    // Talking must not hand a watcher any part of the game.
+    expect(container.querySelector('.hand-fan-shell')).toBeNull()
+    expect(container.querySelector('.tableau-well')).toBeNull()
+    expect(container.querySelector('.action-bar')).toBeNull()
+    expect(tableCallbacks.onPlay).not.toHaveBeenCalled()
+    expect(tableCallbacks.onPickUp).not.toHaveBeenCalled()
+  })
+
+  it('drops a watcher reaction while the transport is down', async () => {
+    const onSendEmote = vi.fn()
+    render(
+      <TableScreen
+        state={spectatorState()}
+        viewerId="queued-spectator"
+        viewerActive={false}
+        spectating
+        actionsEnabled={false}
+        reactionsEnabled={false}
+        viewerName="Watcher"
+        onSendEmote={onSendEmote}
+        soundOn={false}
+        {...tableCallbacks}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+    fireEvent.click(screen.getByRole('button', { name: REACTION_OPTIONS[0].label }))
+    expect(onSendEmote).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByText('Reconnecting — reaction not sent')).toBeTruthy())
+  })
+
+  it('names the watcher on their own reaction, which the roster cannot resolve', async () => {
+    const { container } = render(
+      <TableScreen
+        state={spectatorState()}
+        viewerId="queued-spectator"
+        viewerActive={false}
+        spectating
+        actionsEnabled={false}
+        reactionsEnabled
+        viewerName="Watcher"
+        onSendEmote={vi.fn()}
+        soundOn={false}
+        {...tableCallbacks}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open reactions' }))
+    fireEvent.click(screen.getByRole('button', { name: REACTION_OPTIONS[0].label }))
+
+    const feedback = await waitFor(() => {
+      const found = container.querySelector('.emote-feedback')
+      expect(found).toBeTruthy()
+      return found!
+    })
+    expect(feedback.textContent).toContain('Watcher')
+    expect(feedback.textContent).not.toContain('Player')
+    expect(feedback.getAttribute('data-speaker-role')).toBe('spectator')
+    expect(feedback.querySelector('.reaction-feedback__watching')?.textContent).toContain('watching')
   })
 
   it('adds the tiny watcher count only to a seated player, with singular and plural labels', () => {

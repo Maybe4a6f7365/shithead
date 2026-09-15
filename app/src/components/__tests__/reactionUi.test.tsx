@@ -218,6 +218,71 @@ describe('reaction receipts and table events', () => {
     expect(screen.getByRole('status').querySelector('img')).toBeNull()
   })
 
+  it('tags a queued watcher and leaves a seated player untagged', () => {
+    const { container, rerender } = render(
+      <ChatFeedback
+        event={{ playerId: 'watcher-1', text: 'deal me in', ts: 20, playerName: 'Mira', role: 'spectator' }}
+        playerName="Mira"
+      />,
+    )
+    expect(screen.getByRole('status').getAttribute('data-speaker-role')).toBe('spectator')
+    expect(container.querySelector('.reaction-feedback__watching')?.textContent).toContain('watching')
+
+    rerender(
+      <ChatFeedback
+        event={{ playerId: 'seated-1', text: 'my turn', ts: 21, playerName: 'Ada', role: 'player' }}
+        playerName="Ada"
+      />,
+    )
+    expect(screen.getByRole('status').getAttribute('data-speaker-role')).toBe('player')
+    expect(container.querySelector('.reaction-feedback__watching')).toBeNull()
+
+    // The accessible sentence carries the tag too, not just the visual bubble.
+    rerender(
+      <EmoteFeedback
+        event={{ playerId: 'watcher-1', emote: 'fire', ts: 22, playerName: 'Mira', role: 'spectator' }}
+        playerName="Mira"
+      />,
+    )
+    expect(screen.getByRole('status').textContent).toContain('Mira, watching, reacted: Fire')
+  })
+
+  it('names a speaker the dealt roster cannot resolve from the server stamp', () => {
+    const me: Player = {
+      id: 'me', name: 'Me', hand: [{ id: 'five', rank: '5', suit: '♣' }],
+      faceUp: [], faceDown: [], isOut: false,
+    }
+    const state: GameState = {
+      phase: 'play', rules: { includeJokers: false, winnerSwapsFaceUp: false, deckCount: 1 },
+      players: [me], stock: [], pile: [], currentPlayerIdx: 0,
+      playDirection: 1, turnCount: 1, winnerId: null, loserId: null,
+      pendingTribute: null, pendingQuickFollowUp: null, log: [], seq: 1,
+    }
+    const { container } = render(
+      <TableScreen
+        state={state}
+        viewerId="me"
+        viewerActive
+        onPlay={vi.fn()}
+        onPickUp={vi.fn()}
+        onLeave={vi.fn()}
+        onOpenRules={vi.fn()}
+        soundOn={false}
+        onToggleSound={vi.fn()}
+        latestChat={{
+          playerId: 'watcher-1', text: 'deal me in', ts: 30,
+          playerName: 'Mira', role: 'spectator',
+        }}
+      />,
+    )
+
+    const bubble = container.querySelector('.reaction-feedback--broadcast')
+    expect(bubble?.textContent).toContain('Mira')
+    expect(bubble?.textContent).toContain('deal me in')
+    expect(bubble?.textContent).not.toContain('Player')
+    expect(bubble?.getAttribute('data-speaker-role')).toBe('spectator')
+  })
+
   it('labels player-left as Table while Ondra looks like a normal player broadcast', () => {
     const left: SystemEvent = {
       kind: 'player-left', playerId: 'p1', playerName: 'Mira',

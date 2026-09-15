@@ -71,6 +71,14 @@ describe('isClientMsg', () => {
     expect(isClientMsg({ type: 'CHAT', text: '\u200B\u2060\uFEFF' })).toBe(false)
     expect(isClientMsg({ type: 'CHAT', text: '\u200D\uFE0F' })).toBe(false)
     expect(isClientMsg({ type: 'CHAT', text: 'hi', payload: {} })).toBe(false)
+    // Speaker attribution is stamped by the relay. A client that tries to name
+    // itself — or to pose as a seated player — is rejected at the boundary.
+    expect(isClientMsg({ type: 'CHAT', text: 'hi', playerName: 'Ada' })).toBe(false)
+    expect(isClientMsg({ type: 'CHAT', text: 'hi', role: 'player' })).toBe(false)
+    expect(isClientMsg({ type: 'EMOTE', emote: 'fire', playerName: 'Ada' })).toBe(false)
+    expect(isClientMsg({ type: 'EMOTE', emote: 'fire', role: 'player' })).toBe(false)
+    expect(isClientMsg({ type: 'BROADCAST', broadcast: 'shrug', playerName: 'Ada' })).toBe(false)
+    expect(isClientMsg({ type: 'BROADCAST', broadcast: 'shrug', role: 'player' })).toBe(false)
     expect(isClientMsg({ type: 'CHAT', text: 'hi', version: PROTOCOL_VERSION + 1 })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE', emote: '👍' })).toBe(false)
     expect(isClientMsg({ type: 'EMOTE', emote: 'thumbs-up<script>' })).toBe(false)

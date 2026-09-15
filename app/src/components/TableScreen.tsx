@@ -61,6 +61,13 @@ export interface TableScreenProps {
   spectatorCount?: number
   /** False while multiplayer is waiting for a fresh post-auth snapshot. */
   actionsEnabled?: boolean
+  /** Reactions are gated separately from gameplay: a queued watcher may talk at
+      the table with every play action dead. Defaults to actionsEnabled. */
+  reactionsEnabled?: boolean
+  /** Labels this viewer's own optimistic reaction, which renders before (and
+      instead of) the server echo. Needed when the dealt roster cannot name the
+      viewer — a queued watcher is absent from state.players. */
+  viewerName?: string
   /** Synchronous transport-epoch guard for the disconnect transition before
       the actionsEnabled render catches up. */
   canSubmitAction?: () => boolean
@@ -164,6 +171,20 @@ function sameSelection(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
+/**
+ * Name the speaker behind a table message. The dealt roster wins so a seated
+ * player always shows their live name, then the server's stamp, which is the
+ * only way to name a queued watcher: watchers are deliberately absent from both
+ * the game state and the room summary until they take a seat.
+ */
+export function speakerNameForEvent(
+  event: { playerId: string; playerName?: string } | null,
+  state: Pick<GameState, 'players'>,
+): string | undefined {
+  if (!event) return undefined
+  return state.players.find(player => player.id === event.playerId)?.name ?? event.playerName
+}
+
 export function isMatchingSelfEmoteEcho(
   pending: { emote: EmoteId; sentAt: number } | null,
   latest: EmoteEvent,
@@ -206,7 +227,7 @@ function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }):
 
 export function TableScreen({
   state, viewerId, viewerActive, spectating = false, spectatorCount = 0,
-  actionsEnabled = true, canSubmitAction = () => true,
+  actionsEnabled = true, reactionsEnabled, viewerName, canSubmitAction = () => true,
   initialSelectionDraft = [], onSelectionDraftChange,
   error, onPlay, onQuickFollowUp,
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
@@ -220,6 +241,7 @@ export function TableScreen({
   recentCustomMessages = [], onLocalChatAccepted, latestSystemEvent,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
+  const canReact = reactionsEnabled ?? actionsEnabled
   const current = state.players[state.currentPlayerIdx]
   const top = getTopCard(state)
   const topRank = getTopRank(state)
@@ -566,6 +588,12 @@ export function TableScreen({
     later(2200, () => setFlash(value => value === 'Quick match skipped — take your turn' ? null : value))
   }
 
+  // Your own emote/broadcast renders locally and suppresses the server echo, so
+  // the optimistic event has to carry the attribution the echo would have
+  // brought. Without it a watcher — absent from the dealt roster — would watch
+  // their own reaction come back labelled "Player" and untagged.
+  const selfAttribution = { playerName: viewerName, role: spectating ? 'spectator' as const : 'player' as const }
+
   const explainReactionReconnect = () => {
     const text = 'Reconnecting — reaction not sent'
     setFlash(text)
@@ -576,12 +604,12 @@ export function TableScreen({
   const sendEmote = (emote: EmoteId) => {
     const sentAt = Date.now()
     if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return
-    if (!actionsEnabled || onSendEmote?.(emote) === false) {
+    if (!canReact || onSendEmote?.(emote) === false) {
       explainReactionReconnect()
       return
     }
     lastReactionSentAtByViewer.current.set(viewerId, sentAt)
-    const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt }
+    const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt, ...selfAttribution }
     if (onSendEmote) pendingSelfEmote.current = { emote, sentAt }
     setDisplayedEmote(event)
   }
@@ -589,12 +617,12 @@ export function TableScreen({
   const sendBroadcast = (broadcast: BroadcastId) => {
     const sentAt = Date.now()
     if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return
-    if (!actionsEnabled || onSendBroadcast?.(broadcast) === false) {
+    if (!canReact || onSendBroadcast?.(broadcast) === false) {
       explainReactionReconnect()
       return
     }
     lastReactionSentAtByViewer.current.set(viewerId, sentAt)
-    const event: BroadcastEvent = { playerId: viewerId, broadcast, ts: sentAt }
+    const event: BroadcastEvent = { playerId: viewerId, broadcast, ts: sentAt, ...selfAttribution }
     if (onSendBroadcast) pendingSelfBroadcast.current = { broadcast, sentAt }
     setDisplayedBroadcast(event)
   }
@@ -604,7 +632,7 @@ export function TableScreen({
     if (!isValidChatText(text)) return false
     const sentAt = Date.now()
     if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return false
-    if (!actionsEnabled) {
+    if (!canReact) {
       explainReactionReconnect()
       return false
     }
@@ -631,7 +659,7 @@ export function TableScreen({
     // a message that other players never received. Single-player remains
     // local-only and can render immediately.
     if (onSendChat) return true
-    const event: ChatEvent = { playerId: viewerId, text, ts: sentAt }
+    const event: ChatEvent = { playerId: viewerId, text, ts: sentAt, ...selfAttribution }
     setDisplayedChat(event)
     onLocalChatAccepted?.(text)
     return true
@@ -785,15 +813,9 @@ export function TableScreen({
   const endgameZoneLive = (
     viewerActive || canBurnIn || (canPreselectVisible && zone === 'faceUp')
   ) && (zone === 'faceUp' || zone === 'faceDown')
-  const emotePlayer = displayedEmote
-    ? state.players.find(player => player.id === displayedEmote.playerId)?.name
-    : undefined
-  const broadcastPlayer = displayedBroadcast
-    ? state.players.find(player => player.id === displayedBroadcast.playerId)?.name
-    : undefined
-  const chatPlayer = displayedChat
-    ? state.players.find(player => player.id === displayedChat.playerId)?.name
-    : undefined
+  const emotePlayer = speakerNameForEvent(displayedEmote, state)
+  const broadcastPlayer = speakerNameForEvent(displayedBroadcast, state)
+  const chatPlayer = speakerNameForEvent(displayedChat, state)
   const visibleSystemEvent = latestSystemEvent?.kind === 'ondra-mode' && state.phase === 'gameOver'
     ? null
     : latestSystemEvent ?? null
@@ -842,7 +864,11 @@ export function TableScreen({
             </span>
           </div>
           <div className="game-tools table-tools" aria-label="Table controls">
-            {!spectating && (
+            {/* A watcher cannot play but the table still hears them, so the
+                composer sits where a player expects it — and where its picker
+                panel is anchored. A read-only render (no send handlers wired)
+                stays read-only. */}
+            {(!spectating || Boolean(onSendEmote || onSendBroadcast || onSendChat)) && (
               <EmoteButton
                 key={viewerId}
                 onSend={sendEmote}

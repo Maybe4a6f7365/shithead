@@ -14,6 +14,7 @@ import type {
   EmoteEvent,
   EmoteId,
   SystemEvent,
+  ViewerRole,
 } from '../engine/protocol'
 import { isValidChatText, MAX_CHAT_MESSAGE_LENGTH, normalizeChatText } from '../engine/protocol'
 import {
@@ -487,10 +488,21 @@ function useTimedVisibility(key: string | null, duration: number) {
   return visible
 }
 
+/**
+ * A queued watcher talks on the same channels as a seated player, so every
+ * bubble says which one you are hearing. The marker is derived from the
+ * server-stamped role: a locally constructed event has none and stays untagged.
+ */
+const WATCHING_LABEL = 'watching'
+
+const isWatching = (event: { role?: ViewerRole } | null | undefined) => event?.role === 'spectator'
+
 export function EmoteFeedback({ event, playerName }: { event: EmoteEvent | null; playerName?: string }) {
   const reduceMotion = useReducedMotion()
   const visible = useTimedVisibility(event ? `${event.playerId}:${event.emote}:${event.ts}` : null, 2100)
   const option = event ? REACTION_BY_ID[event.emote] : null
+  const watching = isWatching(event)
+  const name = playerName ?? 'Player'
 
   return (
     <AnimatePresence>
@@ -500,14 +512,20 @@ export function EmoteFeedback({ event, playerName }: { event: EmoteEvent | null;
             className="emote-feedback reaction-feedback reaction-feedback--emoji"
             role="status"
             aria-live="polite"
+            data-speaker-role={watching ? 'spectator' : 'player'}
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.82 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 1.03 }}
             transition={{ duration: reduceMotion ? 0.01 : 0.24, ease: [0.2, 0.8, 0.2, 1] }}
           >
-            <span className="visually-hidden">{playerName ?? 'Player'} reacted: {option.label}</span>
+            <span className="visually-hidden">
+              {name}{watching ? `, ${WATCHING_LABEL},` : ''} reacted: {option.label}
+            </span>
             <img className="emote-feedback__art" src={option.asset} alt="" aria-hidden="true" draggable="false" />
-            <span className="emote-feedback__name" aria-hidden="true">{playerName ?? 'Player'}</span>
+            <span className="emote-feedback__name" aria-hidden="true">
+              {name}
+              {watching && <span className="reaction-feedback__watching"> · {WATCHING_LABEL}</span>}
+            </span>
           </motion.div>
         </div>
       )}
@@ -522,6 +540,7 @@ export function BroadcastFeedback({ event, playerName }: { event: BroadcastEvent
     <SpeechFeedback
       eventKey={event && option ? `${event.playerId}:${event.broadcast}:${event.ts}` : null}
       playerName={playerName ?? 'Player'}
+      watching={isWatching(event)}
       text={option?.text ?? ''}
     />
   )
@@ -532,15 +551,17 @@ export function ChatFeedback({ event, playerName }: { event: ChatEvent | null; p
     <SpeechFeedback
       eventKey={event ? `${event.playerId}:${event.text}:${event.ts}` : null}
       playerName={playerName ?? 'Player'}
+      watching={isWatching(event)}
       text={event?.text ?? ''}
     />
   )
 }
 
-function SpeechFeedback({ eventKey, playerName, text }: {
+function SpeechFeedback({ eventKey, playerName, text, watching = false }: {
   eventKey: string | null
   playerName: string
   text: string
+  watching?: boolean
 }) {
   const reduceMotion = useReducedMotion()
   const visible = useTimedVisibility(eventKey, 3100)
@@ -553,12 +574,16 @@ function SpeechFeedback({ eventKey, playerName, text }: {
             className="reaction-feedback reaction-feedback--broadcast"
             role="status"
             aria-live="polite"
+            data-speaker-role={watching ? 'spectator' : 'player'}
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.98 }}
             transition={{ duration: reduceMotion ? 0.01 : 0.2, ease: [0.2, 0.8, 0.2, 1] }}
           >
-            <span className="reaction-feedback__speaker">{playerName}</span>
+            <span className="reaction-feedback__speaker">
+              <span className="reaction-feedback__speaker-name">{playerName}</span>
+              {watching && <span className="reaction-feedback__watching">· {WATCHING_LABEL}</span>}
+            </span>
             <span className="reaction-feedback__message" dir="auto">{text}</span>
           </motion.div>
         </div>

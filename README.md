@@ -16,7 +16,7 @@ This document is the technical source of truth for the shipped game. Rule behavi
 | Area | Current implementation |
 |---|---|
 | Offline play | 2–5 seats on one device; any mix of humans and Easy/Medium/Hard AI |
-| Online play | Private rooms for 2–5 human players, plus a five-person next-round spectator queue |
+| Online play | Private rooms for 2–5 human players, plus a five-person next-round spectator queue who can react and chat while they wait |
 | Waiting room | Authenticated players can react with emojis, preset broadcasts, and custom messages before the deal starts, subject to the same 3-per-10s custom-message burst limit and shared reaction cooldown used during play |
 | Round configuration | 1–3 decks, Jokers on/off, optional previous-winner face-up exchange |
 | Rules | 2 reset, 3 mirror, 7 low, stacked 8 skip, 10 burn except after 7, Joker burn, cumulative four-plus burn, out-of-turn burn-in, exact matching-card quick follow-up |
@@ -303,6 +303,8 @@ Every current client frame is centrally stamped with `version: 8`. A present but
 | `CHAT` | Ephemeral custom table message during `play`/`endgame`, up to 200 UTF-16 code units before and after normalization |
 | `EMOTE` | One of the finite `EMOTE_IDS` catalog (28 locally rendered reactions) |
 | `BROADCAST` | One of nine fixed text-reaction identifiers |
+
+`CHAT`, `EMOTE`, and `BROADCAST` — together with `PING` and `LEAVE_ROOM` — are the complete set a queued spectator may send. Every other message above is rejected for a watcher at one dispatcher boundary, so a new gameplay message can never become reachable for them by default.
 | `PING` | Manual/smoke-test liveness request |
 
 The 12-card action limit is the maximum number of ordinary same-rank copies across three decks. Protocol validation also enforces unique IDs, nonblank names up to 32 characters, room-code shape, rule keys, deck range, chat length, and the exact reaction/broadcast catalogs. The shipped name fields deliberately limit visible names to 12 characters.
@@ -317,9 +319,9 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 | `GAME_STATE` | Authoritative state serialized specifically for one viewer |
 | `ERROR` | Stable error code and contextual message |
 | `PLAYER_LEFT` | Explicit leave notification |
-| `CHAT` | Ephemeral canonical custom-message relay with player ID and timestamp |
-| `EMOTE` | Ephemeral reaction with player ID and timestamp |
-| `BROADCAST` | Ephemeral fixed-text reaction with player ID and timestamp |
+| `CHAT` | Ephemeral canonical custom-message relay with member ID, server-stamped speaker name and role, and timestamp |
+| `EMOTE` | Ephemeral reaction with member ID, server-stamped speaker name and role, and timestamp |
+| `BROADCAST` | Ephemeral fixed-text reaction with member ID, server-stamped speaker name and role, and timestamp |
 | `SYSTEM_EVENT` | Typed, server-originated event for an explicit leave or a server-only round easter egg |
 | `PONG` | Liveness response |
 
@@ -337,7 +339,7 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 | Pending quick follow-up | Exact owner-only entitlement | `null` | Always `null` | Terminal/irrelevant |
 | Action log | Present, subject to normal viewer masking | Present | Explicit safe-event allowlist only; card-bearing entries omitted | Present |
 
-Room summaries never contain cards or spectator identities. They expose current player identities, connected/out status, zone counts, public vote state, and aggregate spectator counts only. Unauthenticated or rejected sockets receive no roster, chat, reaction, preset-broadcast, system-event, or game broadcasts.
+Room summaries never contain cards or spectator identities. They expose current player identities, connected/out status, zone counts, public vote state, and aggregate spectator counts only. A watcher's display name reaches the table on one path and one path only: the server stamps it onto a `CHAT`, `EMOTE`, or `BROADCAST` that watcher chose to send, which is what lets the table label a speaker who is deliberately absent from the roster. A silent watcher stays anonymous. Unauthenticated or rejected sockets receive no roster, chat, reaction, preset-broadcast, system-event, or game broadcasts.
 
 ### Ordering and reconnect behavior
 
@@ -372,7 +374,7 @@ ABCDEFGHJKLMNPQRSTUVWXYZ23456789
 
 Ambiguous characters are excluded. Allocation uses `env.ROOM.idFromName(code)`, giving one authoritative Durable Object per code. `POST /api/room/new` atomically stores a two-minute claim; `CREATE_ROOM` must consume that claim, closing the direct-WebSocket creation and check-then-act races.
 
-Online rooms default to five maximum seats. Before a round, a join takes an open player seat. During `rearrange`, `tribute`, `play`, or `endgame`, a join becomes an authenticated read-only spectator without host approval. At `gameOver`, a newcomer may take an open seat only when no spectator is already queued; otherwise the newcomer joins the back of the spectator queue. This preserves FIFO admission. A direct-seat newcomer still receives the strict spectator-masked game-over snapshot until participating in the next deal. The queue is FIFO, capped at five, and preserves a disconnected watcher's position for two minutes before an admission/resume/start operation expires the abandoned identity and token. Spectators receive public table state and reactions but cannot send gameplay, chat, reactions, votes, rule changes, host actions, or kicks.
+Online rooms default to five maximum seats. Before a round, a join takes an open player seat. During `rearrange`, `tribute`, `play`, or `endgame`, a join becomes an authenticated read-only spectator without host approval. At `gameOver`, a newcomer may take an open seat only when no spectator is already queued; otherwise the newcomer joins the back of the spectator queue. This preserves FIFO admission. A direct-seat newcomer still receives the strict spectator-masked game-over snapshot until participating in the next deal. The queue is FIFO, capped at five, and preserves a disconnected watcher's position for two minutes before an admission/resume/start operation expires the abandoned identity and token. Spectators receive public table state and may talk at it — custom messages, emotes, and preset broadcasts, under exactly the same limits as a seated player — but cannot send gameplay, votes, rule changes, host actions, or kicks.
 
 An initial start is host-only, needs at least two roster members, and requires every current seat online. After `gameOver`, every online roster member must explicitly vote Yes or No and the host must vote Yes. Starting keeps connected Yes voters first, then promotes connected spectators in FIFO order until the room reaches its seat cap. A host plus one connected queued spectator therefore forms a valid two-player rematch. No voters and offline non-voters are released, while an offline Yes vote deliberately reserves its seat and blocks the deal until that player returns. Excess or briefly disconnected spectators remain queued. Released tokens and spam buckets are cleared and any live released sockets receive a terminal notice and close before the new room/game broadcasts. Vote changes have an identity-scoped cooldown across reconnects, and the general socket limiter measures bursts before messages enter the serialized storage queue.
 
@@ -433,10 +435,10 @@ The token and server-assigned viewer role are stored in browser `localStorage`, 
 |---|---|
 | Inbound WebSocket frame | Maximum 16,384 JavaScript string code units; oversize closes with code `1009` |
 | Message rate | 20 frames/second/socket sliding window |
-| Reaction cadence | One accepted `EMOTE` or `BROADCAST` per 700 ms/socket; the UI uses a shared 800 ms gate |
+| Reaction cadence | One accepted `EMOTE` or `BROADCAST` per 700 ms per member identity, seated or queued; the UI uses a shared 800 ms gate |
 | Rematch vote changes | One accepted changed vote per 750 ms/player identity; unchanged repeats are no-ops |
 | Player offline kick | Host only after 20,000 continuous server-measured milliseconds; reconnect resets the timer |
-| Spectator queue | Five identities; disconnected queue positions expire after a two-minute resume grace |
+| Spectator queue | Five identities; disconnected queue positions expire after a two-minute resume grace. Watchers talk on the same per-identity reaction and custom-message budgets as players |
 | Socket cap | 12 simultaneous sockets per room: five players, five spectators, and two handshake/duplicate-tab slots |
 | Authentication timeout | Anonymous socket closes after ten seconds |
 | Room allocation rate | 10 new rooms/minute/IP, best effort per Worker isolate |
@@ -690,7 +692,7 @@ Configured V8 thresholds apply to engine source: 80% lines/functions/statements 
 
 ### Live local-Worker adversarial suite
 
-The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, player and spectator state masking, token rotation/hijack rejection, read-only spectator authorization, queue promotion, offline-kick timing, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, authoritative round results, throttled rematch votes and secure subset deals, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
+The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, player and spectator state masking, token rotation/hijack rejection, spectator authorization (every gameplay message rejected, the three table-talk channels relayed with a server-stamped speaker name and role under the same limits as a seated player), queue promotion, offline-kick timing, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, authoritative round results, throttled rematch votes and secure subset deals, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
 
 ```bash
 cd app

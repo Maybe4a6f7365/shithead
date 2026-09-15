@@ -374,8 +374,19 @@ async function main() {
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
   host.send({ type: 'CHAT', text: '   ' })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
-  host.send({ type: 'CHAT', text: 'not during a game' })
-  await host.waitType('ERROR', isError('INVALID_MOVE'))
+  // The waiting room hosts table talk, so a pre-deal CHAT is relayed rather
+  // than rejected, carrying the speaker attribution the roster already knows.
+  host.send({ type: 'CHAT', text: 'before the deal' })
+  const [hostLobbyChat, guestLobbyChat] = await Promise.all([
+    host.waitType('CHAT', message => message.text === 'before the deal'),
+    guest.waitType('CHAT', message => message.text === 'before the deal'),
+  ])
+  for (const message of [hostLobbyChat, guestLobbyChat]) {
+    assert.equal(message.playerId, hostId)
+    assert.equal(message.playerName, 'Ondřej')
+    assert.equal(message.role, 'player')
+    assert(!('state' in message), 'ephemeral lobby CHAT must not include room/game state')
+  }
   const hostLogBeforeUnauthChat = host.rawLog.length
   noToken.send({ type: 'CHAT', text: 'unauthenticated' })
   await sleep(100)
@@ -383,7 +394,10 @@ async function main() {
     !host.rawLog.slice(hostLogBeforeUnauthChat).some(raw => JSON.parse(raw).type === 'CHAT'),
     'unauthenticated CHAT was relayed',
   )
-  ok('T7a CHAT is strict, authenticated, and restricted to active games')
+  ok('T7a CHAT is strict and authenticated, and the waiting room may hold table talk')
+
+  // That accepted lobby message took the host's shared reaction slot.
+  await sleep(Math.max(0, hostLobbyChat.ts + 750 - Date.now()))
 
   host.send({ type: 'EMOTE', emote: '<script>' })
   await host.waitType('ERROR', message => /invalid message/i.test(message.message))
@@ -726,11 +740,20 @@ async function main() {
   const spectatorActionSeq = host.latestGameState.seq
   const hostLogBeforeSpectatorActions = host.rawLog.length
   const guestLogBeforeSpectatorActions = guest.rawLog.length
+  // Every gameplay message stays shut for a watcher. The three table-talk
+  // channels below are the complete exception.
   const rejectedSpectatorActions = [
     { type: 'PLAY', cards: [{ id: 'spectator-forgery', rank: 'A', suit: '♠' }] },
-    { type: 'CHAT', text: 'spectator chat must not relay' },
-    { type: 'EMOTE', emote: 'fire' },
-    { type: 'BROADCAST', broadcast: 'shrug' },
+    { type: 'QUICK_FOLLOW_UP', cardId: 'spectator-forgery', expectedSeq: spectatorActionSeq },
+    { type: 'BURN_IN', cards: [{ id: 'spectator-forgery', rank: 'A', suit: '♠' }] },
+    { type: 'PICK_UP' },
+    { type: 'REARRANGE', handIdx: 0, upIdx: 0 },
+    { type: 'READY' },
+    { type: 'START_GAME' },
+    { type: 'SET_RULES', rules: { deckCount: 3 } },
+    { type: 'SET_EASTER_EGG', enabled: true },
+    { type: 'TRIBUTE_SWAP', winnerCardId: 'spectator-forgery-a', loserCardId: 'spectator-forgery-b' },
+    { type: 'TRIBUTE_SKIP' },
     { type: 'REMATCH_VOTE', vote: true },
     { type: 'KICK_OFFLINE_PLAYER', playerId: guestId },
   ]
@@ -746,12 +769,81 @@ async function main() {
     [guest, guestLogBeforeSpectatorActions],
   ]) {
     const relayed = peer.rawLog.slice(logStart).map(raw => JSON.parse(raw)).filter(message =>
-      (message.type === 'CHAT' && message.text === 'spectator chat must not relay') ||
-      (message.type === 'EMOTE' && message.playerId === spectatorId) ||
-      (message.type === 'BROADCAST' && message.playerId === spectatorId)
+      ['CHAT', 'EMOTE', 'BROADCAST'].includes(message.type) && message.playerId === spectatorId
     )
-    assert.deepEqual(relayed, [], `${peer.label} received a spectator reaction`)
+    assert.deepEqual(relayed, [], `${peer.label} received a reaction from a rejected spectator action`)
   }
+  ok('T11a-guard every gameplay message stays rejected for a queued watcher')
+
+  // ---- T11a-talk: a watcher may still talk. The relay carries the name and role
+  // the server resolved, because room summaries never name a spectator.
+  const spectatorSaid = [
+    { sent: { type: 'CHAT', text: 'dealer, my seat please' }, match: message => message.text === 'dealer, my seat please' },
+    { sent: { type: 'EMOTE', emote: 'fire' }, match: message => message.emote === 'fire' },
+    { sent: { type: 'BROADCAST', broadcast: 'shrug' }, match: message => message.broadcast === 'shrug' },
+  ]
+  for (const { sent, match } of spectatorSaid) {
+    spectator.send({ ...sent, version: PROTOCOL_VERSION })
+    const relayed = await Promise.all([
+      host.waitType(sent.type, message => message.playerId === spectatorId && match(message)),
+      guest.waitType(sent.type, message => message.playerId === spectatorId && match(message)),
+      spectator.waitType(sent.type, message => message.playerId === spectatorId && match(message)),
+    ])
+    for (const message of relayed) {
+      assert.equal(message.playerName, 'Watcher', `${sent.type} lost the server-stamped speaker name`)
+      assert.equal(message.role, 'spectator', `${sent.type} lost the server-stamped speaker role`)
+      assert.equal(typeof message.ts, 'number', `${sent.type} must carry a server timestamp`)
+      assert(!('state' in message), `ephemeral ${sent.type} must not include room/game state`)
+    }
+    await sleep(750) // clear the shared reaction cooldown before the next channel
+  }
+  assert.equal(host.latestGameState.seq, spectatorActionSeq, 'a spectator reaction mutated the game')
+  const roomStateAfterSpectatorTalk = await host.waitType('ROOM_STATE').catch(() => null) ??
+    JSON.parse([...host.rawLog].reverse().find(raw => JSON.parse(raw).type === 'ROOM_STATE'))
+  assert(
+    !('spectators' in roomStateAfterSpectatorTalk.room),
+    'room summary exposed spectator identities after the spectator spoke',
+  )
+  assert(
+    !roomStateAfterSpectatorTalk.room.players.some(player => player.id === spectatorId),
+    'a talking spectator leaked into the seated roster',
+  )
+  ok('T11a-talk a queued watcher can chat/emote/broadcast with a server-stamped name and role')
+
+  // ---- T11a-limits: watchers are rate limited exactly like seated players.
+  const hostLogBeforeSpectatorFlood = host.rawLog.length
+  spectator.send({ type: 'CHAT', text: 'watcher burst 1', version: PROTOCOL_VERSION })
+  const firstWatcherBurst = await host.waitType(
+    'CHAT', message => message.playerId === spectatorId && message.text === 'watcher burst 1',
+  )
+  spectator.send({ type: 'EMOTE', emote: 'clap', version: PROTOCOL_VERSION })
+  await sleep(150)
+  assert(
+    !host.rawLog.slice(hostLogBeforeSpectatorFlood).map(raw => JSON.parse(raw)).some(message =>
+      message.type === 'EMOTE' && message.playerId === spectatorId && message.emote === 'clap'
+    ),
+    'a spectator bypassed the shared reaction cooldown by alternating channels',
+  )
+  // The T11a-talk message is already the first custom message in this window,
+  // so one more acceptance exhausts the budget of three.
+  await sleep(Math.max(0, firstWatcherBurst.ts + 750 - Date.now()))
+  spectator.send({ type: 'CHAT', text: 'watcher burst 2', version: PROTOCOL_VERSION })
+  const secondWatcherBurst = await host.waitType('CHAT', message =>
+    message.playerId === spectatorId && message.text === 'watcher burst 2'
+  )
+  await sleep(Math.max(0, secondWatcherBurst.ts + 750 - Date.now()))
+  const hostLogBeforeFourthWatcherChat = host.rawLog.length
+  spectator.send({ type: 'CHAT', text: 'watcher burst 4', version: PROTOCOL_VERSION })
+  const watcherRateLimit = await spectator.waitType('ERROR', isError('RATE_LIMITED'))
+  assert.match(watcherRateLimit.message, /limited to 3 every 10 seconds/i)
+  await sleep(100)
+  assert(
+    !host.rawLog.slice(hostLogBeforeFourthWatcherChat).map(raw => JSON.parse(raw)).some(message =>
+      message.type === 'CHAT' && message.text === 'watcher burst 4'
+    ),
+    'a spectator fourth custom message in the rolling window was relayed',
+  )
+  ok('T11a-limits watcher reactions share the seated cooldown and the 3-per-10s custom burst limit')
 
   await spectator.close()
   const spectatorOffline = await host.waitType(

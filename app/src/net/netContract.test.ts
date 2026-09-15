@@ -270,6 +270,45 @@ describe('RoomClient authentication ordering', () => {
     second.unmount()
   })
 
+  it('carries the server-stamped speaker name and role through every reaction channel', () => {
+    const { result, unmount } = renderHook(() => useMultiplayerRoom({
+      roomId: 'ABC123', playerName: 'Mira', intent: 'join',
+    }))
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.open())
+    act(() => socket.receive({
+      type: 'WELCOME', version: PROTOCOL_VERSION, playerId: 'seated-1', role: 'player',
+      resumeToken: 'token', room: roomSummary('play'),
+    }))
+
+    // A watcher is absent from room.players, so the stamp is the only way the
+    // table can name them. Dropping it here would silently relabel them.
+    act(() => socket.receive({
+      type: 'CHAT', version: PROTOCOL_VERSION,
+      playerId: 'watcher-1', text: 'deal me in', ts: 1, playerName: 'Mira', role: 'spectator',
+    }))
+    expect(result.current.latestChat).toMatchObject({
+      playerId: 'watcher-1', text: 'deal me in', playerName: 'Mira', role: 'spectator',
+    })
+
+    act(() => socket.receive({
+      type: 'EMOTE', version: PROTOCOL_VERSION,
+      playerId: 'watcher-1', emote: 'fire', ts: 2, playerName: 'Mira', role: 'spectator',
+    }))
+    expect(result.current.latestEmote).toMatchObject({
+      playerId: 'watcher-1', emote: 'fire', playerName: 'Mira', role: 'spectator',
+    })
+
+    act(() => socket.receive({
+      type: 'BROADCAST', version: PROTOCOL_VERSION,
+      playerId: 'seated-2', broadcast: 'shrug', ts: 3, playerName: 'Ada', role: 'player',
+    }))
+    expect(result.current.latestBroadcast).toMatchObject({
+      playerId: 'seated-2', broadcast: 'shrug', playerName: 'Ada', role: 'player',
+    })
+    unmount()
+  })
+
   it('promotes a spectator from ROOM_STATE membership without requiring another WELCOME', () => {
     const { result, unmount } = renderHook(() => useMultiplayerRoom({
       roomId: 'ABC123', playerName: 'Mira', intent: 'join',

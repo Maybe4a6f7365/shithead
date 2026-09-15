@@ -25,6 +25,8 @@
 //    EMOTE {emote}                           authenticated ephemeral reaction
 //    BROADCAST {broadcast}                   authenticated preset text reaction
 //    PING {}                                 keepalive
+//    (CHAT, EMOTE and BROADCAST are the only non-keepalive messages a queued
+//     watcher may send; every other type above is seated players only.)
 //  Server → Client:
 //    WELCOME {playerId, role, room, resumeToken} identity assigned; token is secret
 //    RESUME_FAILED {reason}                  resume credential rejected
@@ -32,9 +34,9 @@
 //    GAME_STATE {state, version?}            per-viewer game state broadcast
 //    ERROR {code, message}                   action rejected
 //    PLAYER_JOINED / PLAYER_LEFT             lobby deltas
-//    CHAT {playerId, text, ts}               ephemeral custom-message relay
-//    EMOTE {playerId, emote, ts}             ephemeral reaction relay
-//    BROADCAST {playerId, broadcast, ts}     ephemeral preset text relay
+//    CHAT {playerId, text, ts, playerName?, role?}       ephemeral custom-message relay
+//    EMOTE {playerId, emote, ts, playerName?, role?}      ephemeral reaction relay
+//    BROADCAST {playerId, broadcast, ts, playerName?, role?} ephemeral preset text relay
 //    SYSTEM_EVENT {event}                    typed ephemeral room event
 //    PONG {ts}                               keepalive reply
 //
@@ -178,21 +180,39 @@ export const ONDRA_MESSAGE_IDS = [
 ] as const
 export type OndraMessageId = typeof ONDRA_MESSAGE_IDS[number]
 
-export interface EmoteEvent {
+/**
+ * Server-stamped attribution carried by every ephemeral table message.
+ *
+ * A queued watcher is a room member but never appears in `RoomSummary.players`
+ * (room summaries expose spectator counts only), so a client cannot resolve
+ * their id to a name. The relay stamps the name it already knows instead, which
+ * discloses a watcher only when that watcher chooses to speak. `role` lets the
+ * table mark rail chatter apart from a seated player's.
+ *
+ * Both fields are optional: local single-player and pass-and-play reactions are
+ * constructed client-side, where the roster is already at hand. Clients never
+ * send them — the `hasOnlyKeys` allowlists in `isClientMsg` reject any attempt.
+ */
+export interface SpeakerAttribution {
+  playerName?: string
+  role?: ViewerRole
+}
+
+export interface EmoteEvent extends SpeakerAttribution {
   playerId: string
   emote: EmoteId
   /** Server timestamp; emotes are deliberately not persisted in room state. */
   ts: number
 }
 
-export interface BroadcastEvent {
+export interface BroadcastEvent extends SpeakerAttribution {
   playerId: string
   broadcast: BroadcastId
   /** Server timestamp; broadcasts are deliberately not persisted in room state. */
   ts: number
 }
 
-export interface ChatEvent {
+export interface ChatEvent extends SpeakerAttribution {
   playerId: string
   text: string
   /** Server timestamp; chat is deliberately not persisted in room state. */

@@ -349,7 +349,13 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
             break
           }
           case 'EMOTE': {
-            const received = { playerId: message.playerId, emote: message.emote, ts: message.ts }
+            const received: EmoteEvent = {
+              playerId: message.playerId,
+              emote: message.emote,
+              ts: message.ts,
+              playerName: message.playerName,
+              role: message.role,
+            }
             if (emoteTimer.current) clearTimeout(emoteTimer.current)
             setLatestEmote(received)
             emoteTimer.current = setTimeout(() => {
@@ -369,6 +375,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
               playerId: message.playerId,
               broadcast: message.broadcast,
               ts: message.ts,
+              playerName: message.playerName,
+              role: message.role,
             }
             if (broadcastTimer.current) clearTimeout(broadcastTimer.current)
             setLatestBroadcast(received)
@@ -389,6 +397,8 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
               playerId: message.playerId,
               text: message.text,
               ts: message.ts,
+              playerName: message.playerName,
+              role: message.role,
             }
             // History is private to this client and contains only messages the
             // server authoritatively accepted for this player. Peer messages,

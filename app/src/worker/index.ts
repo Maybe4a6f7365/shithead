@@ -110,6 +110,17 @@ const MAX_MESSAGE_CHARS = 16 * 1024 // per-socket WS message cap; oversize -> cl
 const MAX_SOCKETS_PER_ROOM = 12 // 5 players + 5 spectators + two handshake/duplicate-tab slots
 const AUTH_TIMEOUT_MS = 10_000
 const REMATCH_VOTE_COOLDOWN_MS = 750
+
+/**
+ * The complete set a queued watcher may send. A watcher is read-only with
+ * respect to the *game*, not silent at the table: they can talk while they wait
+ * for a seat, on the same relay and the same limits as a seated player. Keeping
+ * it one explicit allowlist means a new gameplay message can never become
+ * reachable for them by default.
+ */
+const SPECTATOR_ALLOWED_TYPES = new Set<ClientMsg['type']>([
+  'PING', 'LEAVE_ROOM', 'CHAT', 'EMOTE', 'BROADCAST',
+])
 const ROOM_CODE_RE = /^[A-Z0-9]{6}$/
 const CLAIM_TTL_MS = 2 * 60 * 1000 // room-code reservation validity
 
@@ -404,15 +415,16 @@ export class Room {
       return
     }
 
-    // A watcher is an authenticated read-only room member. Enforce that at
-    // one dispatcher boundary so future player actions cannot accidentally
-    // become available merely because a handler forgot its own roster check.
+    // A watcher is an authenticated room member who may watch and talk but not
+    // play. Enforce that at one dispatcher boundary so future player actions
+    // cannot accidentally become available merely because a handler forgot its
+    // own roster check.
     if (this.roleOf(session.playerId) === 'spectator' &&
-      message.type !== 'PING' && message.type !== 'LEAVE_ROOM') {
+      !SPECTATOR_ALLOWED_TYPES.has(message.type)) {
       this.send(session, {
         type: 'ERROR',
         code: 'INVALID_MOVE',
-        message: 'Spectators can watch this round but cannot perform player actions',
+        message: 'Spectators can watch and chat but cannot perform player actions',
       })
       return
     }
@@ -1178,13 +1190,14 @@ export class Room {
   /**
    * Relay one canonical, authenticated custom message as an ephemeral reaction.
    * Allowed in any pre-game or active phase (waiting, rearrange, tribute, play,
-   * endgame) so the waiting room can host table talk. Cooldown and burst limit
-   * apply uniformly.
+   * endgame) so the waiting room can host table talk, and open to queued
+   * watchers as well as seated players. Cooldown and burst limit apply
+   * uniformly to both.
    */
   private chat(session: Session, rawText: string): void {
     const playerId = session.playerId
-    const data = this.data
-    if (!playerId || !data?.players.some(player => player.id === playerId)) return
+    const speaker = playerId ? this.speakerOf(playerId) : null
+    if (!playerId || !speaker) return
     const text = normalizeChatText(rawText)
     if (!text) return
     const ts = acceptedReactionAt(this.lastReactionAtByPlayer.get(playerId) ?? null, Date.now())
@@ -1199,7 +1212,7 @@ export class Room {
       return
     }
     this.lastReactionAtByPlayer.set(playerId, ts)
-    this.broadcast({ type: 'CHAT', playerId, text, ts })
+    this.broadcast({ type: 'CHAT', playerId, text, ts, ...speaker })
   }
 
   /**
@@ -1210,10 +1223,12 @@ export class Room {
    * the table or bypass normal rate limits.
    */
   private emote(session: Session, emote: Extract<ClientMsg, { type: 'EMOTE' }>['emote']): void {
-    if (!session.playerId) return
+    const playerId = session.playerId
+    const speaker = playerId ? this.speakerOf(playerId) : null
+    if (!playerId || !speaker) return
     const ts = this.takeReactionSlot(session)
     if (ts === null) return
-    this.broadcast({ type: 'EMOTE', playerId: session.playerId, emote, ts })
+    this.broadcast({ type: 'EMOTE', playerId, emote, ts, ...speaker })
   }
 
   /**
@@ -1226,15 +1241,18 @@ export class Room {
     session: Session,
     broadcast: Extract<ClientMsg, { type: 'BROADCAST' }>['broadcast'],
   ): void {
-    if (!session.playerId) return
+    const playerId = session.playerId
+    const speaker = playerId ? this.speakerOf(playerId) : null
+    if (!playerId || !speaker) return
     const ts = this.takeReactionSlot(session)
     if (ts === null) return
-    this.broadcast({ type: 'BROADCAST', playerId: session.playerId, broadcast, ts })
+    this.broadcast({ type: 'BROADCAST', playerId, broadcast, ts, ...speaker })
   }
 
+  /** One cooldown slot per room member, seated or queued. */
   private takeReactionSlot(session: Session): number | null {
     const playerId = session.playerId
-    if (!playerId || !this.data?.players.some(player => player.id === playerId)) return null
+    if (!playerId || !this.isMember(playerId)) return null
     const acceptedAt = acceptedReactionAt(this.lastReactionAtByPlayer.get(playerId) ?? null, Date.now())
     if (acceptedAt !== null) this.lastReactionAtByPlayer.set(playerId, acceptedAt)
     return acceptedAt
@@ -1355,6 +1373,22 @@ export class Room {
 
   private isMember(memberId: string): boolean {
     return this.roleOf(memberId) !== null
+  }
+
+  /**
+   * Resolve the attribution stamped onto an ephemeral table message. Room
+   * summaries carry spectator counts but never spectator identities, so a
+   * watcher's name reaches the table only here — on a message that watcher
+   * chose to send. Silent watchers stay anonymous.
+   */
+  private speakerOf(memberId: string): { playerName: string; role: ViewerRole } | null {
+    const data = this.data
+    if (!data) return null
+    const player = data.players.find(entry => entry.id === memberId)
+    if (player) return { playerName: player.name, role: 'player' }
+    const spectator = data.spectators.find(entry => entry.id === memberId)
+    if (spectator) return { playerName: spectator.name, role: 'spectator' }
+    return null
   }
 
   /** Remove abandoned watcher identities without sacrificing brief reconnects. */
