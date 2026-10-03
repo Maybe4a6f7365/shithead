@@ -792,12 +792,16 @@ function applyAcceptedPlay(
     nextIdx = state.currentPlayerIdx
     const extraSkipCount = realCards[0].rank === '8' ? realCards.length : 0
     for (let skipped = 0; skipped < extraSkipCount; skipped++) {
+      // An 8 never skips its own actor.
+      if (nextIdx === actorIdx && !wentOut) break
       nextIdx = nextActiveIdx(nextPlayers, nextIdx, state.playDirection)
     }
   } else {
     nextIdx = nextActiveIdx(nextPlayers, actorIdx, state.playDirection)
     const skipCount = realCards[0].rank === '8' ? realCards.length : 0
     for (let skipped = 0; skipped < skipCount; skipped++) {
+      // An 8 never skips its own actor.
+      if (nextIdx === actorIdx && !wentOut) break
       nextIdx = nextActiveIdx(nextPlayers, nextIdx, state.playDirection)
     }
   }

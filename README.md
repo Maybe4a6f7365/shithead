@@ -167,7 +167,7 @@ If that refill contains the same printed rank that was just played, only the exa
 | `2` | Playable on anything. It is a reset boundary, so any card may follow. Physical 2s still count as printed 2s toward a four-plus burn. |
 | `3` | Playable on anything. It mirrors the first effective rank below a chain of 3s. Above a 2, or with no non-3 beneath it, play remains unrestricted. It mirrors rank legality only and does not repeat an 8 skip. |
 | `7` | The next ordinary card must be 7 or lower. The play-anytime 2, 3, and Joker remain valid; **10 is not exempt**. A 3 above a 7 preserves the low restriction. |
-| `8` | Each 8 skips one additional active player. Already-out seats do not count. With two opponents left, a final pair skips both and wraps to the first opponent, so the turn marker can appear unchanged. A four-plus 8 burn takes precedence over skipping. |
+| `8` | Each 8 skips one additional active player. Already-out seats do not count. An 8 never skips its own player: surplus 8s are ignored once the turn would wrap back to the actor, so with one opponent left any number of 8s returns the turn to the actor. A four-plus 8 burn takes precedence over skipping. |
 | `10` | Burns the pile immediately. It is normally unrestricted, but cannot be played on an effective 7. |
 | Joker | Playable on anything and burns immediately. It is not a rank-substitution wildcard and cannot be mixed into another set. |
 | Physical top run `>=4` | An uninterrupted run of four or more equal printed ranks burns, whether produced in one action or accumulated across actions. Multi-deck games may burn more than four. |

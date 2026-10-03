@@ -453,7 +453,7 @@ describe('confirmed special-card rules: reset 2, copying 3, low 7, stacking 8', 
     expect(result.state.players[result.state.currentPlayerIdx].id).toBe('d')
   })
 
-  it('in a two-player round one 8 returns the turn, while a pair skips both seats', () => {
+  it('in a two-player round any number of 8s returns the turn to the actor, never skipping them', () => {
     const one = mkState({
       players: [{ id: 'a', hand: [c('8'), c('9')] }, { id: 'b', hand: [c('9')] }],
       pile: [[c('5')]],
@@ -467,7 +467,7 @@ describe('confirmed special-card rules: reset 2, copying 3, low 7, stacking 8', 
       pile: [[c('5')]],
     })
     const pairResult = playCards(two, 'a', pair)
-    expect(pairResult.state.players[pairResult.state.currentPlayerIdx].id).toBe('b')
+    expect(pairResult.state.players[pairResult.state.currentPlayerIdx].id).toBe('a')
   })
 
   it('an 8 played as the last card still skips the next remaining player', () => {
