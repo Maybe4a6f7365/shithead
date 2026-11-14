@@ -4,11 +4,12 @@
 // preserving the compact legacy card. A win gets one short suit burst; nothing
 // loops.
 // ============================================================================
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { SuitBurst } from './WinMoment'
 import { motion, useReducedMotion } from 'framer-motion'
 import type { GameRules } from '../engine'
 import { RoundRulesControl } from './RoundRulesControl'
+import { revealStandings } from './standingsReveal'
 
 const focusableSelector = [
   'button:not([disabled])',
@@ -165,6 +166,32 @@ export function GameOverOverlay({
     ? `${shitheadName} kept the cards. ${shitheadName} is the Shithead.`
     : 'The round ended without a recorded last-place player.'
 
+  // Round leaderboard count-down: last place first, winner's row bursts.
+  const hasRows = (leaderboard?.length ?? 0) > 0
+  const revealedRef = useRef(false)
+  const [winnerBurst, setWinnerBurst] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog || !hasRows || reduceMotion || revealedRef.current) return
+    revealedRef.current = true
+    const reveal = revealStandings(dialog, {
+      onWinner: row => {
+        const section = dialog.querySelector<HTMLElement>('.game-over-leaderboard')
+        if (!section) return
+        const rowRect = row.getBoundingClientRect()
+        const sectionRect = section.getBoundingClientRect()
+        setWinnerBurst({
+          left: rowRect.left - sectionRect.left + Math.min(56, rowRect.width / 4),
+          top: rowRect.top - sectionRect.top + rowRect.height / 2,
+        })
+      },
+    })
+    if (!reveal) return
+    const skip = () => reveal.skip()
+    dialog.addEventListener('pointerdown', skip, { once: true })
+    return () => dialog.removeEventListener('pointerdown', skip)
+  }, [hasRows, reduceMotion])
+
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
@@ -262,6 +289,15 @@ export function GameOverOverlay({
                   : 'Only recorded events are shown. The ≥ symbol means “at least”.'}
               </p>
             )}
+            {winnerBurst && (
+              <span
+                className="game-over-card__burst game-over-row-burst"
+                style={{ left: winnerBurst.left, top: winnerBurst.top }}
+                aria-hidden="true"
+              >
+                <SuitBurst burstKey="standings-winner" />
+              </span>
+            )}
             {leaderboard.length > 0 ? (
               <>
                 <div className="game-over-table-scroll" role="region" aria-label="Round statistics" tabIndex={0}>
@@ -280,7 +316,7 @@ export function GameOverOverlay({
                     </thead>
                     <tbody>
                       {leaderboard.map(row => (
-                        <tr key={row.playerId} data-loser={row.isLoser || undefined}>
+                        <tr key={row.playerId} data-loser={row.isLoser || undefined} data-place={row.place ?? undefined}>
                           <td>{formatPlace(row.place)}</td>
                           <th scope="row" aria-label={`${row.name}${row.isLoser ? ', Shithead' : ''}`}>
                             <span>{row.name}</span>

@@ -4520,3 +4520,18 @@ input.modern-input { font-size: 16px; }
   90% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* ---- Standings reveal: the winner's row bursts, over the leaderboard ---- */
+.game-over-leaderboard { position: relative; }
+.game-over-card__burst.game-over-row-burst {
+  position: absolute;
+  display: block;
+  height: 0;
+  width: 0;
+  z-index: 3;
+}
+.game-over-row-burst .suit-burst__particle {
+  /* No card entrance to wait for: the row's own reveal already timed it. */
+  --burst-offset: 0ms;
+  animation-duration: 1200ms;
+}
