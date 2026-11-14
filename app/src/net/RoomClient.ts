@@ -28,6 +28,8 @@ export class RoomClient {
   private gaveUp = false
   private authenticated = false
   private queue: ClientMsg[] = []
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private livenessTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: RoomClientOptions) {
     this.opts = {
@@ -64,6 +66,8 @@ export class RoomClient {
     })
 
     this.ws.addEventListener('message', (ev) => {
+      // Any frame proves the transport is alive.
+      this.clearLivenessTimer()
       try {
         const data = JSON.parse(ev.data)
         if (typeof data === 'object' && data !== null && 'type' in data) {
@@ -74,7 +78,12 @@ export class RoomClient {
       }
     })
 
+    const socket = this.ws
     this.ws.addEventListener('close', (ev) => {
+      // A socket this client already abandoned (liveness timeout) may report
+      // its close late; it must not disturb the connection that replaced it.
+      if (this.ws !== socket) return
+      this.clearLivenessTimer()
       this.authenticated = false
       this.opts.onClose(ev)
       if (!this.closed) this.scheduleReconnect()
@@ -95,7 +104,53 @@ export class RoomClient {
     this.reconnectAttempts++
     this.opts.onReconnecting(this.reconnectAttempts, this.opts.maxReconnectAttempts)
     const delay = this.opts.reconnectDelayMs * Math.min(this.reconnectAttempts, 5)
-    setTimeout(() => this.connect(), delay)
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.connect()
+    }, delay)
+  }
+
+  private clearLivenessTimer() {
+    if (this.livenessTimer !== null) clearTimeout(this.livenessTimer)
+    this.livenessTimer = null
+  }
+
+  /**
+   * Called when the page comes back to the foreground or the network returns.
+   * Phones suspend timers and silently drop sockets while locked, so neither
+   * the backoff schedule nor readyState can be trusted at that moment:
+   *  - waiting on a backoff timer: reconnect now with a fresh attempt budget;
+   *  - socket looks open: PING it, and replace it if nothing arrives in time.
+   * A client that has given up is restarted by its owner through retry().
+   */
+  checkLiveness(timeoutMs = 4000) {
+    if (this.closed || this.gaveUp) return
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+      this.reconnectAttempts = 0
+      this.connect()
+      return
+    }
+    const socket = this.ws
+    if (!socket || socket.readyState !== WebSocket.OPEN || !this.authenticated) return
+    if (this.livenessTimer !== null) return
+    try {
+      socket.send(JSON.stringify({ type: 'PING', version: PROTOCOL_VERSION }))
+    } catch {
+      // Fall through to the timeout: a throwing send is a dead transport.
+    }
+    this.livenessTimer = setTimeout(() => {
+      this.livenessTimer = null
+      if (this.closed || this.ws !== socket) return
+      // close() on a dead mobile socket can take a long time to report, so
+      // abandon it and reconnect immediately instead of waiting for the event.
+      this.ws = null
+      this.authenticated = false
+      try { socket.close() } catch { /* already gone */ }
+      this.reconnectAttempts = 0
+      this.scheduleReconnect()
+    }, timeoutMs)
   }
 
   /** Manual retry after give-up (the badge-as-button path, §4.6). */
@@ -177,6 +232,9 @@ export class RoomClient {
 
   close() {
     this.closed = true
+    this.clearLivenessTimer()
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
     if (this.ws) {
       this.ws.close()
       this.ws = null

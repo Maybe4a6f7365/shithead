@@ -442,7 +442,29 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     })
 
     clientRef.current = client
+
+    // A phone that was locked or backgrounded comes back with suspended
+    // timers and possibly a dead socket. Re-check the transport instead of
+    // leaving the player on a stale table or a "Retry" screen.
+    const recoverConnection = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      if (client.hasGivenUp()) {
+        reconnectingRef.current = false
+        setAttempt(0)
+        setStatus('connecting')
+        client.retry()
+        return
+      }
+      client.checkLiveness()
+    }
+    document.addEventListener('visibilitychange', recoverConnection)
+    window.addEventListener('online', recoverConnection)
+    window.addEventListener('pageshow', recoverConnection)
+
     return () => {
+      document.removeEventListener('visibilitychange', recoverConnection)
+      window.removeEventListener('online', recoverConnection)
+      window.removeEventListener('pageshow', recoverConnection)
       if (restoredTimer.current) clearTimeout(restoredTimer.current)
       if (noticeTimer.current) clearTimeout(noticeTimer.current)
       if (emoteTimer.current) clearTimeout(emoteTimer.current)

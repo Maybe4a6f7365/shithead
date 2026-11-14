@@ -676,3 +676,97 @@ describe('RoomClient authentication ordering', () => {
     unmount()
   })
 })
+
+describe('RoomClient liveness after the page returns to the foreground', () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  const connected = () => {
+    const reconnecting: number[] = []
+    const client = new RoomClient({
+      url: 'ws://example.test/api/room/ABC123/ws',
+      onMessage: () => {},
+      onReconnecting: attempt => { reconnecting.push(attempt) },
+    })
+    const socket = FakeWebSocket.instances[0]
+    socket.open()
+    client.markAuthenticated()
+    return { client, socket, reconnecting }
+  }
+
+  it('pings an open socket and keeps it when anything answers', () => {
+    const { client, socket } = connected()
+    client.checkLiveness(4000)
+    expect(socket.sent.at(-1)).toEqual({ type: 'PING', version: PROTOCOL_VERSION })
+    socket.receive({ type: 'PONG', ts: 1 })
+    vi.advanceTimersByTime(10_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(client.isConnected()).toBe(true)
+    client.close()
+  })
+
+  it('does not stack pings while one is outstanding', () => {
+    const { client, socket } = connected()
+    client.checkLiveness(4000)
+    client.checkLiveness(4000)
+    expect(socket.sent.filter(message => message.type === 'PING')).toHaveLength(1)
+    client.close()
+  })
+
+  it('replaces a silent socket and ignores its late close event', () => {
+    const { client, socket, reconnecting } = connected()
+    // A dead mobile socket never reports its own close in time.
+    socket.close = () => {}
+    client.checkLiveness(4000)
+    vi.advanceTimersByTime(4000)
+    expect(reconnecting).toEqual([1])
+    vi.advanceTimersByTime(1000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    const replacement = FakeWebSocket.instances[1]
+    replacement.open()
+    FakeWebSocket.prototype.close.call(socket)
+    vi.advanceTimersByTime(10_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(reconnecting).toEqual([1])
+    client.close()
+  })
+
+  it('reconnects immediately when a backoff timer was left pending', () => {
+    const { client, socket, reconnecting } = connected()
+    socket.close()
+    socket.close = () => {}
+    expect(reconnecting).toEqual([1])
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    client.checkLiveness()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    // The abandoned timer must not open a third socket.
+    vi.advanceTimersByTime(10_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    client.close()
+  })
+
+  it('leaves an unauthenticated handshake and a given-up client alone', () => {
+    const client = new RoomClient({
+      url: 'ws://example.test/api/room/ABC123/ws',
+      onMessage: () => {},
+      maxReconnectAttempts: 0,
+    })
+    const socket = FakeWebSocket.instances[0]
+    socket.open()
+    client.checkLiveness()
+    expect(socket.sent).toEqual([])
+    socket.close()
+    expect(client.hasGivenUp()).toBe(true)
+    client.checkLiveness()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    client.close()
+  })
+})
