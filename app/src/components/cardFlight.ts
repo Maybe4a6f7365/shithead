@@ -140,3 +140,35 @@ export function flipHand(root: ParentNode | null, entryFrom: HandEntrySource): v
     }
   })
 }
+
+/** Seconds between consecutive cards of a multi-card play; capped for big sets. */
+export function staggerDelay(index: number): number {
+  return Math.min(Math.max(0, index) * 0.055, 0.22)
+}
+
+/** Deterministic resting tilt for the cards tucked under the top card. */
+export function groupTilt(index: number): number {
+  return (index % 2 === 0 ? -1 : 1) * (2 + (index % 3))
+}
+
+export interface GroupGhostTiming {
+  total: number
+  times: number[]
+  opacity: number[]
+}
+
+/**
+ * A ghost card flies in, rests, and fades once the top card has landed.
+ * `flight` is its own travel time; `topLandsAt` when the top card settles (s,
+ * measured from the play); `delay` its own start. All in seconds.
+ */
+export function groupGhostTiming(flight: number, topLandsAt: number, delay: number): GroupGhostTiming {
+  const fade = 0.1
+  const hold = Math.max(flight, topLandsAt - delay)
+  const total = hold + fade
+  return {
+    total,
+    times: [0, flight / total, hold / total, 1],
+    opacity: [1, 1, 1, 0],
+  }
+}

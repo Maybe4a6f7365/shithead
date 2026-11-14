@@ -432,6 +432,12 @@ export function TableScreen({
     return play?.type === 'PLAY_CARDS' && play.playerId !== viewerId ? play.playerId : null
   }, [state.log, viewerId])
 
+  // A multi-card play lands as a quick staggered sequence, top card last.
+  const playedGroup = useMemo(() => {
+    const play = latestActionEvents(state.log).find(e => e.type === 'PLAY_CARDS')
+    return play?.type === 'PLAY_CARDS' && play.cards.length > 1 ? play.cards : null
+  }, [state.log])
+
   // Face-down play: the reveal overlay keeps the pile as it was until the flip
   // has played, so the new top card never spoils the suspense.
   const blindOriginRef = useRef<FlightRect | null>(null)
@@ -1006,6 +1012,7 @@ export function TableScreen({
             specialEffect={specialEffect}
             teachHint={ps === 0 && viewerActive}
             playedBy={playedBy}
+            group={playedGroup}
           />
         </div>
         <div className="game-feed table-feed">

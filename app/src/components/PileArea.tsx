@@ -12,8 +12,8 @@ import { Card } from './Card'
 import { BlindReveal, type BlindRevealData } from './BlindReveal'
 import type { SpecialEffect } from './SpecialEffectFeedback'
 import {
-  flightDuration, flightOffset, forgetCardRect, isTrivialFlight, peekCardRect, peekSeatRect,
-  registerSeat, type FlightOffset,
+  flightDuration, flightOffset, forgetCardRect, groupGhostTiming, groupTilt, isTrivialFlight, peekCardRect,
+  peekSeatRect, registerSeat, staggerDelay, type FlightOffset,
 } from './cardFlight'
 
 export type PileEntryKind = 'reset' | 'mirror' | 'low' | 'skip' | 'standard'
@@ -115,6 +115,8 @@ export interface WastepileProps {
   teachHint?: boolean
   /** Opponent who played the top card; their seat is the flight origin. */
   playedBy?: string | null
+  /** Every card of the latest multi-card play; the first is the pile's top card. */
+  group?: CardT[] | null
   /** Face-down play being revealed over the pile. */
   blind?: BlindRevealData | null
   onBlindDone?: (key: string) => void
@@ -131,6 +133,7 @@ export function Wastepile({
   skipCount = 1,
   teachHint,
   playedBy,
+  group,
   blind,
   onBlindDone,
   suppressEntryId,
@@ -151,8 +154,23 @@ export function Wastepile({
     return isTrivialFlight(offset) ? null : offset
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [top?.id])
+  // The rest of a multi-card play lands one after another, top card last.
+  const ghosts = useMemo(() => {
+    if (!flight || !top || !group || group.length < 2) return []
+    if (group[0].id !== top.id || suppressEntryId === top.id) return []
+    const to = pileRef.current?.getBoundingClientRect()
+    if (!to || to.width <= 0) return []
+    return group.slice(1).flatMap((card, index) => {
+      const from = peekCardRect(card.id) ?? peekSeatRect(playedBy)
+      return from ? [{ card, index, offset: flightOffset(from, to) }] : []
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top?.id])
+  const topDelay = ghosts.length > 0 ? staggerDelay(ghosts.length) : 0
   useEffect(() => {
     forgetCardRect(top?.id)
+    group?.forEach(card => forgetCardRect(card.id))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [top?.id])
   const baseEntry = pileEntryChoreography(entryKind, skipCount, Boolean(reduceMotion))
   const entry = top && suppressEntryId === top.id
@@ -163,9 +181,15 @@ export function Wastepile({
       }
     : flight
     ? {
-        initial: { opacity: 1, x: flight.x, y: flight.y, scale: flight.scale, rotate: 0 },
+        // With a delay the card stays invisible until its turn in the sequence.
+        initial: { opacity: topDelay > 0 ? 0 : 1, x: flight.x, y: flight.y, scale: flight.scale, rotate: 0 },
         animate: { opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 },
-        transition: { duration: flightDuration(flight), ease: [0.16, 1, 0.3, 1] as [number, number, number, number] },
+        transition: {
+          duration: flightDuration(flight),
+          delay: topDelay,
+          opacity: { duration: 0.01, delay: topDelay },
+          ease: [0.16, 1, 0.3, 1] as [number, number, number, number],
+        },
       }
     : baseEntry
   const metaText = copiesRank
@@ -184,6 +208,30 @@ export function Wastepile({
       data-skip-count={entryKind === 'skip' ? skipCount : undefined}
     >
       <div ref={pileRef} className="pile-card pile-card--waste relative">
+        {ghosts.map(ghost => {
+          const travel = flightDuration(ghost.offset)
+          const delay = staggerDelay(ghost.index)
+          const timing = groupGhostTiming(travel, topDelay + (flight ? flightDuration(flight) : travel), delay)
+          const tilt = groupTilt(ghost.index)
+          return (
+            <motion.div
+              key={`ghost-${top?.id}-${ghost.card.id}`}
+              className="waste-pile__ghost absolute inset-0 pointer-events-none"
+              aria-hidden="true"
+              initial={{ opacity: 0, x: ghost.offset.x, y: ghost.offset.y, scale: ghost.offset.scale, rotate: 0 }}
+              animate={{
+                opacity: timing.opacity,
+                x: [ghost.offset.x, 0, 0, 0],
+                y: [ghost.offset.y, 0, 0, 0],
+                scale: [ghost.offset.scale, 1, 1, 1],
+                rotate: [0, tilt, tilt, tilt],
+              }}
+              transition={{ duration: timing.total, times: timing.times, delay, ease: 'easeOut' }}
+            >
+              <Card card={ghost.card} state="in-pile" />
+            </motion.div>
+          )
+        })}
         <AnimatePresence mode="popLayout" initial={false}>
           {burning ? (
             <motion.div
@@ -299,6 +347,7 @@ export interface PileAreaProps {
   specialEffect?: SpecialEffect | null
   teachHint?: boolean
   playedBy?: string | null
+  group?: CardT[] | null
   blind?: BlindRevealData | null
   onBlindDone?: (key: string) => void
   suppressEntryId?: string | null
@@ -350,6 +399,7 @@ export function PileArea({
   specialEffect,
   teachHint,
   playedBy,
+  group,
   blind,
   onBlindDone,
   suppressEntryId,
@@ -391,6 +441,7 @@ export function PileArea({
           skipCount={skipCount}
           teachHint={teachHint}
           playedBy={playedBy}
+          group={group}
           blind={blind}
           onBlindDone={onBlindDone}
           suppressEntryId={suppressEntryId}

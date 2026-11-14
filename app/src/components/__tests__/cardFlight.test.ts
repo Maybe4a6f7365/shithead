@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {
-  flightDuration, flightOffset, flipHand, forgetCardRect, isTrivialFlight, peekCardRect, recordCardRects, registerSeat,
+  flightDuration, flightOffset, flipHand, forgetCardRect, groupGhostTiming, groupTilt, isTrivialFlight, peekCardRect,
+  recordCardRects, registerSeat, staggerDelay,
 } from '../cardFlight'
 
 const rect = (left: number, top: number, width = 60, height = 84) => ({ left, top, width, height })
@@ -88,5 +89,33 @@ describe('flipHand', () => {
     const n = box('n3', 0)
     flipHand(rootOf(n.el), 'pile')
     expect(n.calls[0].keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }])
+  })
+})
+
+describe('multi-card stagger', () => {
+  it('spaces cards 55ms apart and caps the delay', () => {
+    expect(staggerDelay(0)).toBe(0)
+    expect(staggerDelay(1)).toBeCloseTo(0.055)
+    expect(staggerDelay(3)).toBeCloseTo(0.165)
+    expect(staggerDelay(50)).toBe(0.22)
+    expect(staggerDelay(-2)).toBe(0)
+  })
+
+  it('alternates the resting tilt and keeps it small', () => {
+    const tilts = [0, 1, 2, 3].map(groupTilt)
+    expect(tilts[0]).toBeLessThan(0)
+    expect(tilts[1]).toBeGreaterThan(0)
+    expect(tilts.every(t => Math.abs(t) >= 2 && Math.abs(t) <= 4)).toBe(true)
+  })
+
+  it('keeps a ghost visible until the top card has landed, then fades it', () => {
+    const t = groupGhostTiming(0.25, 0.5, 0)
+    expect(t.total).toBeCloseTo(0.6)
+    expect(t.times[0]).toBe(0)
+    expect(t.times[2]).toBeCloseTo(0.5 / 0.6)
+    expect(t.times[3]).toBe(1)
+    expect(t.opacity).toEqual([1, 1, 1, 0])
+    // A later-starting ghost holds for less time but never less than its flight.
+    expect(groupGhostTiming(0.25, 0.5, 0.4).times[1]).toBeLessThanOrEqual(1)
   })
 })
