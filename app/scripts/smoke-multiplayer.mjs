@@ -329,15 +329,17 @@ async function run() {
   const myState = currentPeer.latestGameState
   const me = myState.players.find(player => player.id === myId)
   assert(me && me.hand.length > 0, 'current player has no hand cards to play')
-  // avoid a burn: it keeps the lead with the same player and would break the
-  // turn-advance assertion below (both 10 and Joker clear the pile).
-  const candidate = me.hand.find(card => card.rank !== '10' && card.rank !== 'JOKER') ?? me.hand[0]
+  // Avoid cards that leave the turn with the same player and would break the
+  // turn-advance assertion below: a 10 or Joker clears the pile, and with two
+  // players an 8 skips the only opponent.
+  const keepsTurn = card => card.rank === '10' || card.rank === 'JOKER' || card.rank === '8'
+  const candidate = me.hand.find(card => !keepsTurn(card)) ?? me.hand[0]
   currentPeer.send({ type: 'PLAY', cards: [candidate] })
 
   const hostAdvanced = await host.waitType('GAME_STATE', message => message.state.turnCount > previousTurn)
   const guestAdvanced = await guest.waitType('GAME_STATE', message => message.state.turnCount > previousTurn)
   assert.equal(hostAdvanced.state.turnCount, guestAdvanced.state.turnCount)
-  if (candidate.rank !== '10' && candidate.rank !== 'JOKER') {
+  if (!keepsTurn(candidate)) {
     assert.notEqual(hostAdvanced.state.currentPlayerIdx, currentState.currentPlayerIdx)
   }
   log('game mutation propagated to both players')
@@ -357,5 +359,7 @@ async function run() {
 
 run().catch(error => {
   console.error('[multiplayer-smoke] FAIL', error)
-  process.exitCode = 1
+  // Exit now: sockets left open by the failed run would otherwise keep the
+  // process alive until the CI job times out.
+  process.exit(1)
 })
