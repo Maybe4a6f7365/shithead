@@ -16,6 +16,7 @@ import type { BlindRevealData } from './BlindReveal'
 import type { PileSweepData } from './PileSweep'
 import { burnCleanupMs, type BurnReason } from './BurnFx'
 import { peekCardRect, peekSeatRect, type FlightRect } from './cardFlight'
+import { useYourTurnRipple } from './yourTurnRipple'
 import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
 import { ActionFeed } from './ActionFeed'
@@ -486,6 +487,15 @@ export function TableScreen({
   }, [blindEvent?.key, blindActive])
   const onBlindDone = useCallback((key: string) => setDismissedBlind(key), [])
   const holdPile = blindActive ? blindHoldRef.current : null
+  // The turn just reached the viewer: ripple their playable cards left to right.
+  const screenRef = useRef<HTMLDivElement>(null)
+  useYourTurnRipple(
+    screenRef,
+    isViewerTurn && viewerActive && state.phase !== 'roundEnd' && state.phase !== 'gameOver'
+      ? `turn-${state.turnCount}`
+      : null,
+    reduceMotion,
+  )
   // A burn caused by a blind flip starts the moment the reveal is done. Layout
   // effect so the hand-off never paints an empty pile in between.
   useLayoutEffect(() => {
@@ -957,6 +967,7 @@ export function TableScreen({
 
   return (
     <div
+      ref={screenRef}
       className="app-viewport last-call-screen game-screen bg-felt text-cream flex flex-col table-select-none"
       data-game-phase={state.phase}
       data-viewer-active={viewerActive ? 'true' : 'false'}
