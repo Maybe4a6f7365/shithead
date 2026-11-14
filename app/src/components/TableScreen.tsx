@@ -233,7 +233,7 @@ function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }):
 }
 
 export function TableScreen({
-  state, viewerId, viewerActive, spectating = false, spectatorCount = 0,
+  state, viewerId, viewerActive: viewerTurn, spectating = false, spectatorCount = 0,
   actionsEnabled = true, reactionsEnabled, viewerName, canSubmitAction = () => true,
   initialSelectionDraft = [], onSelectionDraftChange,
   error, onPlay, onQuickFollowUp,
@@ -300,6 +300,20 @@ export function TableScreen({
     if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
   }, [])
 
+  // A face-down play is revealed by the flip, not by anything else on screen.
+  // While it plays, the table behaves as if the action has not landed yet: no
+  // input, no playable highlights, no turn ripple, and the taker's hand waits.
+  const blindEvent = useMemo(() => {
+    const event = latestActionEvents(state.log).find(e => e.type === 'BLIND_REVEAL')
+    return event?.type === 'BLIND_REVEAL'
+      ? { key: `blind-${state.seq ?? state.turnCount}`, playerId: event.playerId, card: event.card, success: event.success }
+      : null
+  }, [state.log, state.seq, state.turnCount])
+  // A reveal already in the log when the table mounts (reconnect, late join) is history.
+  const [dismissedBlind, setDismissedBlind] = useState<string | null>(() => blindEvent?.key ?? null)
+  const blindActive = Boolean(blindEvent) && !reduceMotion && blindEvent?.key !== dismissedBlind
+  const viewerActive = viewerTurn && !blindActive
+
   // ---- Derived ----
   const zone: Zone | null = viewer ? activeZoneOf(viewer) : null
   const zoneCards: CardT[] = viewer ? viewer[zone ?? 'hand'] : []
@@ -338,13 +352,13 @@ export function TableScreen({
   )
   const selectedRank = selectedCards[0]?.rank ?? null
   const interruptCards = useMemo(
-    () => (actionsEnabled && !viewerActive && onBurnIn ? getInterruptBurnCards(state, viewerId) : []),
-    [actionsEnabled, state, viewerId, viewerActive, onBurnIn],
+    () => (actionsEnabled && !blindActive && !viewerTurn && onBurnIn ? getInterruptBurnCards(state, viewerId) : []),
+    [actionsEnabled, blindActive, state, viewerId, viewerTurn, onBurnIn],
   )
   const interruptIds = useMemo(() => new Set(interruptCards.map(card => card.id)), [interruptCards])
   const quickFollowUpCards = useMemo(
-    () => (actionsEnabled && onQuickFollowUp ? getQuickFollowUpCards(state, viewerId) : []),
-    [actionsEnabled, state, viewerId, onQuickFollowUp],
+    () => (actionsEnabled && !blindActive && onQuickFollowUp ? getQuickFollowUpCards(state, viewerId) : []),
+    [actionsEnabled, blindActive, state, viewerId, onQuickFollowUp],
   )
   const quickFollowUpIds = useMemo(() => new Set(quickFollowUpCards.map(card => card.id)), [quickFollowUpCards])
   const physicalRun = getPhysicalTopRun(state)
@@ -357,7 +371,7 @@ export function TableScreen({
   const quickActionVisible = showQuickFollowUp && (!viewerActive || effectiveSelection.length === 0)
   const canPreselectVisible = Boolean(
     viewer && !viewer.isAI && !viewer.isOut && (zone === 'hand' || zone === 'faceUp') &&
-    (state.phase === 'play' || state.phase === 'endgame') && !canQuickFollowUp && !canBurnIn,
+    (state.phase === 'play' || state.phase === 'endgame') && !canQuickFollowUp && !canBurnIn && !blindActive,
   )
 
   // ---- Feed: transient flash > server error > latest table event ----
@@ -376,7 +390,7 @@ export function TableScreen({
         : { text: null, key: 'idle', tone: 'normal' as const }
 
   // ---- Effects: burn detection, announcements, sounds, turn announce ----
-  const [pendingBurn, setPendingBurn] = useState<{ snapshot: BurnSnapshot; generation: number } | null>(null)
+  const [pendingBurn, setPendingBurn] = useState<{ snapshot: BurnSnapshot; generation: number; cursor: number } | null>(null)
   const startBurn = (snapshot: BurnSnapshot, generation: number) => {
     setBurnSnapshot(snapshot)
     setBurning(true)
@@ -390,6 +404,7 @@ export function TableScreen({
   }
   const lastActionSeq = useRef(state.seq ?? state.turnCount)
   const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank })
+  const previousPlayers = useRef(state.players)
   useEffect(() => {
     const cursor = state.seq ?? state.turnCount
     if (lastActionSeq.current === cursor) return
@@ -415,7 +430,7 @@ export function TableScreen({
       if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
       if (!reduceMotion && fresh.some(e => e.type === 'BLIND_REVEAL')) {
         // A blind flip plays first; the burn starts once the reveal is done.
-        setPendingBurn({ snapshot, generation })
+        setPendingBurn({ snapshot, generation, cursor })
       } else {
         startBurn(snapshot, generation)
       }
@@ -456,18 +471,16 @@ export function TableScreen({
   // Face-down play: the reveal overlay keeps the pile as it was until the flip
   // has played, so the new top card never spoils the suspense.
   const blindOriginRef = useRef<FlightRect | null>(null)
-  const blindEvent = useMemo(() => {
-    const event = latestActionEvents(state.log).find(e => e.type === 'BLIND_REVEAL')
-    return event?.type === 'BLIND_REVEAL'
-      ? { key: `blind-${state.seq ?? state.turnCount}`, playerId: event.playerId, card: event.card, success: event.success }
-      : null
-  }, [state.log, state.seq, state.turnCount])
-  // A reveal already in the log when the table mounts (reconnect, late join) is history.
-  const [dismissedBlind, setDismissedBlind] = useState<string | null>(() => blindEvent?.key ?? null)
-  const blindActive = Boolean(blindEvent) && !reduceMotion && blindEvent?.key !== dismissedBlind
-  const blindHoldRef = useRef<{ key: string; top: CardT | null | undefined; pileCount: number; effectiveRank: ReturnType<typeof getTopRank> } | null>(null)
+  const blindHoldRef = useRef<{ key: string; top: CardT | null | undefined; pileCount: number; effectiveRank: ReturnType<typeof getTopRank>; hand: CardT[] | null } | null>(null)
   if (blindEvent && blindHoldRef.current?.key !== blindEvent.key) {
-    blindHoldRef.current = { key: blindEvent.key, ...previousPile.current }
+    blindHoldRef.current = {
+      key: blindEvent.key,
+      ...previousPile.current,
+      // A failed flip hands the pile to the player; their hand waits for the flip.
+      hand: blindEvent.success
+        ? null
+        : previousPlayers.current.find(player => player.id === blindEvent.playerId)?.hand ?? null,
+    }
   }
   const blindData = useMemo<BlindRevealData | null>(() => {
     if (!blindEvent || !blindActive) return null
@@ -487,6 +500,8 @@ export function TableScreen({
   }, [blindEvent?.key, blindActive])
   const onBlindDone = useCallback((key: string) => setDismissedBlind(key), [])
   const holdPile = blindActive ? blindHoldRef.current : null
+  const heldHandOf = (playerId: string): CardT[] | null =>
+    holdPile?.hand && blindEvent?.playerId === playerId ? holdPile.hand : null
   // The turn just reached the viewer: ripple their playable cards left to right.
   const screenRef = useRef<HTMLDivElement>(null)
   useYourTurnRipple(
@@ -500,10 +515,16 @@ export function TableScreen({
   // effect so the hand-off never paints an empty pile in between.
   useLayoutEffect(() => {
     if (!pendingBurn || blindActive) return
-    if (burnGenerationRef.current === pendingBurn.generation) startBurn(pendingBurn.snapshot, pendingBurn.generation)
+    // Only the action that caused the burn may show it. If the table has moved
+    // on (the next play landed before the flip finished), the pile on screen
+    // is no longer the one that burned, so the late burn is dropped.
+    const stillLatest = pendingBurn.cursor === (state.seq ?? state.turnCount)
+    if (stillLatest && burnGenerationRef.current === pendingBurn.generation) {
+      startBurn(pendingBurn.snapshot, pendingBurn.generation)
+    }
     setPendingBurn(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingBurn, blindActive])
+  }, [pendingBurn, blindActive, state.seq, state.turnCount])
 
   // Picking up the pile sweeps the stack to the taker. A failed blind flip has
   // its own sweep, so it is excluded here.
@@ -547,21 +568,22 @@ export function TableScreen({
 
   useEffect(() => {
     previousPile.current = { top, pileCount: ps, effectiveRank: topRank }
-  }, [top, ps, topRank])
+    previousPlayers.current = state.players
+  }, [top, ps, topRank, state.players])
 
   const lastTurnKey = useRef('')
   useEffect(() => {
-    const key = `${current?.id ?? 'none'}-${viewerId}-${viewerActive ? 'active' : 'passive'}`
+    const key = `${current?.id ?? 'none'}-${viewerId}-${viewerTurn ? 'active' : 'passive'}`
     if (key === lastTurnKey.current) return
     lastTurnKey.current = key
     if (!current) return
-    if (current.id === viewerId && viewerActive) {
+    if (current.id === viewerId && viewerTurn) {
       announcer.sayPolite('Your turn')
     } else {
       announcer.sayPolite(`${current.name}'s turn`)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, viewerId, viewerActive])
+  }, [current?.id, viewerId, viewerTurn])
 
   useSoundFromLog(state, soundOn)
 
@@ -807,6 +829,7 @@ export function TableScreen({
   }
 
   const tapCard = (card: CardT, cardZone: Zone) => {
+    if (blindActive) return
     const preparingNextTurn = !viewerActive && canPreselectVisible && cardZone === zone
     if (!viewerActive && !preparingNextTurn) return
     setPickupArmed(false)
@@ -928,7 +951,7 @@ export function TableScreen({
     player: p,
     faceUp: p.faceUp,
     hideFaceUp: spectating,
-    handCount: p.hand.length,
+    handCount: (heldHandOf(p.id) ?? p.hand).length,
     faceDownCount: p.faceDown.length,
     offline: seatOffline?.(p.id) ?? false,
   }))
@@ -995,9 +1018,9 @@ export function TableScreen({
           </div>
           <div
             className="game-turn-label table-turn-label"
-            data-my-turn={isViewerTurn && viewerActive ? 'true' : 'false'}
-            aria-current={isViewerTurn && viewerActive ? 'step' : undefined}
-            aria-label={isViewerTurn && viewerActive
+            data-my-turn={isViewerTurn && viewerTurn ? 'true' : 'false'}
+            aria-current={isViewerTurn && viewerTurn ? 'step' : undefined}
+            aria-label={isViewerTurn && viewerTurn
               ? 'Your turn'
               : `${current?.name ?? 'Table'}'s turn`}
           >
@@ -1005,7 +1028,7 @@ export function TableScreen({
             <span className="table-turn-label__copy">
               <span className="table-turn-label__eyebrow" aria-hidden="true">Turn</span>
               <strong className="table-turn-label__name">
-                {isViewerTurn && viewerActive ? 'Your move' : current?.name ?? 'Table'}
+                {isViewerTurn && viewerTurn ? 'Your move' : current?.name ?? 'Table'}
               </strong>
             </span>
           </div>
@@ -1106,10 +1129,10 @@ export function TableScreen({
       {/* Z4 — ActionBar + hand fan, flush to safe-area bottom */}
       {viewer && !spectating ? <footer
         className="app-bottom-zone game-footer table-hand-zone"
-        data-hand-count={viewer.hand.length}
+        data-hand-count={(heldHandOf(viewer.id) ?? viewer.hand).length}
         data-active-zone={zone ?? undefined}
       >
-        {isViewerTurn && viewerActive && (
+        {isViewerTurn && viewerTurn && (
           <SpatialTurnMarker
             owner="local"
             label="Your move"
@@ -1139,7 +1162,7 @@ export function TableScreen({
             />
           )}
           <HandFan
-            cards={viewer.hand}
+            cards={heldHandOf(viewer.id) ?? viewer.hand}
             states={states}
             ariaHints={hints}
             onSelect={(viewerActive || canPreselectVisible) && zone === 'hand' ? onHandId : undefined}

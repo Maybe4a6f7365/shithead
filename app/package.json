@@ -10,6 +10,7 @@
     "preview": "vite preview --host",
     "test": "vitest run && node scripts/animationPerformance.test.mjs",
     "test:watch": "vitest",
+    "test:browser": "node scripts/test-animations-browser.mjs",
     "test:coverage": "vitest run --coverage",
     "generate:build-meta": "node scripts/write-build-meta.mjs",
     "typecheck:worker": "tsc -p tsconfig.worker.json",

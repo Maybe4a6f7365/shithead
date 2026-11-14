@@ -39,10 +39,25 @@ function snapshot(el: Element): FlightRect | null {
   return { left: r.left, top: r.top, width: r.width, height: r.height }
 }
 
-/** Snapshot every element under `root` tagged `data-card-id`. */
+/**
+ * True while an animation is moving `el` itself. Its bounding box then
+ * includes the animation's transform, so it is not a resting position: a
+ * rect recorded now would make the next FLIP replay a move that already
+ * happened.
+ */
+function isAnimating(el: Element): boolean {
+  const getAnimations = (el as Partial<Pick<Element, 'getAnimations'>>).getAnimations
+  return typeof getAnimations === 'function' && getAnimations.call(el).length > 0
+}
+
+/**
+ * Snapshot every element under `root` tagged `data-card-id`. Elements that
+ * are mid-animation keep the resting rect the FLIP pass stored for them.
+ */
 export function recordCardRects(root: ParentNode | null): void {
   if (!root || flipsHeld()) return
   root.querySelectorAll<HTMLElement>('[data-card-id]').forEach(el => {
+    if (isAnimating(el)) return
     const id = el.dataset.cardId
     const rect = id ? snapshot(el) : null
     if (id && rect) cardRects.set(id, rect)
@@ -122,11 +137,14 @@ export function flipHand(root: ParentNode | null, entryFrom: HandEntrySource): v
   const origin = entryFrom ? peekSeatRect(entryFrom) : null
   let fresh = 0
   root.querySelectorAll<HTMLElement>('[data-card-id]').forEach(el => {
-    if (!canAnimate(el)) return
+    // Still travelling from an earlier FLIP: let it finish where it is going.
+    if (!canAnimate(el) || isAnimating(el)) return
     const id = el.dataset.cardId
     const now = id ? snapshot(el) : null
     if (!id || !now) return
     const before = peekCardRect(id)
+    // Store the resting rect now, before the animation transforms the box.
+    cardRects.set(id, now)
     if (before) {
       const dx = before.left - now.left
       const dy = before.top - now.top
@@ -277,10 +295,12 @@ export function isTrivialTableauMove(offset: FlightOffset): boolean {
 export function flipTableau(root: ParentNode | null): void {
   if (!root || flipsHeld()) return
   root.querySelectorAll<HTMLElement>('[data-card-id]').forEach(el => {
-    if (!canAnimate(el)) return
+    if (!canAnimate(el) || isAnimating(el)) return
     const id = el.dataset.cardId
     const now = id ? snapshot(el) : null
     const before = id ? peekCardRect(id) : null
+    // Store the resting rect now, before the animation transforms the box.
+    if (id && now) cardRects.set(id, now)
     if (!now || !before) return
     const offset = flightOffset(before, now)
     if (isTrivialTableauMove(offset)) return

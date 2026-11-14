@@ -19,8 +19,27 @@ import {
 import { addRecentCustomMessage } from '../customMessageHistory'
 import { gameOverResults } from './gameOverResults'
 import { useWakeLock } from '../useWakeLock'
+import type { GameEvent } from '../engine'
+import { latestActionEvents } from './feedText'
+import { blindRevealMs } from './BlindReveal'
+import { burnCleanupMs } from './BurnFx'
 
 const AI_TICK_MS = 900
+
+/**
+ * How long the AI waits before acting. A blind flip (and the burn it may
+ * cause) takes longer than the base tick, and the next action must not land
+ * on top of an animation that is still explaining the previous one.
+ */
+export function aiTickDelay(log: GameEvent[], reduceMotion: boolean | null): number {
+  if (reduceMotion) return AI_TICK_MS
+  const events = latestActionEvents(log)
+  const blind = events.find(event => event.type === 'BLIND_REVEAL')
+  if (blind?.type !== 'BLIND_REVEAL') return AI_TICK_MS
+  const clear = events.find(event => event.type === 'CLEAR_PILE')
+  const burn = clear?.type === 'CLEAR_PILE' ? burnCleanupMs(clear.reason) : 0
+  return Math.max(AI_TICK_MS, blindRevealMs(blind.success) + burn + 160)
+}
 
 export function GameTable({ onLeave }: { onLeave: () => void }) {
   const state = useSPGame(s => s.state)
@@ -75,22 +94,23 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
 
   // Auto-tick AI turns.
   useEffect(() => {
+    const delay = aiTickDelay(state.log, reduceMotion)
     if (phase === 'tribute') {
       const tributeWinner = players.find(player => player.id === state.pendingTribute?.winnerId)
       if (!tributeWinner?.isAI) return
-      const t = setTimeout(() => tickAI(), AI_TICK_MS)
+      const t = setTimeout(() => tickAI(), delay)
       return () => clearTimeout(t)
     }
     const quickPlayer = players.find(player => player.id === state.pendingQuickFollowUp?.playerId)
     if (quickPlayer?.isAI) {
-      const t = setTimeout(() => tickAI(), AI_TICK_MS)
+      const t = setTimeout(() => tickAI(), delay)
       return () => clearTimeout(t)
     }
     if (!current || current.isOut || loserId || !current.isAI) return
     if (phase !== 'play' && phase !== 'endgame') return
-    const t = setTimeout(() => tickAI(), AI_TICK_MS)
+    const t = setTimeout(() => tickAI(), delay)
     return () => clearTimeout(t)
-  }, [current?.id, current?.isAI, current?.isOut, phase, turnCount, loserId, state.pendingTribute?.winnerId, state.pendingQuickFollowUp?.playerId, state.pendingQuickFollowUp?.sourceSeq, players, tickAI])
+  }, [current?.id, current?.isAI, current?.isOut, phase, turnCount, loserId, state.pendingTribute?.winnerId, state.pendingQuickFollowUp?.playerId, state.pendingQuickFollowUp?.sourceSeq, players, tickAI, state.seq, reduceMotion])
 
   // AI players never rearrange — auto-ready any stragglers.
   useEffect(() => {

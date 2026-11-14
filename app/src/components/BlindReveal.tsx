@@ -38,6 +38,12 @@ export interface BlindTimeline {
   flip: number[]
 }
 
+/** Length (ms) of the reveal, including the hand-off beat before onDone. */
+export const BLIND_DONE_PAD_MS = 40
+export function blindRevealMs(success: boolean): number {
+  return (success ? 900 : 1280) + BLIND_DONE_PAD_MS
+}
+
 /** Pure timeline builder (ms) so the choreography is testable. */
 export function blindTimeline(
   success: boolean,
@@ -111,7 +117,7 @@ export function BlindReveal({ data, onDone }: { data: BlindRevealData; onDone: (
 
   useLayoutEffect(() => {
     if (!timeline) return
-    const timer = window.setTimeout(() => onDone(data.key), timeline.total + 40)
+    const timer = window.setTimeout(() => onDone(data.key), timeline.total + BLIND_DONE_PAD_MS)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline])
