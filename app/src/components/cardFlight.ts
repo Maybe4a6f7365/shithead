@@ -89,3 +89,54 @@ export function flightDuration(offset: FlightOffset): number {
 export function isTrivialFlight(offset: FlightOffset): boolean {
   return Math.hypot(offset.x, offset.y) < 12
 }
+
+export type HandEntrySource = 'stock' | 'pile' | null
+
+type Animatable = Pick<HTMLElement, 'animate'>
+
+function canAnimate(el: Element): el is Element & Animatable {
+  return typeof (el as Partial<Animatable>).animate === 'function'
+}
+
+/**
+ * FLIP the hand: cards that moved slide from their previous slot (so the row
+ * closes gaps and re-sorts smoothly) and cards that are new fly in from the
+ * stock or pile. Runs in a layout effect, before paint; call it BEFORE
+ * recordCardRects so the registry still holds the previous positions.
+ * Compositor-only: transform and opacity, via the Web Animations API.
+ */
+export function flipHand(root: ParentNode | null, entryFrom: HandEntrySource): void {
+  if (!root) return
+  const origin = entryFrom ? peekSeatRect(entryFrom) : null
+  let fresh = 0
+  root.querySelectorAll<HTMLElement>('[data-card-id]').forEach(el => {
+    if (!canAnimate(el)) return
+    const id = el.dataset.cardId
+    const now = id ? snapshot(el) : null
+    if (!id || !now) return
+    const before = peekCardRect(id)
+    if (before) {
+      const dx = before.left - now.left
+      const dy = before.top - now.top
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+      el.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
+        { duration: 200, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
+      )
+      return
+    }
+    const delay = Math.min(fresh++ * 40, 240)
+    if (origin) {
+      const offset = flightOffset(origin, now)
+      el.animate(
+        [
+          { transform: `translate(${offset.x}px, ${offset.y}px) scale(${offset.scale})`, opacity: 0.2 },
+          { transform: 'translate(0, 0) scale(1)', opacity: 1 },
+        ],
+        { duration: Math.round(flightDuration(offset) * 1000), delay, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' },
+      )
+    } else {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, delay, fill: 'backwards' })
+    }
+  })
+}

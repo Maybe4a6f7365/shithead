@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {
-  flightDuration, flightOffset, forgetCardRect, isTrivialFlight, peekCardRect, recordCardRects,
+  flightDuration, flightOffset, flipHand, forgetCardRect, isTrivialFlight, peekCardRect, recordCardRects, registerSeat,
 } from '../cardFlight'
 
 const rect = (left: number, top: number, width = 60, height = 84) => ({ left, top, width, height })
@@ -40,5 +40,53 @@ describe('cardFlight', () => {
     expect(peekCardRect('c2')).toBeNull()
     forgetCardRect('c1')
     expect(peekCardRect('c1')).toBeNull()
+  })
+})
+
+describe('flipHand', () => {
+  const box = (id: string, left: number, top = 600) => {
+    const el = document.createElement('div')
+    el.dataset.cardId = id
+    el.getBoundingClientRect = () => ({ left, top, width: 80, height: 128 } as DOMRect)
+    const calls: Array<{ keyframes: Keyframe[]; options: KeyframeAnimationOptions }> = []
+    ;(el as unknown as { animate: unknown }).animate = (keyframes: Keyframe[], options: KeyframeAnimationOptions) => {
+      calls.push({ keyframes, options })
+      return {}
+    }
+    return { el, calls }
+  }
+  const rootOf = (...els: HTMLElement[]) => {
+    const root = document.createElement('div')
+    root.append(...els)
+    return root
+  }
+
+  it('slides neighbours that moved, leaves still cards alone', () => {
+    const before = rootOf(box('a', 0).el, box('b', 28).el, box('c', 56).el)
+    recordCardRects(before)
+    const a = box('a', 0), c = box('c', 28) // b played; c closes the gap
+    flipHand(rootOf(a.el, c.el), null)
+    expect(a.calls).toHaveLength(0)
+    expect(c.calls).toHaveLength(1)
+    expect(c.calls[0].keyframes[0]).toEqual({ transform: 'translate(28px, 0px)' })
+  })
+
+  it('flies new cards in from the stock anchor, staggered', () => {
+    registerSeat('stock', (() => {
+      const el = document.createElement('div')
+      el.getBoundingClientRect = () => ({ left: 100, top: 200, width: 80, height: 128 } as DOMRect)
+      return el
+    })())
+    const n1 = box('n1', 0), n2 = box('n2', 28)
+    flipHand(rootOf(n1.el, n2.el), 'stock')
+    expect(n1.calls[0].options.delay).toBe(0)
+    expect(n2.calls[0].options.delay).toBe(40)
+    expect(String(n1.calls[0].keyframes[0].transform)).toContain('translate(100px, -400px)')
+  })
+
+  it('fades new cards in when no origin is known', () => {
+    const n = box('n3', 0)
+    flipHand(rootOf(n.el), 'pile')
+    expect(n.calls[0].keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }])
   })
 })

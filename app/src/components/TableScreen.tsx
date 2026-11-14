@@ -430,6 +430,15 @@ export function TableScreen({
     return play?.type === 'PLAY_CARDS' && play.playerId !== viewerId ? play.playerId : null
   }, [state.log, viewerId])
 
+  // Cards that just arrived in the viewer's hand fly in from the stock (draw)
+  // or the pile (pickup).
+  const handEntryFrom = useMemo<'stock' | 'pile' | null>(() => {
+    const events = latestActionEvents(state.log)
+    if (events.some(e => e.type === 'PICK_UP_PILE' && e.playerId === viewerId)) return 'pile'
+    if (events.some(e => e.type === 'DRAW' && e.playerId === viewerId)) return 'stock'
+    return null
+  }, [state.log, viewerId])
+
   useEffect(() => {
     previousPile.current = { top, pileCount: ps, effectiveRank: topRank }
   }, [top, ps, topRank])
@@ -1018,6 +1027,7 @@ export function TableScreen({
             ariaHints={hints}
             onSelect={(viewerActive || canPreselectVisible) && zone === 'hand' ? onHandId : undefined}
             orderKey={viewerId}
+            entryFrom={handEntryFrom}
           />
         </div>
       </footer> : (

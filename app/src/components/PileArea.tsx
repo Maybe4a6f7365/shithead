@@ -4,7 +4,7 @@
 // turns danger-bright at ≤5 (§4.4). Burn animation is owned by Wastepile.
 // NOTE: only stock.length is meaningful — stock cards arrive masked.
 // ============================================================================
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import clsx from 'clsx'
 import type { Card as CardT, Rank } from '../engine'
@@ -12,7 +12,7 @@ import { Card } from './Card'
 import type { SpecialEffect } from './SpecialEffectFeedback'
 import {
   flightDuration, flightOffset, forgetCardRect, isTrivialFlight, peekCardRect, peekSeatRect,
-  type FlightOffset,
+  registerSeat, type FlightOffset,
 } from './cardFlight'
 
 export type PileEntryKind = 'reset' | 'mirror' | 'low' | 'skip' | 'standard'
@@ -334,11 +334,19 @@ export function PileArea({
 }: PileAreaProps) {
   const rule = currentPileRule(top, effectiveRank)
   const reduceMotion = useReducedMotion()
+  const areaRef = useRef<HTMLElement>(null)
+  // Drawn and picked-up cards fly into the hand from these two anchors.
+  useLayoutEffect(() => {
+    const area = areaRef.current
+    registerSeat('stock', area?.querySelector('.pile-card--stock') ?? null)
+    registerSeat('pile', area?.querySelector('.pile-card--waste') ?? null)
+  })
   const skipCount = specialEffect?.kind === 'skip'
     ? Math.max(1, specialEffect.count ?? 1)
     : 1
   return (
     <section
+      ref={areaRef}
       className="pile-area flex items-start justify-center gap-s4"
       aria-label="Stock and play pile"
       data-pile-empty={pileCount === 0 ? 'true' : 'false'}

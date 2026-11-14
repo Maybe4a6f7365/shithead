@@ -8,7 +8,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { HAND_DISPLAY_ORDER, type Card as CardT } from '../engine'
 import { Card, type CardVisualState } from './Card'
-import { recordCardRects } from './cardFlight'
+import { flipHand, recordCardRects, type HandEntrySource } from './cardFlight'
 
 /** Keep the viewer's display order while removing played cards and appending draws. */
 export function reconcileHandOrder(order: string[], cards: CardT[]): string[] {
@@ -48,10 +48,12 @@ export interface HandFanProps {
   labelledBy?: string
   /** Keeps independent local presentation orders when a hot-seat viewer changes. */
   orderKey?: string
+  /** Where newly arrived cards fly in from: the stock (draw) or pile (pickup). */
+  entryFrom?: HandEntrySource
 }
 
 export function HandFan({
-  cards, states, ariaHints, onSelect, labelledBy, orderKey = 'default',
+  cards, states, ariaHints, onSelect, labelledBy, orderKey = 'default', entryFrom = null,
 }: HandFanProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
@@ -124,8 +126,18 @@ export function HandFan({
 
   // Remember where each card sits so a played card can fly to the pile from
   // its real slot (the slot has unmounted by the time the pile renders).
+  const flipReady = useRef(false)
+  const flipOrderKey = useRef(orderKey)
   useLayoutEffect(() => {
-    recordCardRects(containerRef.current)
+    const container = containerRef.current
+    const reduceMotion = typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // No animation for the first deal or when a hot-seat viewer swaps hands.
+    const animate = flipReady.current && flipOrderKey.current === orderKey && !reduceMotion
+    flipReady.current = true
+    flipOrderKey.current = orderKey
+    if (animate) flipHand(container, entryFrom)
+    recordCardRects(container)
   })
   useEffect(() => {
     const container = containerRef.current
