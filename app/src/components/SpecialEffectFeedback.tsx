@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import type { GameEvent, Rank } from '../engine'
+import { EASE_LAND } from './motion'
 
 export type SpecialEffectKind = 'burn' | 'reset' | 'mirror' | 'low' | 'skip'
 
@@ -96,7 +97,7 @@ export function SpecialEffectFeedback({ effect }: { effect: SpecialEffect | null
           initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -3 }}
-          transition={{ duration: reduceMotion ? 0.01 : 0.24, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: reduceMotion ? 0.01 : 0.24, ease: EASE_LAND }}
         >
           <span className="special-effect-feedback__rule" data-effect={effect.kind}>
             <strong className="special-effect-feedback__label">{effect.label}</strong>

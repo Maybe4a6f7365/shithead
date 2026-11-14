@@ -18,6 +18,7 @@ import {
   flightDuration, flightOffset, forgetCardRect, groupGhostTiming, groupTilt, isTrivialFlight, peekCardRect,
   peekSeatRect, registerSeat, staggerDelay, type FlightOffset,
 } from './cardFlight'
+import { EASE_LAND, EASE_EXIT } from './motion'
 
 export type PileEntryKind = 'reset' | 'mirror' | 'low' | 'skip' | 'standard'
 
@@ -41,21 +42,21 @@ export function pileEntryChoreography(kind: PileEntryKind, skipCount: number, re
     return {
       initial: { opacity: 0, y: 18, scale: 1 },
       animate: { opacity: 1, y: [18, -3, 0], scale: [1, 0.95, 1] },
-      transition: { duration: 0.28, times: [0, 0.62, 1], ease: [0.16, 1, 0.3, 1] },
+      transition: { duration: 0.28, times: [0, 0.62, 1], ease: EASE_LAND },
     }
   }
   if (kind === 'mirror') {
     return {
       initial: { opacity: 0, x: 18, y: 12, rotate: 3 },
       animate: { opacity: 1, x: [18, 7, 0], y: [12, 0, 0], rotate: [3, -2, -1] },
-      transition: { duration: 0.32, times: [0, 0.64, 1], ease: [0.16, 1, 0.3, 1] },
+      transition: { duration: 0.32, times: [0, 0.64, 1], ease: EASE_LAND },
     }
   }
   if (kind === 'low') {
     return {
       initial: { opacity: 0, y: -14, scale: 1.03 },
       animate: { opacity: 1, y: [-14, 4, 0], scale: [1.03, 0.97, 1] },
-      transition: { duration: 0.3, times: [0, 0.68, 1], ease: [0.16, 1, 0.3, 1] },
+      transition: { duration: 0.3, times: [0, 0.68, 1], ease: EASE_LAND },
     }
   }
   if (kind === 'skip') {
@@ -67,13 +68,13 @@ export function pileEntryChoreography(kind: PileEntryKind, skipCount: number, re
         y: [16, -2, 0],
         rotate: [-5, skipCount > 1 ? 4 : 2, finalTilt],
       },
-      transition: { duration: skipCount > 1 ? 0.36 : 0.3, times: [0, 0.66, 1], ease: [0.16, 1, 0.3, 1] },
+      transition: { duration: skipCount > 1 ? 0.36 : 0.3, times: [0, 0.66, 1], ease: EASE_LAND },
     }
   }
   return {
     initial: { opacity: 0, y: 16, scale: 1.025 },
     animate: { opacity: 1, y: 0, scale: 1 },
-    transition: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
+    transition: { duration: 0.24, ease: EASE_LAND },
   }
 }
 
@@ -221,7 +222,7 @@ export function Wastepile({
           duration: flightDuration(flight),
           delay: topDelay,
           opacity: { duration: 0.01, delay: topDelay },
-          ease: [0.16, 1, 0.3, 1] as [number, number, number, number],
+          ease: EASE_LAND,
         },
       }
     : baseEntry
@@ -287,7 +288,7 @@ export function Wastepile({
                   }}
               transition={reduceMotion
                 ? { duration: 0.12 }
-                : variantMotion?.transition ?? { duration: 0.52, times: [0, 0.18, 0.58, 1], ease: [0.4, 0, 1, 1] }}
+                : variantMotion?.transition ?? { duration: 0.52, times: [0, 0.18, 0.58, 1], ease: EASE_EXIT }}
             >
               {top && underCount > 0 && (
                 <span className="waste-pile__burn-edges" aria-hidden="true">
@@ -343,7 +344,7 @@ export function Wastepile({
               initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.72, y: 4 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.9 }}
-              transition={{ duration: reduceMotion ? 0.12 : 0.22, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: reduceMotion ? 0.12 : 0.22, ease: EASE_LAND }}
             >
               ×{skipCount}
             </motion.span>
@@ -510,7 +511,7 @@ export function PileArea({
           aria-hidden="true"
           initial={pileRuleChipInitial(rule.kind, Boolean(reduceMotion))}
           animate={{ opacity: 1, x: 0, y: 0, scale: 1, scaleY: 1 }}
-          transition={{ duration: reduceMotion ? 0.12 : 0.24, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: reduceMotion ? 0.12 : 0.24, ease: EASE_LAND }}
         >
           <span className="pile-area__rule-label" aria-hidden="true">{rule.label}</span>
           <strong className="pile-area__rule-value" aria-hidden="true">{rule.value}</strong>

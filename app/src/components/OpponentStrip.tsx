@@ -9,6 +9,7 @@ import clsx from 'clsx'
 import { motion } from 'framer-motion'
 import type { Card as CardT, Player } from '../engine'
 import { registerSeat } from './cardFlight'
+import { EASE_LAND } from './motion'
 
 export interface Seat {
   player: Player
@@ -42,7 +43,7 @@ export function SpatialTurnMarker({ owner, label, className, layoutId }: Spatial
       layoutId={layoutId}
       layout={layoutId ? 'position' : false}
       transition={layoutId
-        ? { layout: { duration: 0.26, ease: [0.16, 1, 0.3, 1] } }
+        ? { layout: { duration: 0.26, ease: EASE_LAND } }
         : { duration: 0 }}
     >
       <span className="table-turn-marker__dot" />

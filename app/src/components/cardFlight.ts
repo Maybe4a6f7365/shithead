@@ -5,6 +5,8 @@
 // reaches the pile its hand slot has already unmounted.
 // ============================================================================
 
+import { EASE_LAND_CSS, EASE_SETTLE_CSS, EASE_SLIDE_CSS } from './motion'
+
 export interface FlightRect {
   left: number
   top: number
@@ -32,6 +34,8 @@ export function flipsHeld(): boolean {
   return Date.now() < holdUntil
 }
 const seatRects = new Map<string, FlightRect>()
+// The elements themselves, so an anchor can be measured where it is now.
+const seatElements = new Map<string, Element>()
 
 function snapshot(el: Element): FlightRect | null {
   const r = el.getBoundingClientRect()
@@ -83,14 +87,31 @@ export function forgetCardRect(id: string | null | undefined): void {
 export function registerSeat(id: string, el: Element | null): void {
   if (!el) {
     seatRects.delete(id)
+    seatElements.delete(id)
     return
   }
+  seatElements.set(id, el)
   const rect = snapshot(el)
   if (rect) seatRects.set(id, rect)
 }
 
+/**
+ * Where a seat (or the stock / pile anchor) is right now. Measured live while
+ * its element is on screen, so a rotation or resize since the last render
+ * cannot send a flight off from where the seat used to be; the cached rect
+ * only covers an element that has already left the page.
+ */
 export function peekSeatRect(id: string | null | undefined): FlightRect | null {
-  return id ? seatRects.get(id) ?? null : null
+  if (!id) return null
+  const el = seatElements.get(id)
+  if (el?.isConnected) {
+    const live = snapshot(el)
+    if (live) {
+      seatRects.set(id, live)
+      return live
+    }
+  }
+  return seatRects.get(id) ?? null
 }
 
 /** Pure: translate/scale that makes a box at `to` look like it sits at `from`. */
@@ -151,7 +172,7 @@ export function flipHand(root: ParentNode | null, entryFrom: HandEntrySource): v
       if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
       el.animate(
         [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
-        { duration: 200, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
+        { duration: 200, easing: EASE_SLIDE_CSS },
       )
       return
     }
@@ -163,7 +184,7 @@ export function flipHand(root: ParentNode | null, entryFrom: HandEntrySource): v
           { transform: `translate(${offset.x}px, ${offset.y}px) scale(${offset.scale})`, opacity: 0.2 },
           { transform: 'translate(0, 0) scale(1)', opacity: 1 },
         ],
-        { duration: Math.round(flightDuration(offset) * 1000), delay, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' },
+        { duration: Math.round(flightDuration(offset) * 1000), delay, easing: EASE_LAND_CSS, fill: 'backwards' },
       )
     } else {
       el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, delay, fill: 'backwards' })
@@ -221,14 +242,37 @@ export interface DealHandle {
   total: number
   /** Finish immediately (tap to skip). */
   skip: () => void
+  /** The screen is going away: stop everything and leave no timer behind. */
+  cancel: () => void
 }
 
+const DEAL_STORAGE_KEY = 'shithead.lastDeal'
 let lastDealKey: string | null = null
 
-/** True once per distinct set of dealt cards — a reconnect/remount won't replay. */
+function storedDealKey(): string | null {
+  try {
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(DEAL_STORAGE_KEY)
+  } catch {
+    return null // private mode / blocked storage: fall back to memory only
+  }
+}
+
+/**
+ * True once per distinct set of dealt cards. A remount, a reconnect or a page
+ * reload in the same tab won't replay the deal: the last key is kept in
+ * sessionStorage as well as in memory.
+ */
 export function claimDeal(key: string): boolean {
-  if (lastDealKey === key) return false
+  if ((lastDealKey ?? storedDealKey()) === key) {
+    lastDealKey = key
+    return false
+  }
   lastDealKey = key
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(DEAL_STORAGE_KEY, key)
+  } catch {
+    // Memory still guards this page load.
+  }
   return true
 }
 
@@ -256,7 +300,7 @@ export function dealIn(root: ParentNode | null, origin: FlightRect): DealHandle 
         { translate: `${offset.x}px ${offset.y}px`, scale: String(offset.scale), rotate: `${dealTilt(index) * 2}deg`, opacity: 0 },
         { translate: '0px 0px', scale: '1', rotate: '0deg', opacity: 1 },
       ],
-      { duration: DEAL_CARD_MS, delay: dealDelay(index, ordered.length), easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' },
+      { duration: DEAL_CARD_MS, delay: dealDelay(index, ordered.length), easing: EASE_LAND_CSS, fill: 'backwards' },
     ))
   })
   const total = dealDelay(ordered.length - 1, ordered.length) + DEAL_CARD_MS
@@ -272,6 +316,11 @@ export function dealIn(root: ParentNode | null, origin: FlightRect): DealHandle 
       clearTimeout(timer)
       animations.forEach(animation => animation.cancel?.())
       settle()
+    },
+    cancel: () => {
+      clearTimeout(timer)
+      animations.forEach(animation => animation.cancel?.())
+      releaseFlips()
     },
   }
 }
@@ -309,9 +358,32 @@ export function flipTableau(root: ParentNode | null): void {
         { translate: `${offset.x}px ${offset.y}px`, scale: String(offset.scale) },
         { translate: '0px 0px', scale: '1' },
       ],
-      { duration: TABLEAU_FLIP_MS, easing: 'cubic-bezier(0.34, 1.3, 0.4, 1)' },
+      { duration: TABLEAU_FLIP_MS, easing: EASE_SETTLE_CSS },
     )
   })
+}
+
+/**
+ * Run `callback` (rAF-throttled) when the viewport is resized or rotated: every
+ * cached card rect is stale at that point, and a FLIP against it would slide
+ * cards in from where they sat in the old layout. Returns the unsubscribe.
+ */
+export function onViewportChange(callback: () => void): () => void {
+  let frame = 0
+  const handler = () => {
+    if (frame) return
+    frame = requestAnimationFrame(() => {
+      frame = 0
+      callback()
+    })
+  }
+  window.addEventListener('resize', handler, { passive: true })
+  window.addEventListener('orientationchange', handler, { passive: true })
+  return () => {
+    window.removeEventListener('resize', handler)
+    window.removeEventListener('orientationchange', handler)
+    if (frame) cancelAnimationFrame(frame)
+  }
 }
 
 /**

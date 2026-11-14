@@ -8,6 +8,7 @@
 //   - the pile must never look empty while a card is flying to it
 //   - a card that burns the pile flies there first; no empty slot in between
 //   - the play that ends the round is shown before the round-over card
+//   - after a resize or rotation, a flight still starts from the seat
 //
 // Starts a Vite dev server, drives the single-player store in headless
 // Chromium and samples the DOM every frame. Needs Playwright with Chromium
@@ -100,6 +101,8 @@ await page.evaluate(async () => {
         entryRank: entry?.getAttribute('aria-label')?.split(' ')[0] ?? null,
         entryDistance: entry ? Math.round(offPile(entry)) : null,
         overlay: Boolean(document.querySelector('.game-over-card')),
+        entryCenter: entry ? (r => [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)])(entry.getBoundingClientRect()) : null,
+        entryOpacity: entry ? opacityOf(entry) : 0,
         blind: Boolean(pile?.querySelector('.blind-reveal')),
         burning: Boolean(pile?.querySelector('.waste-pile__burn-stack')),
         realTop: engine.getTopCard(useSPGame.getState().state)?.rank ?? null,
@@ -308,6 +311,28 @@ await test('game over: the deciding card lands before the round-over card', asyn
   assert(firstOverlay, 'the round-over card never appeared')
   const landed = frames.find(frame => frame.entryRank === 'Ace' && frame.entryDistance < 4)
   assert(landed && landed.t <= firstOverlay.t, 'the round-over card appeared before the last card had landed')
+})
+
+await test('resize: an opponent\'s card still flies from their seat after the viewport changes', async () => {
+  await page.evaluate(() => T.craft({ me: { hand: ['4', '4', '4'] }, opp: { hand: ['K', 'Q'] }, pile: ['5'], turn: 'opp' }))
+  await settle(500)
+  const seatCenter = () => page.evaluate(() => {
+    const rect = document.querySelector('[data-seat-id]').getBoundingClientRect()
+    return [Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2)]
+  })
+  const before = await seatCenter()
+  // Nothing re-renders the table between the resize and the play.
+  await page.setViewportSize({ width: 844, height: 600 })
+  await settle(400)
+  const seat = await seatCenter()
+  assert(Math.hypot(seat[0] - before[0], seat[1] - before[1]) > 80, 'test setup: the seat did not move with the viewport')
+  const frames = await page.evaluate(() => T.record(700, () => T.play(1, 'hand')))
+  const first = frames.find(frame => frame.entryRank === 'King' && frame.entryOpacity > 0.5)
+  assert(first, 'the played card never appeared')
+  const miss = Math.round(Math.hypot(first.entryCenter[0] - seat[0], first.entryCenter[1] - seat[1]))
+  assert(miss < 45, `the flight started ${miss}px away from the seat (seat ${seat}, card ${first.entryCenter})`)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settle(300)
 })
 
 await test('no uncaught page errors', async () => {

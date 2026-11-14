@@ -25,6 +25,7 @@ import {
   REACTION_BY_ID,
   REACTION_OPTIONS,
 } from './reactionCatalog'
+import { EASE_SLIDE } from './motion'
 
 type ReactionTab = 'emoji' | 'text'
 
@@ -251,7 +252,7 @@ export function EmoteButton({
               initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.99 }}
-              transition={{ duration: reduceMotion ? 0.01 : 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+              transition={{ duration: reduceMotion ? 0.01 : 0.18, ease: EASE_SLIDE }}
             >
               <div className="reaction-picker__header">
                 <div>
@@ -516,7 +517,7 @@ export function EmoteFeedback({ event, playerName }: { event: EmoteEvent | null;
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.82 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 1.03 }}
-            transition={{ duration: reduceMotion ? 0.01 : 0.24, ease: [0.2, 0.8, 0.2, 1] }}
+            transition={{ duration: reduceMotion ? 0.01 : 0.24, ease: EASE_SLIDE }}
           >
             <span className="visually-hidden">
               {name}{watching ? `, ${WATCHING_LABEL},` : ''} reacted: {option.label}
@@ -578,7 +579,7 @@ function SpeechFeedback({ eventKey, playerName, text, watching = false }: {
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.98 }}
-            transition={{ duration: reduceMotion ? 0.01 : 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+            transition={{ duration: reduceMotion ? 0.01 : 0.2, ease: EASE_SLIDE }}
           >
             <span className="reaction-feedback__speaker">
               <span className="reaction-feedback__speaker-name">{playerName}</span>

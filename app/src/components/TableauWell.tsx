@@ -5,7 +5,7 @@
 // ============================================================================
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Card as CardT } from '../engine'
-import { flipTableau, onAnyScroll, recordCardRects } from './cardFlight'
+import { flipTableau, onAnyScroll, onViewportChange, recordCardRects } from './cardFlight'
 import { Card, type CardVisualState } from './Card'
 
 export interface TableauWellProps {
@@ -40,7 +40,12 @@ export function TableauWell({
     flipReady.current = true
     recordCardRects(wellRef.current)
   })
-  useEffect(() => onAnyScroll(() => recordCardRects(wellRef.current)), [])
+  useEffect(() => {
+    const record = () => recordCardRects(wellRef.current)
+    const stopScroll = onAnyScroll(record)
+    const stopViewport = onViewportChange(record)
+    return () => { stopScroll(); stopViewport() }
+  }, [])
   return (
     <div
       ref={wellRef}

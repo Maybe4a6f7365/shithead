@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useBackDismiss } from '../backStack'
+import { EASE_SLIDE } from './motion'
 
 const SECTIONS: Array<{ title: string; lines: string[] }> = [
   {
@@ -116,7 +117,7 @@ export function RulesSheet({ open, onClose }: { open: boolean; onClose: () => vo
         aria-labelledby="rules-sheet-title"
         initial={reduceMotion ? { opacity: 0 } : { y: '100%' }}
         animate={reduceMotion ? { opacity: 1 } : { y: 0 }}
-        transition={reduceMotion ? { duration: 0.15 } : { duration: 0.26, ease: [0.2, 0.8, 0.2, 1] }}
+        transition={reduceMotion ? { duration: 0.15 } : { duration: 0.26, ease: EASE_SLIDE }}
         className="sheet-panel rules-sheet absolute bottom-0 left-0 right-0 z-sheet bg-cream text-ink max-h-[70dvh] overflow-y-auto mx-auto max-w-[400px] p-s5 pb-s7"
         style={{ borderRadius: 'var(--radius-sheet)' }}
       >

@@ -10,6 +10,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import type { GameRules } from '../engine'
 import { RoundRulesControl } from './RoundRulesControl'
 import { revealStandings } from './standingsReveal'
+import { EASE_SETTLE, EASE_SLIDE } from './motion'
 
 const focusableSelector = [
   'button:not([disabled])',
@@ -189,7 +190,12 @@ export function GameOverOverlay({
     if (!reveal) return
     const skip = () => reveal.skip()
     dialog.addEventListener('pointerdown', skip, { once: true })
-    return () => dialog.removeEventListener('pointerdown', skip)
+    return () => {
+      dialog.removeEventListener('pointerdown', skip)
+      // Leaving mid-reveal: no row animation or winner timer may outlive the card.
+      reveal.skip()
+      revealedRef.current = false
+    }
   }, [hasRows, reduceMotion])
 
   useEffect(() => {
@@ -239,14 +245,14 @@ export function GameOverOverlay({
       <motion.div
         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-        transition={reduceMotion ? { duration: 0.15 } : { duration: 0.2, ease: [0.2, 0.8, 0.2, 1], delay: 0.2 }}
+        transition={reduceMotion ? { duration: 0.15 } : { duration: 0.2, ease: EASE_SLIDE, delay: 0.2 }}
         className={`phase-card game-over-card w-full ${leaderboard || hasVoteFlow ? 'max-w-[560px]' : 'max-w-[370px]'} max-h-full overflow-y-auto bg-cream text-ink rounded-button p-s5 text-center`}
       >
         {result === 'lose' && (
           <motion.div
             initial={reduceMotion ? { opacity: 0 } : { rotate: 0, opacity: 0 }}
             animate={reduceMotion ? { opacity: 1 } : { rotate: 8, opacity: 1 }}
-            transition={reduceMotion ? { duration: 0.15 } : { duration: 0.6, ease: [0.34, 1.3, 0.4, 1] }}
+            transition={reduceMotion ? { duration: 0.15 } : { duration: 0.6, ease: EASE_SETTLE }}
             className="game-over-card__mark mx-auto mb-s3 w-8 h-11 rounded-[3px] bg-burgundy flex items-center justify-center"
             aria-hidden="true"
           >
@@ -257,7 +263,9 @@ export function GameOverOverlay({
         <h1 className="phase-card__title game-over-card__title font-display text-display font-semibold text-burgundy mt-s1">
           {result === 'win' ? "You're clear" : result === 'lose' ? 'Shithead.' : 'Round complete'}
         </h1>
-        {result === 'win' && (
+        {/* One burst per round-over card: with a leaderboard, the count-down
+            ends on the winner's row burst instead. */}
+        {result === 'win' && !(hasRows && !reduceMotion) && (
           <span className="game-over-card__burst" aria-hidden="true">
             <SuitBurst burstKey="round-win" />
           </span>
@@ -266,7 +274,7 @@ export function GameOverOverlay({
           className="phase-card__rule game-over-card__rule mx-auto my-s3 h-[2px] w-12 bg-gold"
           initial={reduceMotion ? { opacity: 0 } : { width: 0 }}
           animate={reduceMotion ? { opacity: 1 } : { width: 48 }}
-          transition={reduceMotion ? { duration: 0.15 } : { duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
+          transition={reduceMotion ? { duration: 0.15 } : { duration: 0.4, ease: EASE_SLIDE }}
           aria-hidden="true"
         />
         <p className="phase-card__copy game-over-card__copy text-body text-ink">

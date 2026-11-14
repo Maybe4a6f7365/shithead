@@ -9,6 +9,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Card as CardT } from '../engine'
 import { Card } from './Card'
 import { flightOffset, groupTilt, type FlightRect } from './cardFlight'
+import { EASE_LEAVE_CSS, EASE_SETTLE_CSS } from './motion'
 
 export interface PileSweepData {
   key: string
@@ -60,7 +61,7 @@ export function PileSweep({ data, onDone }: { data: PileSweepData; onDone: (key:
           { opacity: 1, offset: 0.6 },
           { transform: `translate(${offset.x}px, ${offset.y}px) scale(${offset.scale}) rotate(${tilt * 2}deg)`, opacity: 0, offset: 1 },
         ],
-        { duration: SWEEP_SECONDS * 1000, delay: trail * 40, easing: 'cubic-bezier(0.5, 0, 0.9, 0.4)', fill: 'both' },
+        { duration: SWEEP_SECONDS * 1000, delay: trail * 40, easing: EASE_LEAVE_CSS, fill: 'both' },
       )
     })
     // The taker's seat recoils as the stack lands on it.
@@ -70,7 +71,7 @@ export function PileSweep({ data, onDone }: { data: PileSweepData; onDone: (key:
       if (seat && typeof seat.animate === 'function') {
         seat.animate(
           [{ transform: 'scale(1)' }, { transform: 'scale(1.07)' }, { transform: 'scale(0.98)' }, { transform: 'scale(1)' }],
-          { duration: 260, easing: 'cubic-bezier(0.34, 1.3, 0.4, 1)' },
+          { duration: 260, easing: EASE_SETTLE_CSS },
         )
       }
     }, SWEEP_SECONDS * 1000 * 0.75)

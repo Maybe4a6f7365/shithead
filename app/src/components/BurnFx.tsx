@@ -11,6 +11,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import type { Card as CardT } from '../engine'
 import { Card } from './Card'
+import { EASE_LAND_CSS, EASE_LEAVE_CSS } from './motion'
 
 export type BurnReason = 'ten' | 'quartet' | 'joker'
 
@@ -50,7 +51,7 @@ function play(el: Element | null, keyframes: Keyframes, options: KeyframeAnimati
   }
 }
 
-const EASE_OUT = 'cubic-bezier(0.16, 1, 0.3, 1)'
+const EASE_OUT = EASE_LAND_CSS
 
 export function BurnFx({ reason, card }: { reason: BurnReason; card: CardT | null }) {
   const root = useRef<HTMLDivElement>(null)
@@ -77,7 +78,7 @@ export function BurnFx({ reason, card }: { reason: BurnReason; card: CardT | nul
           { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1, offset: 0.55 },
           { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1, offset: 0.62 },
           { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 0 },
-        ], { duration: 720, easing: 'cubic-bezier(0.5, 0, 0.9, 0.4)' })
+        ], { duration: 720, easing: EASE_LEAVE_CSS })
       })
       play(el.querySelector('[data-fx="ring"]'), [
         { transform: 'scale(0.7)', opacity: 0 },

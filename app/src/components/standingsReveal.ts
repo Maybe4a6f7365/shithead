@@ -6,6 +6,8 @@
 // fill: backwards so rows are hidden until their turn. Tap anywhere to skip.
 // ============================================================================
 
+import { EASE_LAND_CSS, EASE_SETTLE_CSS } from './motion'
+
 export const REVEAL_START_MS = 450
 export const REVEAL_ROW_MS = 260
 export const REVEAL_MAX_STEP_MS = 170
@@ -51,7 +53,7 @@ export function revealStandings(
           { opacity: 0, translate: '0px 14px' },
           { opacity: 1, translate: '0px 0px' },
         ],
-        { duration: REVEAL_ROW_MS, delay, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' },
+        { duration: REVEAL_ROW_MS, delay, easing: EASE_LAND_CSS, fill: 'backwards' },
       ))
     }
     const tag = row.querySelector<HTMLElement>('.game-over-loser-tag')
@@ -63,7 +65,7 @@ export function revealStandings(
           { opacity: 1, scale: '0.9', rotate: '-3deg', offset: 0.6 },
           { opacity: 1, scale: '1', rotate: '-3deg' },
         ],
-        { duration: 320, delay: delay + 200, easing: 'cubic-bezier(0.34, 1.3, 0.4, 1)', fill: 'both' },
+        { duration: 320, delay: delay + 200, easing: EASE_SETTLE_CSS, fill: 'both' },
       ))
     }
     if (row.dataset.place === '1' && options.onWinner) {

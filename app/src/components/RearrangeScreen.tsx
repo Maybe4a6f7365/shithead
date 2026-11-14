@@ -50,6 +50,7 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
     return () => {
       window.clearTimeout(timer)
       screen.removeEventListener('pointerdown', skip)
+      deal.cancel()
     }
   }, [dealReady])
 
