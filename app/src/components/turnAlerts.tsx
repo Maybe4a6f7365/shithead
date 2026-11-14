@@ -242,7 +242,7 @@ function isGameplayPhase(phase: TurnSnapshot['phase']): boolean {
 }
 
 /** Best-effort haptics: unsupported or policy-blocked vibration stays silent. */
-function vibrate(pattern: VibratePattern): void {
+export function vibrate(pattern: VibratePattern): void {
   try {
     if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
     navigator.vibrate(pattern)

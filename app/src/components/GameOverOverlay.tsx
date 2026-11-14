@@ -1,9 +1,11 @@
 // ============================================================================
 // GameOverOverlay — victory (§4.8) and charming tipped-crown defeat (§4.9).
 // Scrim + centered cream panel. Detailed round results widen the panel while
-// preserving the compact legacy card. No confetti or looping animation.
+// preserving the compact legacy card. A win gets one short suit burst; nothing
+// loops.
 // ============================================================================
 import { useEffect, useId, useRef } from 'react'
+import { SuitBurst } from './WinMoment'
 import { motion, useReducedMotion } from 'framer-motion'
 import type { GameRules } from '../engine'
 import { RoundRulesControl } from './RoundRulesControl'
@@ -228,6 +230,11 @@ export function GameOverOverlay({
         <h1 className="phase-card__title game-over-card__title font-display text-display font-semibold text-burgundy mt-s1">
           {result === 'win' ? "You're clear" : result === 'lose' ? 'Shithead.' : 'Round complete'}
         </h1>
+        {result === 'win' && (
+          <span className="game-over-card__burst" aria-hidden="true">
+            <SuitBurst burstKey="round-win" />
+          </span>
+        )}
         <motion.div
           className="phase-card__rule game-over-card__rule mx-auto my-s3 h-[2px] w-12 bg-gold"
           initial={reduceMotion ? { opacity: 0 } : { width: 0 }}

@@ -45,7 +45,8 @@ import {
   normalizeChatText,
 } from '../engine/protocol'
 import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
-import { TurnAttentionBeacon } from './turnAlerts'
+import { TurnAttentionBeacon, vibrate } from './turnAlerts'
+import { OutMoment, outMomentCopy, type OutMomentEvent } from './WinMoment'
 import { SpectatorIndicator } from './SpectatorIndicator'
 
 export interface TableScreenProps {
@@ -257,6 +258,7 @@ export function TableScreen({
   const [burning, setBurning] = useState(false)
   const [burnSnapshot, setBurnSnapshot] = useState<BurnSnapshot | null>(null)
   const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
+  const [outMoment, setOutMoment] = useState<OutMomentEvent | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
   const [displayedBroadcast, setDisplayedBroadcast] = useState<BroadcastEvent | null>(null)
   const [displayedChat, setDisplayedChat] = useState<ChatEvent | null>(null)
@@ -398,6 +400,16 @@ export function TableScreen({
     const ctx: FeedContext = { meId: viewerId, players: state.players }
     const line = feedLine(state, ctx)
     if (line) announcer.sayPolite(line.text)
+    // The viewer just shed their last card while the round carries on. When
+    // the same action ends the round, the round-over card celebrates instead.
+    const viewerWentOut = fresh.some(e => e.type === 'PLAYER_OUT' && e.playerId === viewerId)
+    if (viewerWentOut && !fresh.some(e => e.type === 'GAME_OVER')) {
+      const place = Math.max(1, state.players.filter(player => player.isOut).length)
+      const copy = outMomentCopy(place)
+      setOutMoment({ key: `${viewerId}:${cursor}`, place })
+      announcer.sayPolite(`${copy.title}. ${copy.detail}.`)
+      if (turnAlertsEnabled) vibrate([30, 60, 30, 60, 90])
+    }
     if (fresh.some(e => e.type === 'GAME_OVER')) {
       const loser = state.players.find(p => p.id === state.loserId)
       announcer.sayPolite(`Round over. ${loser?.name ?? ''} is the Shithead.`)
@@ -916,6 +928,7 @@ export function TableScreen({
           data-burn-key={burnSnapshot?.actionKey}
         >
           <SpecialEffectFeedback effect={specialEffect} />
+          <OutMoment event={outMoment?.key.startsWith(`${viewerId}:`) ? outMoment : null} />
           <PileArea
             stockCount={state.stock.length}
             top={burning && burnSnapshot ? burnSnapshot.top : top}
