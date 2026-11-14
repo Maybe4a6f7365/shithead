@@ -13,6 +13,7 @@ import type { Card as CardT, GameState } from '../engine'
 import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
 import type { BlindRevealData } from './BlindReveal'
+import type { PileSweepData } from './PileSweep'
 import { peekCardRect, peekSeatRect, type FlightRect } from './cardFlight'
 import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
@@ -472,6 +473,37 @@ export function TableScreen({
   }, [blindEvent?.key, blindActive])
   const onBlindDone = useCallback((key: string) => setDismissedBlind(key), [])
   const holdPile = blindActive ? blindHoldRef.current : null
+
+  // Picking up the pile sweeps the stack to the taker. A failed blind flip has
+  // its own sweep, so it is excluded here.
+  const pickupEvent = useMemo(() => {
+    const events = latestActionEvents(state.log)
+    const pickup = events.find(e => e.type === 'PICK_UP_PILE')
+    if (pickup?.type !== 'PICK_UP_PILE' || events.some(e => e.type === 'BLIND_REVEAL')) return null
+    return { key: `pickup-${state.seq ?? state.turnCount}`, playerId: pickup.playerId }
+  }, [state.log, state.seq, state.turnCount])
+  const [dismissedPickup, setDismissedPickup] = useState<string | null>(() => pickupEvent?.key ?? null)
+  const pickupHoldRef = useRef<{ key: string; top: CardT | null | undefined; pileCount: number } | null>(null)
+  if (pickupEvent && pickupHoldRef.current?.key !== pickupEvent.key) {
+    pickupHoldRef.current = { key: pickupEvent.key, top: previousPile.current.top, pileCount: previousPile.current.pileCount }
+  }
+  const sweepActive = Boolean(pickupEvent) && !reduceMotion && pickupEvent?.key !== dismissedPickup
+  const sweepData = useMemo<PileSweepData | null>(() => {
+    const hold = pickupHoldRef.current
+    if (!pickupEvent || !sweepActive || !hold?.top) return null
+    const handRect = document.querySelector('.hand-fan')?.getBoundingClientRect()
+    return {
+      key: pickupEvent.key,
+      card: hold.top,
+      count: hold.pileCount,
+      takerId: pickupEvent.playerId,
+      toward: pickupEvent.playerId === viewerId
+        ? handRect ? { left: handRect.left, top: handRect.top, width: handRect.width, height: handRect.height } : null
+        : peekSeatRect(pickupEvent.playerId),
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickupEvent?.key, sweepActive])
+  const onSweepDone = useCallback((key: string) => setDismissedPickup(key), [])
 
   // Cards that just arrived in the viewer's hand fly in from the stock (draw)
   // or the pile (pickup).
@@ -1006,6 +1038,8 @@ export function TableScreen({
             effectiveRank={holdPile ? holdPile.effectiveRank : burning && burnSnapshot ? burnSnapshot.effectiveRank : topRank}
             burning={burning && !holdPile}
             blind={blindData}
+            sweep={sweepData}
+            onSweepDone={onSweepDone}
             onBlindDone={onBlindDone}
             suppressEntryId={blindEvent?.success ? blindEvent.card.id : null}
             burnKey={burnSnapshot?.actionKey}

@@ -10,6 +10,7 @@ import clsx from 'clsx'
 import type { Card as CardT, Rank } from '../engine'
 import { Card } from './Card'
 import { BlindReveal, type BlindRevealData } from './BlindReveal'
+import { PileSweep, type PileSweepData } from './PileSweep'
 import type { SpecialEffect } from './SpecialEffectFeedback'
 import {
   flightDuration, flightOffset, forgetCardRect, groupGhostTiming, groupTilt, isTrivialFlight, peekCardRect,
@@ -120,6 +121,9 @@ export interface WastepileProps {
   /** Face-down play being revealed over the pile. */
   blind?: BlindRevealData | null
   onBlindDone?: (key: string) => void
+  /** The pile being swept to whoever picked it up. */
+  sweep?: PileSweepData | null
+  onSweepDone?: (key: string) => void
   /** Top card already shown by the blind reveal; skip its entry animation. */
   suppressEntryId?: string | null
 }
@@ -136,6 +140,8 @@ export function Wastepile({
   group,
   blind,
   onBlindDone,
+  sweep,
+  onSweepDone,
   suppressEntryId,
 }: WastepileProps) {
   const reduceMotion = useReducedMotion()
@@ -277,6 +283,7 @@ export function Wastepile({
             </motion.div>
           )}
         </AnimatePresence>
+        {sweep && onSweepDone && <PileSweep key={sweep.key} data={sweep} onDone={onSweepDone} />}
         {blind && onBlindDone && <BlindReveal key={blind.key} data={blind} onDone={onBlindDone} />}
         {burning && (
           <motion.span
@@ -350,6 +357,8 @@ export interface PileAreaProps {
   group?: CardT[] | null
   blind?: BlindRevealData | null
   onBlindDone?: (key: string) => void
+  sweep?: PileSweepData | null
+  onSweepDone?: (key: string) => void
   suppressEntryId?: string | null
 }
 
@@ -402,6 +411,8 @@ export function PileArea({
   group,
   blind,
   onBlindDone,
+  sweep,
+  onSweepDone,
   suppressEntryId,
 }: PileAreaProps) {
   const rule = currentPileRule(top, effectiveRank)
@@ -444,6 +455,8 @@ export function PileArea({
           group={group}
           blind={blind}
           onBlindDone={onBlindDone}
+          sweep={sweep}
+          onSweepDone={onSweepDone}
           suppressEntryId={suppressEntryId}
         />
       </div>
