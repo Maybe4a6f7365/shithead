@@ -8,7 +8,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { HAND_DISPLAY_ORDER, type Card as CardT } from '../engine'
 import { Card, type CardVisualState } from './Card'
-import { flipHand, recordCardRects, type HandEntrySource } from './cardFlight'
+import { flipHand, onAnyScroll, recordCardRects, type HandEntrySource } from './cardFlight'
 
 /** Keep the viewer's display order while removing played cards and appending draws. */
 export function reconcileHandOrder(order: string[], cards: CardT[]): string[] {
@@ -144,7 +144,12 @@ export function HandFan({
     if (!container) return
     const onScroll = () => recordCardRects(container)
     container.addEventListener('scroll', onScroll, { passive: true })
-    return () => container.removeEventListener('scroll', onScroll)
+    // The page itself can scroll too (small screens); keep rects in viewport space.
+    const stopPageScroll = onAnyScroll(onScroll)
+    return () => {
+      container.removeEventListener('scroll', onScroll)
+      stopPageScroll()
+    }
   }, [])
 
   // A pickup or draw re-sorts the hand and can push the cards that matter

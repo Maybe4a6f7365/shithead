@@ -257,3 +257,60 @@ export function dealIn(root: ParentNode | null, origin: FlightRect): DealHandle 
     },
   }
 }
+
+export const TABLEAU_FLIP_MS = 260
+
+/** True when a card's box barely changed (position AND size), so a FLIP would be jitter. */
+export function isTrivialTableauMove(offset: FlightOffset): boolean {
+  return Math.hypot(offset.x, offset.y) < 1 && Math.abs(offset.scale - 1) < 0.02
+}
+
+/**
+ * FLIP the tableau: any card whose box changed since it was last recorded
+ * slides/scales from there to its new slot. That covers a hand<->face-up swap
+ * (the card's old rect was recorded in the hand), closing gaps when a face-up
+ * card is played, and minis growing to full size in place. Cards with no
+ * recorded rect (brand new) are left alone. Uses the individual translate and
+ * scale properties so the face-down stack's own CSS transform survives. Call
+ * BEFORE recordCardRects.
+ */
+export function flipTableau(root: ParentNode | null): void {
+  if (!root || flipsHeld()) return
+  root.querySelectorAll<HTMLElement>('[data-card-id]').forEach(el => {
+    if (!canAnimate(el)) return
+    const id = el.dataset.cardId
+    const now = id ? snapshot(el) : null
+    const before = id ? peekCardRect(id) : null
+    if (!now || !before) return
+    const offset = flightOffset(before, now)
+    if (isTrivialTableauMove(offset)) return
+    el.animate(
+      [
+        { translate: `${offset.x}px ${offset.y}px`, scale: String(offset.scale) },
+        { translate: '0px 0px', scale: '1' },
+      ],
+      { duration: TABLEAU_FLIP_MS, easing: 'cubic-bezier(0.34, 1.3, 0.4, 1)' },
+    )
+  })
+}
+
+/**
+ * Run `callback` (rAF-throttled) whenever anything scrolls, so cached card
+ * rects stay in viewport coordinates and a later FLIP doesn't mistake a scroll
+ * for a move. Returns the unsubscribe.
+ */
+export function onAnyScroll(callback: () => void): () => void {
+  let frame = 0
+  const handler = () => {
+    if (frame) return
+    frame = requestAnimationFrame(() => {
+      frame = 0
+      callback()
+    })
+  }
+  window.addEventListener('scroll', handler, { capture: true, passive: true })
+  return () => {
+    window.removeEventListener('scroll', handler, { capture: true } as EventListenerOptions)
+    if (frame) cancelAnimationFrame(frame)
+  }
+}

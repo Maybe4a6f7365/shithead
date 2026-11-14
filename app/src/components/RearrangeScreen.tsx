@@ -68,27 +68,32 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
     player.faceUp.forEach(c => { upStates.set(c.id, 'joinable'); upHints.set(c.id, 'tap to swap') })
   }
 
+  // Selection lives in a ref as well, so the handlers can read it without
+  // doing side effects (swap, announce) inside a state updater, which React
+  // StrictMode runs twice in development.
+  const selectedRef = useRef<number | null>(null)
+  selectedRef.current = selectedHand
+
   const onHandId = useCallback((id: string) => {
     const idx = player.hand.findIndex(c => c.id === id)
     if (idx === -1) return
-    setSelectedHand(sel => {
-      const next = sel === idx ? null : idx
-      announcer.sayPolite(next === null ? 'Card unmarked' : `${player.hand[next].rank} marked — tap a face-up card to swap`)
-      return next
-    })
+    const next = selectedRef.current === idx ? null : idx
+    announcer.sayPolite(next === null ? 'Card unmarked' : `${player.hand[next].rank} marked — tap a face-up card to swap`)
+    selectedRef.current = next
+    setSelectedHand(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player.hand])
 
   const onFaceUpId = useCallback((id: string) => {
     const upIdx = player.faceUp.findIndex(c => c.id === id)
     if (upIdx === -1) return
-    setSelectedHand(sel => {
-      if (sel !== null) {
-        onSwapRef.current(sel, upIdx)
-        announcer.sayPolite('Cards swapped')
-      }
-      return null
-    })
+    const selected = selectedRef.current
+    if (selected !== null) {
+      onSwapRef.current(selected, upIdx)
+      announcer.sayPolite('Cards swapped')
+    }
+    selectedRef.current = null
+    setSelectedHand(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player.faceUp])
 

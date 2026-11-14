@@ -3,9 +3,9 @@
 // Six cards therefore read as three physical stacks instead of two wasteful
 // rows. Minis upgrade to full cards while setup/endgame is interactive.
 // ============================================================================
-import { useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Card as CardT } from '../engine'
-import { recordCardRects } from './cardFlight'
+import { flipTableau, onAnyScroll, recordCardRects } from './cardFlight'
 import { Card, type CardVisualState } from './Card'
 
 export interface TableauWellProps {
@@ -29,9 +29,18 @@ export function TableauWell({
   const size = fullSize ? 'full' : 'mini'
   const stackCount = Math.max(faceUp.length, faceDown.length)
   const wellRef = useRef<HTMLDivElement>(null)
+  // Cards that moved (hand<->face-up swap, gap closing) or changed size (minis
+  // growing to full) glide from where they were. Not on first mount, not for
+  // reduced motion; the opening deal pauses it via holdFlips.
+  const flipReady = useRef(false)
   useLayoutEffect(() => {
+    const reduceMotion = typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (flipReady.current && !reduceMotion) flipTableau(wellRef.current)
+    flipReady.current = true
     recordCardRects(wellRef.current)
   })
+  useEffect(() => onAnyScroll(() => recordCardRects(wellRef.current)), [])
   return (
     <div
       ref={wellRef}
