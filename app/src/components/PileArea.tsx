@@ -11,6 +11,7 @@ import type { Card as CardT, Rank } from '../engine'
 import { Card } from './Card'
 import { BlindReveal, type BlindRevealData } from './BlindReveal'
 import { PileSweep, type PileSweepData } from './PileSweep'
+import { BurnFx, burnStackMotion, type BurnReason } from './BurnFx'
 import type { SpecialEffect } from './SpecialEffectFeedback'
 import {
   flightDuration, flightOffset, forgetCardRect, groupGhostTiming, groupTilt, isTrivialFlight, peekCardRect,
@@ -111,6 +112,7 @@ export interface WastepileProps {
   effectiveRank?: Rank | null
   burning?: boolean
   burnKey?: string
+  burnReason?: BurnReason | null
   skipCount?: number
   /** Empty-pile rule teaching (§4.2): shown only while pile empty + my turn. */
   teachHint?: boolean
@@ -134,6 +136,7 @@ export function Wastepile({
   effectiveRank,
   burning,
   burnKey,
+  burnReason,
   skipCount = 1,
   teachHint,
   playedBy,
@@ -178,6 +181,7 @@ export function Wastepile({
     group?.forEach(card => forgetCardRect(card.id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [top?.id])
+  const variantMotion = reduceMotion ? null : burnStackMotion(burnReason)
   const baseEntry = pileEntryChoreography(entryKind, skipCount, Boolean(reduceMotion))
   const entry = top && suppressEntryId === top.id
     ? {
@@ -246,7 +250,7 @@ export function Wastepile({
               initial={{ opacity: 1 }}
               animate={reduceMotion
                 ? { opacity: 0 }
-                : {
+                : variantMotion?.animate ?? {
                     opacity: [1, 1, 0.82, 0],
                     x: [0, -2, 14, 50],
                     y: [0, 2, 10, 24],
@@ -255,7 +259,7 @@ export function Wastepile({
                   }}
               transition={reduceMotion
                 ? { duration: 0.12 }
-                : { duration: 0.52, times: [0, 0.18, 0.58, 1], ease: [0.4, 0, 1, 1] }}
+                : variantMotion?.transition ?? { duration: 0.52, times: [0, 0.18, 0.58, 1], ease: [0.4, 0, 1, 1] }}
             >
               {top && underCount > 0 && (
                 <span className="waste-pile__burn-edges" aria-hidden="true">
@@ -285,6 +289,7 @@ export function Wastepile({
         </AnimatePresence>
         {sweep && onSweepDone && <PileSweep key={sweep.key} data={sweep} onDone={onSweepDone} />}
         {blind && onBlindDone && <BlindReveal key={blind.key} data={blind} onDone={onBlindDone} />}
+        {burning && burnReason && !reduceMotion && <BurnFx key={burnKey} reason={burnReason} card={top ?? null} />}
         {burning && (
           <motion.span
             aria-hidden="true"
@@ -351,6 +356,7 @@ export interface PileAreaProps {
   effectiveRank?: Rank | null
   burning?: boolean
   burnKey?: string
+  burnReason?: BurnReason | null
   specialEffect?: SpecialEffect | null
   teachHint?: boolean
   playedBy?: string | null
@@ -405,6 +411,7 @@ export function PileArea({
   effectiveRank,
   burning,
   burnKey,
+  burnReason,
   specialEffect,
   teachHint,
   playedBy,
@@ -449,6 +456,7 @@ export function PileArea({
           effectiveRank={effectiveRank}
           burning={burning}
           burnKey={burnKey}
+          burnReason={burnReason}
           skipCount={skipCount}
           teachHint={teachHint}
           playedBy={playedBy}

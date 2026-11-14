@@ -7,13 +7,14 @@
 // Interaction model (§6.1): tap-select → explicit PLAY button. No action ever
 // fires on a single tap of a card. Invalid taps shake + explain in the feed.
 // ============================================================================
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LayoutGroup, useReducedMotion } from 'framer-motion'
 import type { Card as CardT, GameState } from '../engine'
 import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
 import type { BlindRevealData } from './BlindReveal'
 import type { PileSweepData } from './PileSweep'
+import { burnCleanupMs, type BurnReason } from './BurnFx'
 import { peekCardRect, peekSeatRect, type FlightRect } from './cardFlight'
 import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
@@ -127,13 +128,14 @@ type Zone = 'hand' | 'faceUp' | 'faceDown'
 
 interface BurnSnapshot {
   actionKey: string
+  reason: BurnReason
   top: CardT | null
   pileCount: number
   effectiveRank: ReturnType<typeof getTopRank>
 }
 
-export function burnCleanupDelay(reduceMotion: boolean | null): number {
-  return reduceMotion ? 140 : 560
+export function burnCleanupDelay(reduceMotion: boolean | null, reason?: BurnReason | null): number {
+  return reduceMotion ? 140 : burnCleanupMs(reason)
 }
 
 /**
@@ -373,6 +375,18 @@ export function TableScreen({
         : { text: null, key: 'idle', tone: 'normal' as const }
 
   // ---- Effects: burn detection, announcements, sounds, turn announce ----
+  const [pendingBurn, setPendingBurn] = useState<{ snapshot: BurnSnapshot; generation: number } | null>(null)
+  const startBurn = (snapshot: BurnSnapshot, generation: number) => {
+    setBurnSnapshot(snapshot)
+    setBurning(true)
+    haptic(28)
+    burnTimerRef.current = setTimeout(() => {
+      if (burnGenerationRef.current !== generation) return
+      setBurning(false)
+      setBurnSnapshot(current => current?.actionKey === snapshot.actionKey ? null : current)
+      burnTimerRef.current = null
+    }, burnCleanupDelay(reduceMotion, snapshot.reason))
+  }
   const lastActionSeq = useRef(state.seq ?? state.turnCount)
   const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank })
   useEffect(() => {
@@ -388,23 +402,22 @@ export function TableScreen({
         ? burnPlay.cards[burnPlay.cards.length - 1] ?? previousPile.current.top
         : previousPile.current.top
       const actionKey = `${cursor}:${clear.reason}:${playedTop?.id ?? 'empty'}`
-      const generation = burnGenerationRef.current + 1
-      burnGenerationRef.current = generation
-      if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
-      setBurnSnapshot({
+      const snapshot: BurnSnapshot = {
         actionKey,
+        reason: clear.reason,
         top: playedTop,
         pileCount: previousPile.current.pileCount + (burnPlay?.type === 'PLAY_CARDS' ? burnPlay.cards.length : 0),
         effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
-      })
-      setBurning(true)
-      haptic(28)
-      burnTimerRef.current = setTimeout(() => {
-        if (burnGenerationRef.current !== generation) return
-        setBurning(false)
-        setBurnSnapshot(snapshot => snapshot?.actionKey === actionKey ? null : snapshot)
-        burnTimerRef.current = null
-      }, burnCleanupDelay(reduceMotion))
+      }
+      const generation = burnGenerationRef.current + 1
+      burnGenerationRef.current = generation
+      if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
+      if (!reduceMotion && fresh.some(e => e.type === 'BLIND_REVEAL')) {
+        // A blind flip plays first; the burn starts once the reveal is done.
+        setPendingBurn({ snapshot, generation })
+      } else {
+        startBurn(snapshot, generation)
+      }
     }
     setSpecialEffect(specialEffectFromEvents(fresh, cursor, topRank))
     const ctx: FeedContext = { meId: viewerId, players: state.players }
@@ -473,6 +486,14 @@ export function TableScreen({
   }, [blindEvent?.key, blindActive])
   const onBlindDone = useCallback((key: string) => setDismissedBlind(key), [])
   const holdPile = blindActive ? blindHoldRef.current : null
+  // A burn caused by a blind flip starts the moment the reveal is done. Layout
+  // effect so the hand-off never paints an empty pile in between.
+  useLayoutEffect(() => {
+    if (!pendingBurn || blindActive) return
+    if (burnGenerationRef.current === pendingBurn.generation) startBurn(pendingBurn.snapshot, pendingBurn.generation)
+    setPendingBurn(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingBurn, blindActive])
 
   // Picking up the pile sweeps the stack to the taker. A failed blind flip has
   // its own sweep, so it is excluded here.
@@ -1043,6 +1064,7 @@ export function TableScreen({
             onBlindDone={onBlindDone}
             suppressEntryId={blindEvent?.success ? blindEvent.card.id : null}
             burnKey={burnSnapshot?.actionKey}
+            burnReason={burnSnapshot?.reason}
             specialEffect={specialEffect}
             teachHint={ps === 0 && viewerActive}
             playedBy={playedBy}
