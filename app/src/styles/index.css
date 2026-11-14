@@ -2158,6 +2158,9 @@
   background: var(--color-felt);
 }
 
+/* iOS Safari zooms the page on focus for any field below 16px and does not
+   zoom back out. Every text field stays at 16px regardless of utility size. */
+input.modern-input { font-size: 16px; }
 .modern-input {
   border: 2px solid rgba(241, 229, 199, 0.34) !important;
   border-radius: 7px;

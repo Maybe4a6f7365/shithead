@@ -95,6 +95,10 @@ export function HotSeatLobby({ onBack }: { onBack: () => void }) {
                     placeholder={`Player ${i + 1}`}
                     maxLength={12}
                     autoComplete="off"
+                    autoCapitalize="words"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    enterKeyHint="done"
                     className="modern-input player-name-input w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body"
                   />
                 </div>

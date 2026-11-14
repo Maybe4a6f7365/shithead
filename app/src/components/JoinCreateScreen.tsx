@@ -139,6 +139,10 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
               placeholder="Your name"
               maxLength={12}
               autoComplete="off"
+              autoCapitalize="words"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="done"
               aria-invalid={nameError ? true : undefined}
               aria-describedby={nameError ? 'online-name-error' : undefined}
               className="modern-input player-name-input w-full min-h-[48px] px-s3 rounded-button text-body bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline"
@@ -204,6 +208,9 @@ export function JoinCreateScreen({ onEnterRoom, onBack }: JoinCreateScreenProps)
                 inputMode="text"
                 autoCapitalize="characters"
                 autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
                 aria-invalid={joinError ? true : undefined}
                 aria-describedby={joinError ? 'join-code-hint join-code-error' : 'join-code-hint'}
                 className="modern-input room-code-input w-full min-h-[48px] px-s3 rounded-button bg-felt-deep text-cream placeholder:text-cream-dim border border-hairline text-body tracking-[0.3em] uppercase"

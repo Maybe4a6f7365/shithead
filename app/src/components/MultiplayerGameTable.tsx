@@ -25,6 +25,7 @@ import {
   useTurnAlertPreferences,
 } from './turnAlerts'
 import { gameOverResults } from './gameOverResults'
+import { useWakeLock } from '../useWakeLock'
 
 const focusableSelector = [
   'button:not([disabled])',
@@ -89,6 +90,9 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
     localHumanTurn: Boolean(playerId && currentPlayerId === playerId && phase !== 'gameOver'),
     ...preferences,
   })
+
+  // Waiting for the deal counts: the round can start while the phone idles.
+  useWakeLock(phase === 'rearrange' || phase === 'tribute' || phase === 'play' || phase === 'endgame')
 
   // READY state resets whenever a (new) rearrange phase begins.
   useEffect(() => {

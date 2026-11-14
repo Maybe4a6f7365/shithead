@@ -18,6 +18,7 @@ import {
 } from './turnAlerts'
 import { addRecentCustomMessage } from '../customMessageHistory'
 import { gameOverResults } from './gameOverResults'
+import { useWakeLock } from '../useWakeLock'
 
 const AI_TICK_MS = 900
 
@@ -65,6 +66,8 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
     localHumanTurn: Boolean(current && !current.isAI && !current.isOut && !loserId),
     ...preferences,
   })
+
+  useWakeLock(phase === 'play' || phase === 'endgame')
 
   useEffect(() => {
     if (!state.pendingQuickFollowUp) setDeclinedQuickSourceSeq(null)

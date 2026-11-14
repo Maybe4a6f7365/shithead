@@ -58,6 +58,8 @@ export function HandFan({
   const activeOrderKey = useRef(orderKey)
   const [metrics, setMetrics] = useState({ avail: 0, cardW: 0 })
   const [order, setOrder] = useState(() => sortHandByDisplay(cards))
+  // Roving tabindex: exactly one card is the hand's tab stop.
+  const [tabStop, setTabStop] = useState(0)
 
   useLayoutEffect(() => {
     const measure = () => {
@@ -126,12 +128,14 @@ export function HandFan({
         zIndex: Math.min(i + 1, 50),
       }}
       className="hand-fan__card shrink-0"
+      onFocus={() => setTabStop(i)}
     >
       <Card
         card={c}
         state={states.get(c.id) ?? 'rest'}
         ariaHint={`${ariaHints?.get(c.id) ? `${ariaHints.get(c.id)}, ` : ''}${i + 1} of ${n}`}
         onActivate={onSelect ? () => onSelect(c.id) : undefined}
+        focusable={i === Math.min(tabStop, n - 1)}
       />
     </div>
   )

@@ -41,6 +41,10 @@ export function NameField({ id, label, value, onChange, placeholder = 'Your name
         placeholder={placeholder}
         maxLength={12}
         autoComplete="off"
+        autoCapitalize="words"
+        autoCorrect="off"
+        spellCheck={false}
+        enterKeyHint="done"
         className={clsx(
           'modern-input player-name-input w-full min-h-[48px] px-s3 rounded-button text-body',
           onDark
