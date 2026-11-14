@@ -67,7 +67,8 @@ describe('blind reveal on the table', () => {
     expect(topLabel()).toMatch(/5 of diamonds/i)
 
     await waitFor(() => expect(view.container.querySelector('.blind-reveal')).toBeNull(), { timeout: 3000 })
-    expect(topLabel()).toMatch(/9 of spades/i)
+    // The outgoing card can linger a frame in AnimatePresence under load.
+    await waitFor(() => expect(topLabel()).toMatch(/9 of spades/i))
   })
 
   it('does not replay a reveal that was already in the log at mount', () => {

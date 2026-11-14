@@ -2,12 +2,13 @@
 // RearrangeScreen — tap a hand card (marks with the selected visual), tap a
 // face-up card to swap (§6.2, preserved pattern). Shared by SP and MP.
 // ============================================================================
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { Player } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
 import { HandFan } from './HandFan'
 import { TableauWell } from './TableauWell'
 import { Announcer, useAnnouncer } from './Announcer'
+import { claimDeal, dealIn, holdFlips } from './cardFlight'
 
 export interface RearrangeScreenProps {
   player: Player
@@ -20,6 +21,37 @@ export interface RearrangeScreenProps {
 export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: RearrangeScreenProps) {
   const [selectedHand, setSelectedHand] = useState<number | null>(null)
   const announcer = useAnnouncer()
+
+  // Opening deal: cards fly in from the dealer, once per set of dealt cards.
+  // Pass 1 decides and pauses the hand FLIP; pass 2 (after the hand has
+  // measured itself) reads real positions and deals.
+  const screenRef = useRef<HTMLDivElement>(null)
+  const dealing = useRef(false)
+  const [dealReady, setDealReady] = useState(false)
+  useLayoutEffect(() => {
+    const reduceMotion = typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const key = [...player.hand, ...player.faceUp, ...player.faceDown].map(card => card.id).sort().join('|')
+    // Sticky: StrictMode re-runs this effect, and the second claim would fail.
+    dealing.current = dealing.current || (!reduceMotion && claimDeal(`${player.id}:${key}`))
+    if (dealing.current) holdFlips(900)
+    setDealReady(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useLayoutEffect(() => {
+    const screen = screenRef.current
+    if (!dealReady || !screen || !dealing.current) return
+    const origin = { left: window.innerWidth / 2 - 30, top: -110, width: 60, height: 84 }
+    const deal = dealIn(screen, origin)
+    if (!deal) return
+    const skip = () => deal.skip()
+    screen.addEventListener('pointerdown', skip, { once: true })
+    const timer = window.setTimeout(() => screen.removeEventListener('pointerdown', skip), deal.total + 50)
+    return () => {
+      window.clearTimeout(timer)
+      screen.removeEventListener('pointerdown', skip)
+    }
+  }, [dealReady])
 
   const onSwapRef = useRef(onSwap)
   onSwapRef.current = onSwap
@@ -62,6 +94,7 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
 
   return (
     <div
+      ref={screenRef}
       className="app-viewport last-call-screen phase-screen phase-screen--rearrange rearrange-screen bg-felt text-cream flex flex-col table-select-none overflow-y-auto"
       data-waiting={waitingForOthers ? 'true' : 'false'}
       data-selection={selectedHand === null ? 'none' : 'hand'}

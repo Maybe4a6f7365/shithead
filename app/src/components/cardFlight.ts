@@ -19,6 +19,18 @@ export interface FlightOffset {
 }
 
 const cardRects = new Map<string, FlightRect>()
+// While a deal is in flight, card rects include its transforms and the hand is
+// still settling; recording them (or FLIPping against them) would fight the deal.
+let holdUntil = 0
+export function holdFlips(ms: number): void {
+  holdUntil = Math.max(holdUntil, Date.now() + ms)
+}
+export function releaseFlips(): void {
+  holdUntil = 0
+}
+export function flipsHeld(): boolean {
+  return Date.now() < holdUntil
+}
 const seatRects = new Map<string, FlightRect>()
 
 function snapshot(el: Element): FlightRect | null {
@@ -29,7 +41,7 @@ function snapshot(el: Element): FlightRect | null {
 
 /** Snapshot every element under `root` tagged `data-card-id`. */
 export function recordCardRects(root: ParentNode | null): void {
-  if (!root) return
+  if (!root || flipsHeld()) return
   root.querySelectorAll<HTMLElement>('[data-card-id]').forEach(el => {
     const id = el.dataset.cardId
     const rect = id ? snapshot(el) : null
@@ -106,7 +118,7 @@ function canAnimate(el: Element): el is Element & Animatable {
  * Compositor-only: transform and opacity, via the Web Animations API.
  */
 export function flipHand(root: ParentNode | null, entryFrom: HandEntrySource): void {
-  if (!root) return
+  if (!root || flipsHeld()) return
   const origin = entryFrom ? peekSeatRect(entryFrom) : null
   let fresh = 0
   root.querySelectorAll<HTMLElement>('[data-card-id]').forEach(el => {
@@ -170,5 +182,78 @@ export function groupGhostTiming(flight: number, topLandsAt: number, delay: numb
     total,
     times: [0, flight / total, hold / total, 1],
     opacity: [1, 1, 1, 0],
+  }
+}
+
+/** Delay (ms) before card `index` of `count` is dealt; whole deal stays ~<=700ms. */
+export function dealDelay(index: number, count: number): number {
+  if (count <= 1) return 0
+  return Math.round(Math.min(45, 360 / (count - 1)) * index)
+}
+
+/** Small deterministic spin so a dealt hand doesn't look machine-stamped. */
+export function dealTilt(index: number): number {
+  return ((index * 7) % 11) - 5 // -5..5 degrees
+}
+
+export const DEAL_CARD_MS = 280
+
+export interface DealHandle {
+  /** Total length of the deal in ms. */
+  total: number
+  /** Finish immediately (tap to skip). */
+  skip: () => void
+}
+
+let lastDealKey: string | null = null
+
+/** True once per distinct set of dealt cards — a reconnect/remount won't replay. */
+export function claimDeal(key: string): boolean {
+  if (lastDealKey === key) return false
+  lastDealKey = key
+  return true
+}
+
+/**
+ * Deal the round in: three face-down, three face-up, then the hand, each card
+ * flying from `origin` (the dealer, off the top of the screen) in turn. Uses
+ * the individual translate/scale/rotate properties so it composes with the
+ * transforms the cards already carry (e.g. the face-down offset).
+ */
+export function dealIn(root: ParentNode | null, origin: FlightRect): DealHandle | null {
+  if (!root) return null
+  const ordered = [
+    ...root.querySelectorAll<HTMLElement>('.tableau-stack__down[data-card-id]'),
+    ...root.querySelectorAll<HTMLElement>('.tableau-stack__up[data-card-id]'),
+    ...root.querySelectorAll<HTMLElement>('.hand-fan__card[data-card-id]'),
+  ].filter(el => canAnimate(el))
+  if (ordered.length === 0) return null
+  const animations: Animation[] = []
+  ordered.forEach((el, index) => {
+    const rect = snapshot(el)
+    if (!rect) return
+    const offset = flightOffset(origin, rect)
+    animations.push(el.animate(
+      [
+        { translate: `${offset.x}px ${offset.y}px`, scale: String(offset.scale), rotate: `${dealTilt(index) * 2}deg`, opacity: 0 },
+        { translate: '0px 0px', scale: '1', rotate: '0deg', opacity: 1 },
+      ],
+      { duration: DEAL_CARD_MS, delay: dealDelay(index, ordered.length), easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' },
+    ))
+  })
+  const total = dealDelay(ordered.length - 1, ordered.length) + DEAL_CARD_MS
+  holdFlips(total + 60)
+  const settle = () => {
+    releaseFlips()
+    recordCardRects(root) // fresh, transform-free positions for the next FLIP
+  }
+  const timer = setTimeout(settle, total + 80)
+  return {
+    total,
+    skip: () => {
+      clearTimeout(timer)
+      animations.forEach(animation => animation.cancel?.())
+      settle()
+    },
   }
 }
