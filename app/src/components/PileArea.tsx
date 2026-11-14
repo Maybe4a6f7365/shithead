@@ -4,11 +4,16 @@
 // turns danger-bright at ≤5 (§4.4). Burn animation is owned by Wastepile.
 // NOTE: only stock.length is meaningful — stock cards arrive masked.
 // ============================================================================
+import { useEffect, useMemo, useRef } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import clsx from 'clsx'
 import type { Card as CardT, Rank } from '../engine'
 import { Card } from './Card'
 import type { SpecialEffect } from './SpecialEffectFeedback'
+import {
+  flightDuration, flightOffset, forgetCardRect, isTrivialFlight, peekCardRect, peekSeatRect,
+  type FlightOffset,
+} from './cardFlight'
 
 export type PileEntryKind = 'reset' | 'mirror' | 'low' | 'skip' | 'standard'
 
@@ -107,6 +112,8 @@ export interface WastepileProps {
   skipCount?: number
   /** Empty-pile rule teaching (§4.2): shown only while pile empty + my turn. */
   teachHint?: boolean
+  /** Opponent who played the top card; their seat is the flight origin. */
+  playedBy?: string | null
 }
 
 export function Wastepile({
@@ -117,11 +124,35 @@ export function Wastepile({
   burnKey,
   skipCount = 1,
   teachHint,
+  playedBy,
 }: WastepileProps) {
   const reduceMotion = useReducedMotion()
+  const pileRef = useRef<HTMLDivElement>(null)
   const copiesRank = top?.rank === '3'
   const entryKind = pileEntryKind(top?.rank)
-  const entry = pileEntryChoreography(entryKind, skipCount, Boolean(reduceMotion))
+  // Where the new top card came from: its own hand/tableau slot when we saw
+  // it, else the playing opponent's seat. Computed once per top card.
+  const flight = useMemo<FlightOffset | null>(() => {
+    if (reduceMotion || !top) return null
+    const to = pileRef.current?.getBoundingClientRect()
+    if (!to || to.width <= 0 || to.height <= 0) return null
+    const from = peekCardRect(top.id) ?? peekSeatRect(playedBy)
+    if (!from) return null
+    const offset = flightOffset(from, to)
+    return isTrivialFlight(offset) ? null : offset
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top?.id])
+  useEffect(() => {
+    forgetCardRect(top?.id)
+  }, [top?.id])
+  const baseEntry = pileEntryChoreography(entryKind, skipCount, Boolean(reduceMotion))
+  const entry = flight
+    ? {
+        initial: { opacity: 1, x: flight.x, y: flight.y, scale: flight.scale, rotate: 0 },
+        animate: { opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 },
+        transition: { duration: flightDuration(flight), ease: [0.16, 1, 0.3, 1] as [number, number, number, number] },
+      }
+    : baseEntry
   const metaText = copiesRank
     ? `= ${effectiveRank ?? 'OPEN'}${underCount > 0 ? ` · +${underCount}` : ''}`
     : underCount > 0 ? `+${underCount}` : ''
@@ -137,7 +168,7 @@ export function Wastepile({
       data-entry-effect={entryKind}
       data-skip-count={entryKind === 'skip' ? skipCount : undefined}
     >
-      <div className="pile-card pile-card--waste relative">
+      <div ref={pileRef} className="pile-card pile-card--waste relative">
         <AnimatePresence mode="popLayout" initial={false}>
           {burning ? (
             <motion.div
@@ -251,6 +282,7 @@ export interface PileAreaProps {
   burnKey?: string
   specialEffect?: SpecialEffect | null
   teachHint?: boolean
+  playedBy?: string | null
 }
 
 export type PileRuleKind = 'open' | 'mirror' | 'low'
@@ -298,6 +330,7 @@ export function PileArea({
   burnKey,
   specialEffect,
   teachHint,
+  playedBy,
 }: PileAreaProps) {
   const rule = currentPileRule(top, effectiveRank)
   const reduceMotion = useReducedMotion()
@@ -327,6 +360,7 @@ export function PileArea({
           burnKey={burnKey}
           skipCount={skipCount}
           teachHint={teachHint}
+          playedBy={playedBy}
         />
       </div>
       {rule && !burning && (

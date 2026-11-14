@@ -3,7 +3,9 @@
 // Six cards therefore read as three physical stacks instead of two wasteful
 // rows. Minis upgrade to full cards while setup/endgame is interactive.
 // ============================================================================
+import { useLayoutEffect, useRef } from 'react'
 import type { Card as CardT } from '../engine'
+import { recordCardRects } from './cardFlight'
 import { Card, type CardVisualState } from './Card'
 
 export interface TableauWellProps {
@@ -26,8 +28,13 @@ export function TableauWell({
 }: TableauWellProps) {
   const size = fullSize ? 'full' : 'mini'
   const stackCount = Math.max(faceUp.length, faceDown.length)
+  const wellRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    recordCardRects(wellRef.current)
+  })
   return (
     <div
+      ref={wellRef}
       className="tableau-well mx-s4"
       style={{ scrollbarWidth: 'none' }}
       role="group"
@@ -60,7 +67,7 @@ export function TableauWell({
                 </div>
               )}
               {shown && (
-                <div className="tableau-stack__up">
+                <div className="tableau-stack__up" data-card-id={shown.id}>
                   <Card
                     card={shown}
                     size={size}

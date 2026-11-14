@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { HAND_DISPLAY_ORDER, type Card as CardT } from '../engine'
 import { Card, type CardVisualState } from './Card'
+import { recordCardRects } from './cardFlight'
 
 /** Keep the viewer's display order while removing played cards and appending draws. */
 export function reconcileHandOrder(order: string[], cards: CardT[]): string[] {
@@ -121,6 +122,19 @@ export function HandFan({
     return () => container.removeEventListener('scroll', update)
   }, [n, avail, cardW])
 
+  // Remember where each card sits so a played card can fly to the pile from
+  // its real slot (the slot has unmounted by the time the pile renders).
+  useLayoutEffect(() => {
+    recordCardRects(containerRef.current)
+  })
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const onScroll = () => recordCardRects(container)
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => container.removeEventListener('scroll', onScroll)
+  }, [])
+
   // A pickup or draw re-sorts the hand and can push the cards that matter
   // off-screen. Bring the first selected (else first playable) card back into
   // view — only when the hand grew, so manual scrolling is never fought.
@@ -171,6 +185,7 @@ export function HandFan({
         zIndex: Math.min(i + 1, 50),
       }}
       className="hand-fan__card shrink-0"
+      data-card-id={c.id}
       onFocus={() => setTabStop(i)}
     >
       <Card

@@ -4,10 +4,11 @@
 // OpponentSeat: compact phone-first seat. Public and hidden final cards use
 // the same overlaid three-stack silhouette as the local tableau.
 // ============================================================================
-import { memo } from 'react'
+import { memo, useLayoutEffect, useRef } from 'react'
 import clsx from 'clsx'
 import { motion } from 'framer-motion'
 import type { Card as CardT, Player } from '../engine'
+import { registerSeat } from './cardFlight'
 
 export interface Seat {
   player: Player
@@ -83,6 +84,7 @@ export const OpponentSeat = memo(function OpponentSeat({
         seat.offline && 'opponent-seat--offline',
         player.isOut && 'opponent-seat--out',
       )}
+      data-seat-id={player.id}
       data-active={active ? 'true' : 'false'}
       data-offline={seat.offline ? 'true' : 'false'}
       data-out={player.isOut ? 'true' : 'false'}
@@ -188,8 +190,16 @@ export function OpponentStrip({
   turnMarkerLayoutId,
   ariaLabel = 'Opponents',
 }: OpponentStripProps) {
+  const stripRef = useRef<HTMLDivElement>(null)
+  // Seats are where an opponent's played card flies in from.
+  useLayoutEffect(() => {
+    stripRef.current?.querySelectorAll<HTMLElement>('[data-seat-id]').forEach(el => {
+      if (el.dataset.seatId) registerSeat(el.dataset.seatId, el)
+    })
+  })
   return (
     <div
+      ref={stripRef}
       className="opponent-strip"
       role="list"
       aria-label={ariaLabel}

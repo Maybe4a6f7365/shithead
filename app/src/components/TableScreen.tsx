@@ -424,6 +424,12 @@ export function TableScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.seq, state.turnCount, state.log])
 
+  // Who played the card now on top; an opponent's seat is its flight origin.
+  const playedBy = useMemo(() => {
+    const play = latestActionEvents(state.log).find(event => event.type === 'PLAY_CARDS')
+    return play?.type === 'PLAY_CARDS' && play.playerId !== viewerId ? play.playerId : null
+  }, [state.log, viewerId])
+
   useEffect(() => {
     previousPile.current = { top, pileCount: ps, effectiveRank: topRank }
   }, [top, ps, topRank])
@@ -948,6 +954,7 @@ export function TableScreen({
             burnKey={burnSnapshot?.actionKey}
             specialEffect={specialEffect}
             teachHint={ps === 0 && viewerActive}
+            playedBy={playedBy}
           />
         </div>
         <div className="game-feed table-feed">
