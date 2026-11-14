@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LayoutGroup, useReducedMotion } from 'framer-motion'
 import type { Card as CardT, GameState } from '../engine'
-import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
+import { canPlay, getInterruptBurnCards, getMirroredCard, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
 import type { BlindRevealData } from './BlindReveal'
 import type { PileSweepData } from './PileSweep'
@@ -1069,6 +1069,7 @@ export function TableScreen({
             teachHint={ps === 0 && viewerActive}
             playedBy={playedBy}
             group={playedGroup}
+            mirrorOf={holdPile || burning ? null : getMirroredCard(state)}
           />
         </div>
         <div className="game-feed table-feed">

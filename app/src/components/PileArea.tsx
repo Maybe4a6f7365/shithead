@@ -11,6 +11,7 @@ import type { Card as CardT, Rank } from '../engine'
 import { Card } from './Card'
 import { BlindReveal, type BlindRevealData } from './BlindReveal'
 import { PileSweep, type PileSweepData } from './PileSweep'
+import { MirrorGhost } from './MirrorGhost'
 import { BurnFx, burnStackMotion, type BurnReason } from './BurnFx'
 import type { SpecialEffect } from './SpecialEffectFeedback'
 import {
@@ -120,6 +121,8 @@ export interface WastepileProps {
   playedBy?: string | null
   /** Every card of the latest multi-card play; the first is the pile's top card. */
   group?: CardT[] | null
+  /** The card a mirroring 3 on top is copying. */
+  mirrorOf?: CardT | null
   /** Face-down play being revealed over the pile. */
   blind?: BlindRevealData | null
   onBlindDone?: (key: string) => void
@@ -141,6 +144,7 @@ export function Wastepile({
   teachHint,
   playedBy,
   group,
+  mirrorOf,
   blind,
   onBlindDone,
   sweep,
@@ -149,6 +153,8 @@ export function Wastepile({
 }: WastepileProps) {
   const reduceMotion = useReducedMotion()
   const pileRef = useRef<HTMLDivElement>(null)
+  // A 3 already on top when the table mounts (reconnect) is history, not news.
+  const mountTopId = useRef(top?.id)
   const copiesRank = top?.rank === '3'
   const entryKind = pileEntryKind(top?.rank)
   // Where the new top card came from: its own hand/tableau slot when we saw
@@ -287,6 +293,9 @@ export function Wastepile({
             </motion.div>
           )}
         </AnimatePresence>
+        {mirrorOf && !reduceMotion && top?.rank === '3' && top.id !== mountTopId.current && (
+          <MirrorGhost key={`mirror-${top.id}`} source={mirrorOf} />
+        )}
         {sweep && onSweepDone && <PileSweep key={sweep.key} data={sweep} onDone={onSweepDone} />}
         {blind && onBlindDone && <BlindReveal key={blind.key} data={blind} onDone={onBlindDone} />}
         {burning && burnReason && !reduceMotion && <BurnFx key={burnKey} reason={burnReason} card={top ?? null} />}
@@ -361,6 +370,7 @@ export interface PileAreaProps {
   teachHint?: boolean
   playedBy?: string | null
   group?: CardT[] | null
+  mirrorOf?: CardT | null
   blind?: BlindRevealData | null
   onBlindDone?: (key: string) => void
   sweep?: PileSweepData | null
@@ -416,6 +426,7 @@ export function PileArea({
   teachHint,
   playedBy,
   group,
+  mirrorOf,
   blind,
   onBlindDone,
   sweep,
@@ -461,6 +472,7 @@ export function PileArea({
           teachHint={teachHint}
           playedBy={playedBy}
           group={group}
+          mirrorOf={mirrorOf}
           blind={blind}
           onBlindDone={onBlindDone}
           sweep={sweep}

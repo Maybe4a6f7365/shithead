@@ -348,6 +348,24 @@ export function getTopRank(state: GameState): Rank | null {
   return null
 }
 
+/**
+ * The physical card a mirroring 3 is copying: the first non-3 card down the
+ * pile, by the same walk as getTopRank. Null when the pile is open (empty
+ * beneath, or a 2 resets it) or when the top card is not a 3.
+ */
+export function getMirroredCard(state: GameState): Card | null {
+  const top = getTopCard(state)
+  if (!top || top.rank !== '3') return null
+  for (let i = state.pile.length - 1; i >= 0; i--) {
+    const entry = state.pile[i]
+    if (entry.cleared || entry.cards.length === 0) continue
+    const card = entry.cards[0]
+    if (card.rank === '3') continue
+    return card.rank === '2' ? null : card
+  }
+  return null
+}
+
 export interface PhysicalTopRun {
   rank: Rank
   count: number
