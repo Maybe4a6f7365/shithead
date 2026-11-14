@@ -8,8 +8,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      // Registered explicitly in main.tsx so an activated update reloads an
-      // already-open game client instead of leaving it on a stale bundle.
+      // Registered by src/swUpdate.ts, which also owns the single bounded
+      // reload after an update. The plugin's own client is not used: its
+      // reload-on-activate has no limit and can loop.
       injectRegister: null,
       includeAssets: ['favicon.svg', 'robots.txt'],
       manifest: {
