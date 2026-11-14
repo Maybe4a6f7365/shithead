@@ -1759,6 +1759,17 @@
   touch-action: pan-x;
 }
 .hand-fan::-webkit-scrollbar { display: none; }
+/* Fade the edge that hides more cards. A mask is paint-only: it changes no
+   geometry, so the invariant hand layout above still holds. */
+.hand-fan[data-overflow-start="true"],
+.hand-fan[data-overflow-end="true"] {
+  --hand-fade-start: 0px;
+  --hand-fade-end: 0px;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--hand-fade-start), #000 calc(100% - var(--hand-fade-end)), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 var(--hand-fade-start), #000 calc(100% - var(--hand-fade-end)), transparent 100%);
+}
+.hand-fan[data-overflow-start="true"] { --hand-fade-start: 28px; }
+.hand-fan[data-overflow-end="true"] { --hand-fade-end: 28px; }
 .hand-fan__row {
   height: 100%;
   padding-top: var(--hand-top-space) !important;

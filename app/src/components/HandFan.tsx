@@ -60,6 +60,9 @@ export function HandFan({
   const [order, setOrder] = useState(() => sortHandByDisplay(cards))
   // Roving tabindex: exactly one card is the hand's tab stop.
   const [tabStop, setTabStop] = useState(0)
+  // Which edges hide more cards; drives the fade that says "this scrolls".
+  const [overflow, setOverflow] = useState({ start: false, end: false })
+  const previousCount = useRef(cards.length)
 
   useLayoutEffect(() => {
     const measure = () => {
@@ -104,6 +107,46 @@ export function HandFan({
     ? Math.max(24, Math.min(28, (avail - cardW) / (n - 1)))
     : 28
   const overlap = cardW > 0 ? Math.max(0, cardW - step) : 0
+
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const update = () => {
+      const max = container.scrollWidth - container.clientWidth
+      const next = { start: container.scrollLeft > 2, end: max - container.scrollLeft > 2 }
+      setOverflow(current => (current.start === next.start && current.end === next.end ? current : next))
+    }
+    update()
+    container.addEventListener('scroll', update, { passive: true })
+    return () => container.removeEventListener('scroll', update)
+  }, [n, avail, cardW])
+
+  // A pickup or draw re-sorts the hand and can push the cards that matter
+  // off-screen. Bring the first selected (else first playable) card back into
+  // view — only when the hand grew, so manual scrolling is never fought.
+  useEffect(() => {
+    const grew = n > previousCount.current
+    previousCount.current = n
+    const container = containerRef.current
+    if (!grew || !container || typeof container.scrollTo !== 'function') return
+    if (container.scrollWidth <= container.clientWidth) return
+    const target = orderedCards.find(card => states.get(card.id) === 'selected')
+      ?? orderedCards.find(card => states.get(card.id) === 'playable' || states.get(card.id) === 'joinable')
+    if (!target) return
+    const index = orderedCards.indexOf(target)
+    const node = container.querySelectorAll<HTMLElement>('.hand-fan__card')[index]
+    if (!node) return
+    const left = node.offsetLeft
+    const right = left + node.offsetWidth
+    if (left >= container.scrollLeft && right <= container.scrollLeft + container.clientWidth) return
+    const reduceMotion = typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    container.scrollTo({
+      left: Math.max(0, left - (container.clientWidth - node.offsetWidth) / 2),
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [n])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
@@ -151,6 +194,8 @@ export function HandFan({
       <div
         ref={containerRef}
         className="hand-fan w-full"
+        data-overflow-start={overflow.start ? 'true' : 'false'}
+        data-overflow-end={overflow.end ? 'true' : 'false'}
         style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
       >
         <div
