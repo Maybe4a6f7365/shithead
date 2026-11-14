@@ -12,6 +12,8 @@ import { LayoutGroup, useReducedMotion } from 'framer-motion'
 import type { Card as CardT, GameState } from '../engine'
 import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs, type CardVisualState } from './Card'
+import type { BlindRevealData } from './BlindReveal'
+import { peekCardRect, peekSeatRect, type FlightRect } from './cardFlight'
 import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
 import { ActionFeed } from './ActionFeed'
@@ -430,6 +432,41 @@ export function TableScreen({
     return play?.type === 'PLAY_CARDS' && play.playerId !== viewerId ? play.playerId : null
   }, [state.log, viewerId])
 
+  // Face-down play: the reveal overlay keeps the pile as it was until the flip
+  // has played, so the new top card never spoils the suspense.
+  const blindOriginRef = useRef<FlightRect | null>(null)
+  const blindEvent = useMemo(() => {
+    const event = latestActionEvents(state.log).find(e => e.type === 'BLIND_REVEAL')
+    return event?.type === 'BLIND_REVEAL'
+      ? { key: `blind-${state.seq ?? state.turnCount}`, playerId: event.playerId, card: event.card, success: event.success }
+      : null
+  }, [state.log, state.seq, state.turnCount])
+  // A reveal already in the log when the table mounts (reconnect, late join) is history.
+  const [dismissedBlind, setDismissedBlind] = useState<string | null>(() => blindEvent?.key ?? null)
+  const blindActive = Boolean(blindEvent) && !reduceMotion && blindEvent?.key !== dismissedBlind
+  const blindHoldRef = useRef<{ key: string; top: CardT | null | undefined; pileCount: number; effectiveRank: ReturnType<typeof getTopRank> } | null>(null)
+  if (blindEvent && blindHoldRef.current?.key !== blindEvent.key) {
+    blindHoldRef.current = { key: blindEvent.key, ...previousPile.current }
+  }
+  const blindData = useMemo<BlindRevealData | null>(() => {
+    if (!blindEvent || !blindActive) return null
+    const mine = blindEvent.playerId === viewerId
+    const handRect = document.querySelector('.hand-fan')?.getBoundingClientRect()
+    return {
+      key: blindEvent.key,
+      card: blindEvent.card,
+      success: blindEvent.success,
+      from: mine ? blindOriginRef.current : peekSeatRect(blindEvent.playerId),
+      toward: blindEvent.success ? null
+        : mine
+          ? handRect ? { left: handRect.left, top: handRect.top, width: handRect.width, height: handRect.height } : null
+          : peekSeatRect(blindEvent.playerId),
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blindEvent?.key, blindActive])
+  const onBlindDone = useCallback((key: string) => setDismissedBlind(key), [])
+  const holdPile = blindActive ? blindHoldRef.current : null
+
   // Cards that just arrived in the viewer's hand fly in from the stock (draw)
   // or the pile (pickup).
   const handEntryFrom = useMemo<'stock' | 'pile' | null>(() => {
@@ -708,6 +745,8 @@ export function TableScreen({
     if (zone === 'faceDown') {
       // Blind plays are single cards (D7): tap toggles a single selection.
       const isSelected = effectiveSelection.includes(card.id)
+      // Remember where the card sits: the reveal flies out of this slot.
+      if (!isSelected) blindOriginRef.current = peekCardRect(card.id)
       setSelection(isSelected ? [] : [card.id])
       haptic(8)
       emitSoundDebounced(isSelected ? 'deselect' : 'select')
@@ -956,10 +995,13 @@ export function TableScreen({
           <OutMoment event={outMoment?.key.startsWith(`${viewerId}:`) ? outMoment : null} />
           <PileArea
             stockCount={state.stock.length}
-            top={burning && burnSnapshot ? burnSnapshot.top : top}
-            pileCount={burning && burnSnapshot ? burnSnapshot.pileCount : ps}
-            effectiveRank={burning && burnSnapshot ? burnSnapshot.effectiveRank : topRank}
-            burning={burning}
+            top={holdPile ? holdPile.top : burning && burnSnapshot ? burnSnapshot.top : top}
+            pileCount={holdPile ? holdPile.pileCount : burning && burnSnapshot ? burnSnapshot.pileCount : ps}
+            effectiveRank={holdPile ? holdPile.effectiveRank : burning && burnSnapshot ? burnSnapshot.effectiveRank : topRank}
+            burning={burning && !holdPile}
+            blind={blindData}
+            onBlindDone={onBlindDone}
+            suppressEntryId={blindEvent?.success ? blindEvent.card.id : null}
             burnKey={burnSnapshot?.actionKey}
             specialEffect={specialEffect}
             teachHint={ps === 0 && viewerActive}

@@ -9,6 +9,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import clsx from 'clsx'
 import type { Card as CardT, Rank } from '../engine'
 import { Card } from './Card'
+import { BlindReveal, type BlindRevealData } from './BlindReveal'
 import type { SpecialEffect } from './SpecialEffectFeedback'
 import {
   flightDuration, flightOffset, forgetCardRect, isTrivialFlight, peekCardRect, peekSeatRect,
@@ -114,6 +115,11 @@ export interface WastepileProps {
   teachHint?: boolean
   /** Opponent who played the top card; their seat is the flight origin. */
   playedBy?: string | null
+  /** Face-down play being revealed over the pile. */
+  blind?: BlindRevealData | null
+  onBlindDone?: (key: string) => void
+  /** Top card already shown by the blind reveal; skip its entry animation. */
+  suppressEntryId?: string | null
 }
 
 export function Wastepile({
@@ -125,6 +131,9 @@ export function Wastepile({
   skipCount = 1,
   teachHint,
   playedBy,
+  blind,
+  onBlindDone,
+  suppressEntryId,
 }: WastepileProps) {
   const reduceMotion = useReducedMotion()
   const pileRef = useRef<HTMLDivElement>(null)
@@ -146,7 +155,13 @@ export function Wastepile({
     forgetCardRect(top?.id)
   }, [top?.id])
   const baseEntry = pileEntryChoreography(entryKind, skipCount, Boolean(reduceMotion))
-  const entry = flight
+  const entry = top && suppressEntryId === top.id
+    ? {
+        initial: { opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 },
+        animate: { opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 },
+        transition: { duration: 0 },
+      }
+    : flight
     ? {
         initial: { opacity: 1, x: flight.x, y: flight.y, scale: flight.scale, rotate: 0 },
         animate: { opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 },
@@ -214,6 +229,7 @@ export function Wastepile({
             </motion.div>
           )}
         </AnimatePresence>
+        {blind && onBlindDone && <BlindReveal key={blind.key} data={blind} onDone={onBlindDone} />}
         {burning && (
           <motion.span
             aria-hidden="true"
@@ -283,6 +299,9 @@ export interface PileAreaProps {
   specialEffect?: SpecialEffect | null
   teachHint?: boolean
   playedBy?: string | null
+  blind?: BlindRevealData | null
+  onBlindDone?: (key: string) => void
+  suppressEntryId?: string | null
 }
 
 export type PileRuleKind = 'open' | 'mirror' | 'low'
@@ -331,6 +350,9 @@ export function PileArea({
   specialEffect,
   teachHint,
   playedBy,
+  blind,
+  onBlindDone,
+  suppressEntryId,
 }: PileAreaProps) {
   const rule = currentPileRule(top, effectiveRank)
   const reduceMotion = useReducedMotion()
@@ -369,6 +391,9 @@ export function PileArea({
           skipCount={skipCount}
           teachHint={teachHint}
           playedBy={playedBy}
+          blind={blind}
+          onBlindDone={onBlindDone}
+          suppressEntryId={suppressEntryId}
         />
       </div>
       {rule && !burning && (

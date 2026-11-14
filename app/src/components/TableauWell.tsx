@@ -56,7 +56,7 @@ export function TableauWell({
               data-face-down={hidden ? 'true' : 'false'}
             >
               {hidden && (
-                <div className="tableau-stack__down">
+                <div className="tableau-stack__down" data-card-id={hidden.id}>
                   <Card
                     faceDown
                     size={size}
