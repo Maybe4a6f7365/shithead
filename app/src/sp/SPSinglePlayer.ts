@@ -3,6 +3,7 @@
 // the previous winner/last-place exchange can be carried into a rematch.
 // ============================================================================
 import { create } from 'zustand'
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import {
   DEFAULT_GAME_RULES,
   RANK_ORDER,
@@ -177,7 +178,75 @@ function makeRound(
   }
 }
 
-export const useSPGame = create<SPState>((set, get) => ({
+// ---------- Persistence ----------
+// A pass-and-play round lives only on this device. Keep it across a reload —
+// an app update, a pull-to-refresh, the OS discarding the tab — the way a
+// multiplayer seat is resumed from the server.
+
+export const SP_STORAGE_KEY = 'shithead:local-round'
+/** Bump when the engine's GameState shape changes incompatibly. */
+export const SP_STORAGE_VERSION = 1
+
+const memoryStorage = (): StateStorage => {
+  const values = new Map<string, string>()
+  return {
+    getItem: name => values.get(name) ?? null,
+    setItem: (name, value) => { values.set(name, value) },
+    removeItem: name => { values.delete(name) },
+  }
+}
+
+function safeLocalStorage(): StateStorage {
+  try {
+    if (typeof localStorage === 'undefined') return memoryStorage()
+    const fallback = memoryStorage()
+    // Private modes and full quotas throw on access; a lost save must never
+    // break the round in progress.
+    return {
+      getItem: name => { try { return localStorage.getItem(name) } catch { return fallback.getItem(name) } },
+      setItem: (name, value) => { try { localStorage.setItem(name, value) } catch { fallback.setItem(name, value) } },
+      removeItem: name => { try { localStorage.removeItem(name) } catch { fallback.removeItem(name) } },
+    }
+  } catch {
+    return memoryStorage()
+  }
+}
+
+type PersistedRound = Pick<SPState, 'state' | 'rules' | 'meId' | 'readyIds' | 'configs'>
+
+const PHASES: ReadonlyArray<GameState['phase']> = ['lobby', 'rearrange', 'tribute', 'play', 'endgame', 'roundEnd', 'gameOver']
+const isCardList = (value: unknown): boolean =>
+  Array.isArray(value) && value.every(card =>
+    typeof card === 'object' && card !== null && typeof (card as Card).id === 'string' &&
+    typeof (card as Card).rank === 'string')
+
+/** Accept only a snapshot the current table can render; anything else is dropped. */
+export function isResumableRound(value: unknown): value is PersistedRound {
+  if (typeof value !== 'object' || value === null) return false
+  const round = value as Partial<PersistedRound>
+  const state = round.state
+  if (typeof state !== 'object' || state === null) return false
+  if (!PHASES.includes(state.phase) || state.phase === 'lobby') return false
+  if (!Array.isArray(state.players) || state.players.length < 2) return false
+  if (!state.players.every(player =>
+    typeof player === 'object' && player !== null && typeof player.id === 'string' &&
+    typeof player.name === 'string' &&
+    isCardList(player.hand) && isCardList(player.faceUp) && isCardList(player.faceDown))) return false
+  if (!isCardList(state.stock) || !isCardList(state.pile) || !Array.isArray(state.log)) return false
+  if (!Number.isInteger(state.currentPlayerIdx) ||
+    state.currentPlayerIdx < 0 || state.currentPlayerIdx >= state.players.length) return false
+  if (typeof state.rules !== 'object' || state.rules === null) return false
+  if (typeof round.rules !== 'object' || round.rules === null) return false
+  if (!Array.isArray(round.readyIds) || !Array.isArray(round.configs)) return false
+  return round.meId === null || state.players.some(player => player.id === round.meId)
+}
+
+/** True when a reload should land back on the local table. */
+export function hasResumableLocalRound(): boolean {
+  return useSPGame.getState().state.phase !== 'lobby'
+}
+
+export const useSPGame = create<SPState>()(persist((set, get) => ({
   state: emptyState(),
   rules: { ...DEFAULT_GAME_RULES },
   meId: null,
@@ -320,4 +389,20 @@ export const useSPGame = create<SPState>((set, get) => ({
     lastError: null,
     configs: [],
   }),
+}), {
+  name: SP_STORAGE_KEY,
+  version: SP_STORAGE_VERSION,
+  storage: createJSONStorage(safeLocalStorage),
+  // revealedId is deliberately left out: after a reload the pass gate must
+  // come back before any hand other than the device owner's is shown.
+  partialize: (current): PersistedRound => ({
+    state: current.state,
+    rules: current.rules,
+    meId: current.meId,
+    readyIds: current.readyIds,
+    configs: current.configs,
+  }),
+  // A snapshot from another storage version is not migrated, only dropped.
+  migrate: () => ({}) as PersistedRound,
+  merge: (persisted, current) => (isResumableRound(persisted) ? { ...current, ...persisted } : current),
 }))

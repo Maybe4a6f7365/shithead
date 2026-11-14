@@ -2,7 +2,7 @@
 // App root — landing / online lobby / MP room / hot-seat lobby / SP table.
 // ============================================================================
 import { useState } from 'react'
-import { useSPGame } from './sp/SPSinglePlayer'
+import { hasResumableLocalRound, useSPGame } from './sp/SPSinglePlayer'
 import { LandingScreen } from './components/LandingScreen'
 import { JoinCreateScreen } from './components/JoinCreateScreen'
 import { HotSeatLobby } from './components/HotSeatLobby'
@@ -33,6 +33,8 @@ export function initialMode(search = typeof window === 'undefined' ? '' : window
   }
 
   if (linkedRoom) return { name: 'join-create' }
+  // A pass-and-play round interrupted by a reload resumes on its table.
+  if (hasResumableLocalRound()) return { name: 'hotseat' }
   return { name: 'landing' }
 }
 
