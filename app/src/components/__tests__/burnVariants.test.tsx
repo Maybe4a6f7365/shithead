@@ -69,9 +69,14 @@ const stage = (c: HTMLElement) => c.querySelector('.table-pile-stage')
 
 describe('burn variants on the table', () => {
   for (const [reason, layers] of [['ten', 0], ['quartet', 4], ['joker', 0]] as const) {
-    it(`renders the ${reason} effect for its reason`, () => {
+    it(`lands the card, then renders the ${reason} effect for its reason`, async () => {
       const view = render(<TableScreen state={burnState({ seq: 4 })} {...props} />)
       view.rerender(<TableScreen state={burnState({ reason, seq: 5 })} {...props} />)
+      // The burning card is on the pile from the first commit, never an empty slot.
+      expect(view.container.querySelector('.pile-slot--waste')).toBeNull()
+      expect(view.container.querySelector('.waste-pile__entry')).not.toBeNull()
+      expect(stage(view.container)?.getAttribute('data-burning')).toBe('false')
+      await waitFor(() => expect(stage(view.container)?.getAttribute('data-burning')).toBe('true'), { timeout: 2000 })
       const fx = view.container.querySelector('.burn-fx')
       expect(fx?.getAttribute('data-burn-fx')).toBe(reason)
       expect(fx!.querySelectorAll('[data-fx="slam"]').length).toBe(layers)

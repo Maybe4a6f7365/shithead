@@ -5,6 +5,9 @@
 //   - a burn caused by a blind flip must never play over a pile that moved on
 //   - a failed blind flip must not fill the hand before the card has turned
 //   - no playable highlights or turn ripple while an opponent's flip is hidden
+//   - the pile must never look empty while a card is flying to it
+//   - a card that burns the pile flies there first; no empty slot in between
+//   - the play that ends the round is shown before the round-over card
 //
 // Starts a Vite dev server, drives the single-player store in headless
 // Chromium and samples the DOM every frame. Needs Playwright with Chromium
@@ -79,7 +82,24 @@ await page.evaluate(async () => {
     frame() {
       const pile = document.querySelector('.pile-card--waste')
       const hand = [...document.querySelectorAll('.hand-fan__card .card')]
+      const pileRect = pile.getBoundingClientRect()
+      const opacityOf = el => {
+        let opacity = 1
+        for (let node = el; node && node !== document.body; node = node.parentElement) opacity *= parseFloat(getComputedStyle(node).opacity)
+        return opacity
+      }
+      const offPile = el => {
+        const rect = el.getBoundingClientRect()
+        return Math.hypot(rect.left - pileRect.left, rect.top - pileRect.top)
+      }
+      const entry = pile.querySelector('.waste-pile__entry .card')
       return {
+        // Cards a player can actually see resting on the pile slot.
+        onPile: [...pile.querySelectorAll('.card')].filter(el => opacityOf(el) > 0.5 && offPile(el) < 24).length,
+        slot: Boolean(pile.querySelector('.pile-slot--waste')),
+        entryRank: entry?.getAttribute('aria-label')?.split(' ')[0] ?? null,
+        entryDistance: entry ? Math.round(offPile(entry)) : null,
+        overlay: Boolean(document.querySelector('.game-over-card')),
         blind: Boolean(pile?.querySelector('.blind-reveal')),
         burning: Boolean(pile?.querySelector('.waste-pile__burn-stack')),
         realTop: engine.getTopCard(useSPGame.getState().state)?.rank ?? null,
@@ -225,6 +245,69 @@ await test('blind flip: no highlights or turn ripple until an opponent\'s flip i
   const after = frames.filter(frame => !frame.blind && frame.t > reveal[reveal.length - 1].t)
   assert(after.some(frame => frame.playable === 3), 'playable highlights never appeared after the reveal')
   assert(after.some(frame => frame.ripple > 0), 'the turn ripple never ran after the reveal')
+})
+
+await test('pile: never looks empty while a card flies to it', async () => {
+  await page.evaluate(() => T.craft({ me: { hand: ['9', 'J', 'K'], faceUp: ['4', '4', '4'], faceDown: ['4', '4', '4'] }, opp: { hand: ['4', '4'] }, pile: ['5'] }))
+  await settle(600)
+  const single = await page.evaluate(() => T.record(800, () => T.play(0, 'hand')))
+  const bare = single.find(frame => frame.onPile === 0)
+  assert(!bare, `single play: nothing on the pile at ${bare?.t}ms`)
+  assert(single.some(frame => frame.entryDistance > 60), 'single play: the card never flew in from the hand')
+
+  await page.evaluate(() => T.craft({ me: { hand: ['9', '9', '9', 'K'], faceUp: [], faceDown: [] }, opp: { hand: ['4', '4'] }, pile: ['5'] }))
+  await settle(600)
+  const triple = await page.evaluate(() => T.record(1000, () => T.play(0, 'hand', 3)))
+  const bareTriple = triple.find(frame => frame.onPile === 0)
+  assert(!bareTriple, `triple play: nothing on the pile at ${bareTriple?.t}ms`)
+  assert(triple[triple.length - 1].onPile === 1, `triple play: ${triple[triple.length - 1].onPile} cards left showing on the pile`)
+})
+
+await test('burn: the 10 flies to the pile, then burns, with no empty slot in between', async () => {
+  await page.evaluate(() => T.craft({ me: { hand: ['10', 'K', 'Q'], faceUp: [], faceDown: [] }, opp: { hand: ['4', '4'] }, pile: ['5', '6'] }))
+  await settle(600)
+  const frames = await page.evaluate(() => T.record(1500, () => T.play(0, 'hand')))
+  const firstBurn = frames.find(frame => frame.burning)
+  assert(firstBurn, 'the burn never played')
+  const before = frames.filter(frame => frame.t < firstBurn.t)
+  const slot = before.find(frame => frame.slot)
+  assert(!slot, `empty pile slot shown at ${slot?.t}ms, before the burn`)
+  assert(before.some(frame => frame.entryRank === '10' && frame.entryDistance > 60), 'the 10 never flew in from the hand')
+  const bare = before.find(frame => frame.onPile === 0)
+  assert(!bare, `nothing on the pile at ${bare?.t}ms, before the burn`)
+  const last = frames[frames.length - 1]
+  assert(!last.burning && last.slot && last.realTop === null, 'the pile did not end up empty after the burn')
+})
+
+await test('burn: a quartet completed by two cards lands staggered, then burns', async () => {
+  await page.evaluate(() => T.craft({ me: { hand: ['9', '9', 'K'], faceUp: [], faceDown: [] }, opp: { hand: ['4', '4'] }, pile: ['9', '9'] }))
+  await settle(600)
+  const frames = await page.evaluate(() => T.record(1700, () => T.play(0, 'hand', 2)))
+  const firstBurn = frames.find(frame => frame.burning)
+  assert(firstBurn, 'the burn never played')
+  const slot = frames.find(frame => frame.t < firstBurn.t && frame.slot)
+  assert(!slot, `empty pile slot shown at ${slot?.t}ms, before the burn`)
+  assert(frames[frames.length - 1].slot, 'the pile did not end up empty after the burn')
+})
+
+await test('game over: the deciding blind flip plays before the round-over card', async () => {
+  await page.evaluate(() => T.craft({ me: { hand: [], faceUp: [], faceDown: ['A'] }, opp: { hand: ['4', '4'] }, pile: ['9'] }))
+  await settle(300)
+  const frames = await page.evaluate(() => T.record(2000, () => T.play(0, 'faceDown')))
+  assert(frames.some(frame => frame.blind), 'the deciding flip was never revealed')
+  const covered = frames.find(frame => frame.blind && frame.overlay)
+  assert(!covered, `round-over card was up at ${covered?.t}ms, during the flip`)
+  assert(frames[frames.length - 1].overlay, 'the round-over card never appeared')
+})
+
+await test('game over: the deciding card lands before the round-over card', async () => {
+  await page.evaluate(() => T.craft({ me: { hand: ['A'], faceUp: [], faceDown: [] }, opp: { hand: ['4', '4'] }, pile: ['9'] }))
+  await settle(600)
+  const frames = await page.evaluate(() => T.record(1500, () => T.play(0, 'hand')))
+  const firstOverlay = frames.find(frame => frame.overlay)
+  assert(firstOverlay, 'the round-over card never appeared')
+  const landed = frames.find(frame => frame.entryRank === 'Ace' && frame.entryDistance < 4)
+  assert(landed && landed.t <= firstOverlay.t, 'the round-over card appeared before the last card had landed')
 })
 
 await test('no uncaught page errors', async () => {

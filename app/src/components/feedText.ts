@@ -59,6 +59,22 @@ export function latestActionEvents(log: GameEvent[]): GameEvent[] {
 }
 
 /**
+ * Events the table should animate for the newest action. Same as
+ * latestActionEvents, except that the play which ended the round is kept
+ * together with its GAME_OVER: the deciding card still deserves its flight,
+ * flip or burn. The engine logs PLAYER_OUT right before such a GAME_OVER; a
+ * bare one (stalemate cap, legacy state) stays its own block and replays
+ * nothing.
+ */
+export function latestAnimatedEvents(log: GameEvent[]): GameEvent[] {
+  const last = log[log.length - 1]
+  if (last?.type !== 'GAME_OVER') return latestActionEvents(log)
+  const before = log.slice(0, -1)
+  if (before[before.length - 1]?.type !== 'PLAYER_OUT') return [last]
+  return [...latestActionEvents(before), last]
+}
+
+/**
  * The one feed line for the newest log entry. Events that merely elaborate a
  * play (DRAW) are folded into the play line; CLEAR_PILE borrows the actor
  * from the PLAY_CARDS entry that precedes it.

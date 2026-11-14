@@ -21,24 +21,20 @@ import { gameOverResults } from './gameOverResults'
 import { useWakeLock } from '../useWakeLock'
 import type { GameEvent } from '../engine'
 import { latestActionEvents } from './feedText'
-import { blindRevealMs } from './BlindReveal'
-import { burnCleanupMs } from './BurnFx'
+import { actionSettleMs, useGameOverReady } from './actionTiming'
 
 const AI_TICK_MS = 900
 
 /**
- * How long the AI waits before acting. A blind flip (and the burn it may
- * cause) takes longer than the base tick, and the next action must not land
+ * How long the AI waits before acting. A blind flip or a burn takes longer
+ * than the base tick, and the next action must not land
  * on top of an animation that is still explaining the previous one.
  */
 export function aiTickDelay(log: GameEvent[], reduceMotion: boolean | null): number {
   if (reduceMotion) return AI_TICK_MS
   const events = latestActionEvents(log)
-  const blind = events.find(event => event.type === 'BLIND_REVEAL')
-  if (blind?.type !== 'BLIND_REVEAL') return AI_TICK_MS
-  const clear = events.find(event => event.type === 'CLEAR_PILE')
-  const burn = clear?.type === 'CLEAR_PILE' ? burnCleanupMs(clear.reason) : 0
-  return Math.max(AI_TICK_MS, blindRevealMs(blind.success) + burn + 160)
+  const slow = events.some(event => event.type === 'BLIND_REVEAL' || event.type === 'CLEAR_PILE')
+  return slow ? Math.max(AI_TICK_MS, actionSettleMs(log, reduceMotion) + 160) : AI_TICK_MS
 }
 
 export function GameTable({ onLeave }: { onLeave: () => void }) {
@@ -69,12 +65,13 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   } = useSPGame.getState()
 
   const { players, currentPlayerIdx, phase, loserId, turnCount } = state
-  const current = players[currentPlayerIdx]
   const reduceMotion = useReducedMotion()
+  const current = players[currentPlayerIdx]
   const latestGameplayAction = latestAcceptedGameplayAction(state.log)
   const loser = players.find(p => p.id === loserId)
   const meIsShithead = loserId !== null && loserId === meId
   const resultsView = phase === 'gameOver' ? gameOverResults(state) : null
+  const gameOverReady = useGameOverReady(state, reduceMotion)
   const attentionAlertActive = useTurnAlertController({
     phase,
     currentPlayerId: current?.id ?? null,
@@ -211,7 +208,7 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
         <PassGate player={current} onReveal={() => revealFor(current.id)} />
       )}
 
-      {phase === 'gameOver' && (
+      {gameOverReady && (
         <GameOverOverlay
           result={!loser ? 'neutral' : meIsShithead ? 'lose' : 'win'}
           shitheadName={loser?.name}

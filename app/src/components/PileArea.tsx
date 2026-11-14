@@ -4,7 +4,7 @@
 // turns danger-bright at ≤5 (§4.4). Burn animation is owned by Wastepile.
 // NOTE: only stock.length is meaningful — stock cards arrive masked.
 // ============================================================================
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import clsx from 'clsx'
 import type { Card as CardT, Rank } from '../engine'
@@ -187,6 +187,23 @@ export function Wastepile({
     group?.forEach(card => forgetCardRect(card.id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [top?.id])
+  // The card the new top landed on stays visible beneath it until it arrives;
+  // otherwise the pile is bare felt for the length of the flight.
+  const lastTop = useRef<CardT | null>(top ?? null)
+  const [under, setUnder] = useState<{ card: CardT; forId: string } | null>(null)
+  const landMs = Math.round((topDelay + (flight ? flightDuration(flight) : 0.36)) * 1000) + 30
+  useLayoutEffect(() => {
+    const previous = lastTop.current
+    lastTop.current = burning ? null : top ?? null
+    if (burning || !top || !previous || previous.id === top.id || suppressEntryId === top.id || reduceMotion) {
+      setUnder(null)
+      return
+    }
+    setUnder({ card: previous, forId: top.id })
+    const timer = window.setTimeout(() => setUnder(null), landMs)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top?.id, burning])
   const variantMotion = reduceMotion ? null : burnStackMotion(burnReason)
   const baseEntry = pileEntryChoreography(entryKind, skipCount, Boolean(reduceMotion))
   const entry = top && suppressEntryId === top.id
@@ -224,6 +241,11 @@ export function Wastepile({
       data-skip-count={entryKind === 'skip' ? skipCount : undefined}
     >
       <div ref={pileRef} className="pile-card pile-card--waste relative">
+        {under && !burning && under.forId === top?.id && (
+          <div className="waste-pile__under absolute inset-0 pointer-events-none" aria-hidden="true">
+            <Card card={under.card} state="in-pile" />
+          </div>
+        )}
         {ghosts.map(ghost => {
           const travel = flightDuration(ghost.offset)
           const delay = staggerDelay(ghost.index)
@@ -278,7 +300,7 @@ export function Wastepile({
           ) : top ? (
             <motion.div
               key={top.id}
-              className="waste-pile__entry"
+              className="waste-pile__entry relative"
               data-entry-effect={entryKind}
               data-skip-count={entryKind === 'skip' ? skipCount : undefined}
               initial={entry.initial}

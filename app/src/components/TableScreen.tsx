@@ -25,7 +25,8 @@ import { TableauWell } from './TableauWell'
 import { ActionBar } from './ActionBar'
 import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
-import { feedLine, latestActionEvents, type FeedContext } from './feedText'
+import { feedLine, latestAnimatedEvents, type FeedContext } from './feedText'
+import { playArrivalMs } from './actionTiming'
 import { useSoundFromLog, emitSoundDebounced, type AdhdAlertSound } from './soundManager'
 import {
   BroadcastFeedback,
@@ -261,8 +262,6 @@ export function TableScreen({
   const [flash, setFlash] = useState<string | null>(null)     // transient feed copy (errors, guards)
   const [pickupArmed, setPickupArmed] = useState(false)
   const [dismissedQuickSourceSeq, setDismissedQuickSourceSeq] = useState<number | null>(null)
-  const [burning, setBurning] = useState(false)
-  const [burnSnapshot, setBurnSnapshot] = useState<BurnSnapshot | null>(null)
   const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
   const [outMoment, setOutMoment] = useState<OutMomentEvent | null>(null)
   const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
@@ -280,8 +279,6 @@ export function TableScreen({
   const debounceRef = useRef(0)
   const pickupDraftBackup = useRef<string[]>([])
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
-  const burnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const burnGenerationRef = useRef(0)
   const announcer = useAnnouncer()
   const reduceMotion = useReducedMotion()
 
@@ -296,15 +293,13 @@ export function TableScreen({
   }
   useEffect(() => () => {
     timers.current.forEach(clearTimeout)
-    burnGenerationRef.current += 1
-    if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
   }, [])
 
   // A face-down play is revealed by the flip, not by anything else on screen.
   // While it plays, the table behaves as if the action has not landed yet: no
   // input, no playable highlights, no turn ripple, and the taker's hand waits.
   const blindEvent = useMemo(() => {
-    const event = latestActionEvents(state.log).find(e => e.type === 'BLIND_REVEAL')
+    const event = latestAnimatedEvents(state.log).find(e => e.type === 'BLIND_REVEAL')
     return event?.type === 'BLIND_REVEAL'
       ? { key: `blind-${state.seq ?? state.turnCount}`, playerId: event.playerId, card: event.card, success: event.success }
       : null
@@ -390,18 +385,6 @@ export function TableScreen({
         : { text: null, key: 'idle', tone: 'normal' as const }
 
   // ---- Effects: burn detection, announcements, sounds, turn announce ----
-  const [pendingBurn, setPendingBurn] = useState<{ snapshot: BurnSnapshot; generation: number; cursor: number } | null>(null)
-  const startBurn = (snapshot: BurnSnapshot, generation: number) => {
-    setBurnSnapshot(snapshot)
-    setBurning(true)
-    haptic(28)
-    burnTimerRef.current = setTimeout(() => {
-      if (burnGenerationRef.current !== generation) return
-      setBurning(false)
-      setBurnSnapshot(current => current?.actionKey === snapshot.actionKey ? null : current)
-      burnTimerRef.current = null
-    }, burnCleanupDelay(reduceMotion, snapshot.reason))
-  }
   const lastActionSeq = useRef(state.seq ?? state.turnCount)
   const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank })
   const previousPlayers = useRef(state.players)
@@ -409,32 +392,8 @@ export function TableScreen({
     const cursor = state.seq ?? state.turnCount
     if (lastActionSeq.current === cursor) return
     lastActionSeq.current = cursor
-    const fresh = latestActionEvents(state.log)
+    const fresh = latestAnimatedEvents(state.log)
     if (fresh.length === 0) return
-    const clear = fresh.find(e => e.type === 'CLEAR_PILE')
-    if (clear?.type === 'CLEAR_PILE') {
-      const burnPlay = fresh.find(event => event.type === 'PLAY_CARDS')
-      const playedTop = burnPlay?.type === 'PLAY_CARDS'
-        ? burnPlay.cards[burnPlay.cards.length - 1] ?? previousPile.current.top
-        : previousPile.current.top
-      const actionKey = `${cursor}:${clear.reason}:${playedTop?.id ?? 'empty'}`
-      const snapshot: BurnSnapshot = {
-        actionKey,
-        reason: clear.reason,
-        top: playedTop,
-        pileCount: previousPile.current.pileCount + (burnPlay?.type === 'PLAY_CARDS' ? burnPlay.cards.length : 0),
-        effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
-      }
-      const generation = burnGenerationRef.current + 1
-      burnGenerationRef.current = generation
-      if (burnTimerRef.current !== null) clearTimeout(burnTimerRef.current)
-      if (!reduceMotion && fresh.some(e => e.type === 'BLIND_REVEAL')) {
-        // A blind flip plays first; the burn starts once the reveal is done.
-        setPendingBurn({ snapshot, generation, cursor })
-      } else {
-        startBurn(snapshot, generation)
-      }
-    }
     setSpecialEffect(specialEffectFromEvents(fresh, cursor, topRank))
     const ctx: FeedContext = { meId: viewerId, players: state.players }
     const line = feedLine(state, ctx)
@@ -458,13 +417,13 @@ export function TableScreen({
 
   // Who played the card now on top; an opponent's seat is its flight origin.
   const playedBy = useMemo(() => {
-    const play = latestActionEvents(state.log).find(event => event.type === 'PLAY_CARDS')
+    const play = latestAnimatedEvents(state.log).find(event => event.type === 'PLAY_CARDS')
     return play?.type === 'PLAY_CARDS' && play.playerId !== viewerId ? play.playerId : null
   }, [state.log, viewerId])
 
   // A multi-card play lands as a quick staggered sequence, top card last.
   const playedGroup = useMemo(() => {
-    const play = latestActionEvents(state.log).find(e => e.type === 'PLAY_CARDS')
+    const play = latestAnimatedEvents(state.log).find(e => e.type === 'PLAY_CARDS')
     return play?.type === 'PLAY_CARDS' && play.cards.length > 1 ? play.cards : null
   }, [state.log])
 
@@ -511,25 +470,65 @@ export function TableScreen({
       : null,
     reduceMotion,
   )
-  // A burn caused by a blind flip starts the moment the reveal is done. Layout
-  // effect so the hand-off never paints an empty pile in between.
-  useLayoutEffect(() => {
-    if (!pendingBurn || blindActive) return
-    // Only the action that caused the burn may show it. If the table has moved
-    // on (the next play landed before the flip finished), the pile on screen
-    // is no longer the one that burned, so the late burn is dropped.
-    const stillLatest = pendingBurn.cursor === (state.seq ?? state.turnCount)
-    if (stillLatest && burnGenerationRef.current === pendingBurn.generation) {
-      startBurn(pendingBurn.snapshot, pendingBurn.generation)
+  // ---- Burn: derived from the latest action during render, so the pile never
+  // paints one frame of the cleared (empty) state between a play and its burn.
+  //   arriving  the card that causes the burn flies to the pile like any other
+  //   burning   the pile burns (straight away after a blind flip, whose reveal
+  //             already put the card there, and under reduced motion)
+  // A newer action replaces the burn at once; it never plays over a pile that
+  // has moved on.
+  const burnEvent = useMemo(() => {
+    const events = latestAnimatedEvents(state.log)
+    const clear = events.find(e => e.type === 'CLEAR_PILE')
+    if (clear?.type !== 'CLEAR_PILE') return null
+    const play = events.find(e => e.type === 'PLAY_CARDS')
+    const cards = play?.type === 'PLAY_CARDS' ? play.cards : []
+    return {
+      // The first card of a play is the one on top of the pile (getTopCard).
+      key: `${state.seq ?? state.turnCount}:${clear.reason}:${cards[0]?.id ?? 'empty'}`,
+      reason: clear.reason,
+      cards,
+      blind: events.some(e => e.type === 'BLIND_REVEAL'),
     }
-    setPendingBurn(null)
+  }, [state.log, state.seq, state.turnCount])
+  const burnHoldRef = useRef<BurnSnapshot | null>(null)
+  if (burnEvent && burnHoldRef.current?.actionKey !== burnEvent.key) {
+    const playedTop = burnEvent.cards[0] ?? previousPile.current.top
+    burnHoldRef.current = {
+      actionKey: burnEvent.key,
+      reason: burnEvent.reason,
+      top: playedTop,
+      pileCount: previousPile.current.pileCount + burnEvent.cards.length,
+      effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
+    }
+  }
+  // A burn already in the log when the table mounts (reconnect) is history.
+  const [burnDoneKey, setBurnDoneKey] = useState<string | null>(() => burnEvent?.key ?? null)
+  const [burnLandedKey, setBurnLandedKey] = useState<string | null>(null)
+  const burnSnapshot = burnEvent && burnEvent.key !== burnDoneKey ? burnHoldRef.current : null
+  const burnKey = burnSnapshot?.actionKey ?? null
+  const burnNeedsArrival = Boolean(burnEvent) && !burnEvent?.blind && !reduceMotion
+  const burning = Boolean(burnSnapshot) && !blindActive && (!burnNeedsArrival || burnLandedKey === burnKey)
+  const burnArriveMs = playArrivalMs(burnEvent?.cards.length ?? 1)
+  useEffect(() => {
+    if (!burnKey || !burnNeedsArrival) return
+    const timer = setTimeout(() => setBurnLandedKey(burnKey), burnArriveMs)
+    return () => clearTimeout(timer)
+  }, [burnKey, burnNeedsArrival, burnArriveMs])
+  const burningKey = burning ? burnKey : null
+  const burnReason = burnSnapshot?.reason
+  useEffect(() => {
+    if (!burningKey) return
+    haptic(28)
+    const timer = setTimeout(() => setBurnDoneKey(burningKey), burnCleanupDelay(reduceMotion, burnReason))
+    return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingBurn, blindActive, state.seq, state.turnCount])
+  }, [burningKey])
 
   // Picking up the pile sweeps the stack to the taker. A failed blind flip has
   // its own sweep, so it is excluded here.
   const pickupEvent = useMemo(() => {
-    const events = latestActionEvents(state.log)
+    const events = latestAnimatedEvents(state.log)
     const pickup = events.find(e => e.type === 'PICK_UP_PILE')
     if (pickup?.type !== 'PICK_UP_PILE' || events.some(e => e.type === 'BLIND_REVEAL')) return null
     return { key: `pickup-${state.seq ?? state.turnCount}`, playerId: pickup.playerId }
@@ -560,7 +559,7 @@ export function TableScreen({
   // Cards that just arrived in the viewer's hand fly in from the stock (draw)
   // or the pile (pickup).
   const handEntryFrom = useMemo<'stock' | 'pile' | null>(() => {
-    const events = latestActionEvents(state.log)
+    const events = latestAnimatedEvents(state.log)
     if (events.some(e => e.type === 'PICK_UP_PILE' && e.playerId === viewerId)) return 'pile'
     if (events.some(e => e.type === 'DRAW' && e.playerId === viewerId)) return 'stock'
     return null
@@ -976,6 +975,9 @@ export function TableScreen({
     return () => document.removeEventListener('keydown', onKey)
   })
 
+  // The burning pile as it was, from the card's arrival to the end of the burn.
+  const burnShown = burnSnapshot
+
   if (!viewer && !spectating) return null
 
   const endgameZoneLive = (
@@ -1088,9 +1090,9 @@ export function TableScreen({
           <OutMoment event={outMoment?.key.startsWith(`${viewerId}:`) ? outMoment : null} />
           <PileArea
             stockCount={state.stock.length}
-            top={holdPile ? holdPile.top : burning && burnSnapshot ? burnSnapshot.top : top}
-            pileCount={holdPile ? holdPile.pileCount : burning && burnSnapshot ? burnSnapshot.pileCount : ps}
-            effectiveRank={holdPile ? holdPile.effectiveRank : burning && burnSnapshot ? burnSnapshot.effectiveRank : topRank}
+            top={holdPile ? holdPile.top : burnShown ? burnShown.top : top}
+            pileCount={holdPile ? holdPile.pileCount : burnShown ? burnShown.pileCount : ps}
+            effectiveRank={holdPile ? holdPile.effectiveRank : burnShown ? burnShown.effectiveRank : topRank}
             burning={burning && !holdPile}
             blind={blindData}
             sweep={sweepData}
@@ -1103,7 +1105,7 @@ export function TableScreen({
             teachHint={ps === 0 && viewerActive}
             playedBy={playedBy}
             group={playedGroup}
-            mirrorOf={holdPile || burning ? null : getMirroredCard(state)}
+            mirrorOf={holdPile || burnShown ? null : getMirroredCard(state)}
           />
         </div>
         <div className="game-feed table-feed">

@@ -7,6 +7,7 @@
 // ============================================================================
 import { useEffect, useId, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
+import { useGameOverReady } from './actionTiming'
 import { useMultiplayerRoom } from '../net/useMultiplayerRoom'
 import { ConnectionBadge, type BadgeStatus } from './ConnectionBadge'
 import { WaitingRoom } from './WaitingRoom'
@@ -79,6 +80,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
   } = useTurnAlertPreferences()
   const currentPlayerId = gameState?.players[gameState.currentPlayerIdx]?.id ?? null
   const reduceMotion = useReducedMotion()
+  const gameOverReady = useGameOverReady(gameState ?? null, reduceMotion)
   const latestGameplayAction = latestAcceptedGameplayAction(gameState?.log ?? [])
   const attentionAlertActive = useTurnAlertController({
     phase: phase ?? room?.phase ?? null,
@@ -419,7 +421,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
         : !everyYesVoterOnline
           ? 'Every Yes voter must be online.'
           : undefined
-  const gameOverOverlay = gameState.phase === 'gameOver' ? (
+  const gameOverOverlay = gameOverReady ? (
     <GameOverOverlay
       result={!me || !loser ? 'neutral' : gameState.loserId === playerId ? 'lose' : 'win'}
       shitheadName={loser?.name}

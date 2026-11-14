@@ -231,13 +231,22 @@ describe('modern game-screen hierarchy', () => {
       .toBe('3:ten:burn-two')
     expect(screen.getByRole('img', { name: /10 of clubs/i })).toBeTruthy()
 
-    // This is when the first action's timer would have fired.
+    // This is when the first action's timers would have fired: the second
+    // 10 is still landing, and nothing of the first burn may touch it.
     act(() => vi.advanceTimersByTime(260))
-    expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burning')).toBe('true')
+    expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burning')).toBe('false')
     expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burn-key'))
       .toBe('3:ten:burn-two')
 
-    act(() => vi.advanceTimersByTime(300))
+    // The second 10 has landed and burns for its full length.
+    act(() => vi.advanceTimersByTime(150))
+    expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burning')).toBe('true')
+    expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burn-key'))
+      .toBe('3:ten:burn-two')
+    act(() => vi.advanceTimersByTime(500))
+    expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burning')).toBe('true')
+
+    act(() => vi.advanceTimersByTime(120))
     expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burning')).toBe('false')
     expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burn-key')).toBeNull()
   })
