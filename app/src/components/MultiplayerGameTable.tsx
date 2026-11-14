@@ -49,9 +49,11 @@ export interface MultiplayerGameTableProps {
   playerName: string
   intent: 'create' | 'join'
   onLeave: () => void
+  /** Incremented by the app shell when the player confirms leaving via Back. */
+  leaveRequest?: number
 }
 
-export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: MultiplayerGameTableProps) {
+export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leaveRequest = 0 }: MultiplayerGameTableProps) {
   const {
     status, attempt, maxAttempts, room, gameState, playerId, viewerRole,
     error, notice, latestEmote, latestBroadcast, latestChat, recentCustomMessages, latestSystemEvent,
@@ -117,6 +119,14 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave }: Mu
     if (status === 'connected' || status === 'restored' || status === 'reconnecting') leave()
     onLeave()
   }
+
+  const handledLeaveRequest = useRef(leaveRequest)
+  useEffect(() => {
+    if (leaveRequest === handledLeaveRequest.current) return
+    handledLeaveRequest.current = leaveRequest
+    quit()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaveRequest])
 
   const requestRematch = () => {
     if (rematchPending) return
@@ -562,7 +572,7 @@ export function StatePanel({ title, copy, actions }: { title: string; copy: stri
   )
 }
 
-function PrimaryBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+export function PrimaryBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -574,7 +584,7 @@ function PrimaryBtn({ onClick, children }: { onClick: () => void; children: Reac
   )
 }
 
-function GhostBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+export function GhostBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"

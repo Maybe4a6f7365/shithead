@@ -1,13 +1,14 @@
 // ============================================================================
 // App root — landing / online lobby / MP room / hot-seat lobby / SP table.
 // ============================================================================
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { hasResumableLocalRound, useSPGame } from './sp/SPSinglePlayer'
 import { LandingScreen } from './components/LandingScreen'
 import { JoinCreateScreen } from './components/JoinCreateScreen'
 import { HotSeatLobby } from './components/HotSeatLobby'
 import { GameTable } from './components/GameTable'
-import { MultiplayerGameTable } from './components/MultiplayerGameTable'
+import { GhostBtn, MultiplayerGameTable, PrimaryBtn, StatePanel } from './components/MultiplayerGameTable'
+import { pushBackHandler } from './backStack'
 import { loadRestoredRoomIntent } from './net/useMultiplayerRoom'
 
 export type Mode =
@@ -41,7 +42,58 @@ export function initialMode(search = typeof window === 'undefined' ? '' : window
 export function App() {
   const phase = useSPGame(s => s.state.phase)
   const [mode, setMode] = useState<Mode>(() => initialMode())
+  const [leavePrompt, setLeavePrompt] = useState(false)
+  const [backGuardKey, setBackGuardKey] = useState(0)
+  const [mpLeaveRequest, setMpLeaveRequest] = useState(0)
+  const inMatch = mode.name === 'mp-room' || (mode.name === 'hotseat' && phase !== 'lobby')
 
+  // System Back: sub-screens return to the landing screen; a running match
+  // asks first and stays put. On the landing screen Back leaves the app.
+  useEffect(() => {
+    if (mode.name === 'landing') return
+    return pushBackHandler(() => {
+      if (inMatch) {
+        setLeavePrompt(open => !open)
+        setBackGuardKey(key => key + 1)
+      } else {
+        setMode({ name: 'landing' })
+      }
+    })
+  }, [mode.name, inMatch, backGuardKey])
+
+  useEffect(() => {
+    if (!inMatch) setLeavePrompt(false)
+  }, [inMatch])
+
+  const confirmLeave = () => {
+    setLeavePrompt(false)
+    if (mode.name === 'mp-room') {
+      setMpLeaveRequest(request => request + 1)
+    } else {
+      useSPGame.getState().reset()
+      setMode({ name: 'landing' })
+    }
+  }
+
+  return (
+    <>
+      {renderMode()}
+      {leavePrompt && inMatch && (
+        <StatePanel
+          title="Leave the game?"
+          copy={mode.name === 'mp-room'
+            ? 'The table carries on without you.'
+            : 'This round will be discarded.'}
+          actions={<>
+            <PrimaryBtn onClick={() => setLeavePrompt(false)}>Stay</PrimaryBtn>
+            <GhostBtn onClick={confirmLeave}>Leave</GhostBtn>
+          </>}
+        />
+      )}
+    </>
+  )
+
+  function renderMode() {
   switch (mode.name) {
     case 'landing':
       return (
@@ -64,6 +116,7 @@ export function App() {
           playerName={mode.playerName}
           intent={mode.intent}
           onLeave={() => setMode({ name: 'landing' })}
+          leaveRequest={mpLeaveRequest}
         />
       )
     case 'hotseat':
@@ -71,5 +124,6 @@ export function App() {
         return <HotSeatLobby onBack={() => setMode({ name: 'landing' })} />
       }
       return <GameTable onLeave={() => setMode({ name: 'landing' })} />
+  }
   }
 }

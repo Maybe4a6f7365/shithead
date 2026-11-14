@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useBackDismiss } from '../backStack'
 
 export type LegalSheetKind = 'privacy' | 'imprint'
 
@@ -11,6 +12,7 @@ export interface LegalSheetProps {
 export function LegalSheet({ kind, open, onClose }: LegalSheetProps) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const dialog = useRef<HTMLElement>(null)
+  useBackDismiss(open, onClose)
   const returnFocus = useRef<HTMLElement | null>(null)
 
   useEffect(() => {

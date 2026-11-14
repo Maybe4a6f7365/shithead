@@ -5,6 +5,7 @@
 // ============================================================================
 import { useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
+import { useBackDismiss } from '../backStack'
 
 const SECTIONS: Array<{ title: string; lines: string[] }> = [
   {
@@ -62,6 +63,7 @@ export function RulesSheet({ open, onClose }: { open: boolean; onClose: () => vo
   const returnFocus = useRef<HTMLElement | null>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  useBackDismiss(open, onClose)
 
   useEffect(() => {
     if (!open) return
