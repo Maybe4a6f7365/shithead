@@ -279,6 +279,12 @@ export function TableScreen({
   const announcer = useAnnouncer()
   const reduceMotion = useReducedMotion()
 
+  // Light touch feedback for card handling. Follows the turn-alert switch so
+  // one setting silences every vibration; unsupported devices do nothing.
+  const haptic = (pattern: number | number[]) => {
+    if (turnAlertsEnabled) vibrate(pattern)
+  }
+
   const later = (ms: number, fn: () => void) => {
     timers.current.push(setTimeout(fn, ms))
   }
@@ -389,6 +395,7 @@ export function TableScreen({
         effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
       })
       setBurning(true)
+      haptic(28)
       burnTimerRef.current = setTimeout(() => {
         if (burnGenerationRef.current !== generation) return
         setBurning(false)
@@ -408,7 +415,7 @@ export function TableScreen({
       const copy = outMomentCopy(place)
       setOutMoment({ key: `${viewerId}:${cursor}`, place })
       announcer.sayPolite(`${copy.title}. ${copy.detail}.`)
-      if (turnAlertsEnabled) vibrate([30, 60, 30, 60, 90])
+      haptic([30, 60, 30, 60, 90])
     }
     if (fresh.some(e => e.type === 'GAME_OVER')) {
       const loser = state.players.find(p => p.id === state.loserId)
@@ -517,6 +524,7 @@ export function TableScreen({
     if (cardId) {
       setInvalidId(cardId)
       emitSoundDebounced('invalid')
+      haptic([12, 40, 12])
       later(300, () => setInvalidId(null))
     }
     later(3000, () => setFlash(f => (f === text ? null : f)))
@@ -686,6 +694,7 @@ export function TableScreen({
       // Blind plays are single cards (D7): tap toggles a single selection.
       const isSelected = effectiveSelection.includes(card.id)
       setSelection(isSelected ? [] : [card.id])
+      haptic(8)
       emitSoundDebounced(isSelected ? 'deselect' : 'select')
       return
     }
@@ -705,6 +714,7 @@ export function TableScreen({
       return
     }
     setSelection(next)
+    haptic(8)
     emitSoundDebounced(effectiveSelection.includes(card.id) ? 'deselect' : 'select')
   }
 
