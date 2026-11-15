@@ -6,7 +6,8 @@ import { TableScreen, topRunCards } from '../TableScreen'
 import { burnCleanupMs, burnStackMotion } from '../BurnFx'
 import { BURN_MS, JOKER_POP_MS, QUARTET_IMPACT_MS } from '../pileFx/burns'
 import { landingFxMs } from '../pileFx/landings'
-import { canvasFxSupported } from '../pileFx/stage'
+import { canvasFxSupported, qualityForPace } from '../pileFx/stage'
+import { skippedSeatIds } from '../seatFx'
 import { burnMaskSupported } from '../pileFx/burnMask'
 
 beforeAll(() => {
@@ -107,5 +108,45 @@ describe('quartet burn', () => {
     expect(labels.at(-1)).toBe('9 of spades')
     // The stack burns inside the box the mask is cut from.
     expect(view.container.querySelector('.waste-pile__burn-stack .waste-pile__burn-mask .card')).not.toBeNull()
+  })
+})
+
+describe('frame-pace quality', () => {
+  it('draws everything at 60 and 50 fps, thins out as frames slip, and never draws nothing', () => {
+    expect(qualityForPace(1000 / 60)).toBe(1)
+    expect(qualityForPace(20)).toBe(1)
+    expect(qualityForPace(30)).toBeGreaterThan(qualityForPace(36))
+    expect(qualityForPace(30)).toBeLessThan(1)
+    expect(qualityForPace(40)).toBeCloseTo(0.45, 5)
+    expect(qualityForPace(400)).toBeCloseTo(0.45, 5)
+  })
+})
+
+describe('skippedSeatIds', () => {
+  const seat = (id: string, isOut = false) => ({ id, name: id, hand: [], faceUp: [], faceDown: [], isOut }) as Player
+  const table = (ids: Array<[string, boolean?]>, currentPlayerIdx: number) =>
+    ({ players: ids.map(([id, out]) => seat(id, out)), currentPlayerIdx, playDirection: 1 as const })
+
+  it('names the one seat a single 8 passes', () => {
+    expect(skippedSeatIds(table([['a'], ['b'], ['c']], 2), 'a', 1)).toEqual(['b'])
+  })
+
+  it('names every seat stacked 8s pass, in play order, wrapping the table', () => {
+    expect(skippedSeatIds(table([['a'], ['b'], ['c'], ['d']], 0), 'c', 2)).toEqual(['d'])
+    expect(skippedSeatIds(table([['a'], ['b'], ['c'], ['d']], 1), 'c', 2)).toEqual(['d', 'a'])
+  })
+
+  it('skips the only opponent in a two-player game, however many 8s were played', () => {
+    expect(skippedSeatIds(table([['a'], ['b']], 0), 'a', 1)).toEqual(['b'])
+    expect(skippedSeatIds(table([['a'], ['b']], 0), 'a', 3)).toEqual(['b'])
+  })
+
+  it('does not count players who are already out', () => {
+    expect(skippedSeatIds(table([['a'], ['b', true], ['c'], ['d']], 3), 'a', 1)).toEqual(['c'])
+  })
+
+  it('follows the direction of play and tolerates an unknown actor', () => {
+    expect(skippedSeatIds({ ...table([['a'], ['b'], ['c']], 1), playDirection: -1 }, 'a', 1)).toEqual(['c'])
+    expect(skippedSeatIds(table([['a'], ['b']], 0), 'nobody', 1)).toEqual([])
   })
 })

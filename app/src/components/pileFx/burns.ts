@@ -207,11 +207,11 @@ export function burnFx(reason: BurnReason, card: CardBox, options: BurnFxOptions
     return [outline[index * 2], outline[index * 2 + 1], index]
   }
 
-  function emit(dt: number, edgeLength: number) {
+  function emit(amount: number, edgeLength: number) {
     if (plan.fire) {
-      flameDebt += edgeLength * 2.5 * dt
-      emberDebt += edgeLength * 0.55 * dt
-      ashDebt += edgeLength * 0.4 * dt
+      flameDebt += edgeLength * 2.5 * amount
+      emberDebt += edgeLength * 0.55 * amount
+      ashDebt += edgeLength * 0.4 * amount
       while (flameDebt >= 1) {
         flameDebt -= 1
         const point = edgePoint()
@@ -245,7 +245,7 @@ export function burnFx(reason: BurnReason, card: CardBox, options: BurnFxOptions
         addAsh(point[0] + Math.cos(angle) * back, point[1] + Math.sin(angle) * back, rand(-28, 28) * k, -rand(14, 58) * k)
       }
     } else {
-      glintDebt += edgeLength * 0.5 * dt
+      glintDebt += edgeLength * 0.5 * amount
       while (glintDebt >= 1) {
         glintDebt -= 1
         const point = edgePoint()
@@ -348,7 +348,7 @@ export function burnFx(reason: BurnReason, card: CardBox, options: BurnFxOptions
       }
     }
     const edgeLength = live.length * ((Math.PI * 2 * radius) / BLOB_SAMPLES)
-    if (burning) emit(dt, edgeLength)
+    if (burning) emit(dt * frame.quality, edgeLength)
     heat += ((burning && live.length > 0 ? 1 : 0) - heat) * Math.min(1, dt * 9)
 
     // ---- Light thrown on the felt ----

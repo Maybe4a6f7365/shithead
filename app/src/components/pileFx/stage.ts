@@ -24,6 +24,12 @@ export interface FxFrame {
   card: CardBox
   width: number
   height: number
+  /**
+   * 1 while frames arrive on time, falling towards MIN_QUALITY as they slip.
+   * Effects scale how much they emit by it, so a struggling device draws a
+   * thinner fire instead of a slower one.
+   */
+  quality: number
 }
 
 export interface Fx {
@@ -39,6 +45,16 @@ export interface FxHandle {
 
 const MAX_DPR = 2
 const MAX_DT = 0.05
+const MIN_QUALITY = 0.45
+/** Frame gaps (ms) between which quality falls from 1 to MIN_QUALITY. */
+const PACE_GOOD_MS = 20
+const PACE_POOR_MS = 40
+
+/** How much an effect should draw, given the recent average gap between frames. */
+export function qualityForPace(paceMs: number): number {
+  const slip = (paceMs - PACE_GOOD_MS) / (PACE_POOR_MS - PACE_GOOD_MS)
+  return 1 - Math.min(1, Math.max(0, slip)) * (1 - MIN_QUALITY)
+}
 
 /** jsdom has a canvas element but no 2D context; do not even ask it for one. */
 export function canvasFxSupported(): boolean {
@@ -52,6 +68,8 @@ export class PileFxStage {
   private running: Array<{ fx: Fx; start: number }> = []
   private raf = 0
   private last = 0
+  /** Smoothed gap between frames (ms). */
+  private pace = 1000 / 60
   private dpr = 1
   private width = 0
   private height = 0
@@ -67,6 +85,7 @@ export class PileFxStage {
     this.canvas.dataset.active = 'true'
     if (!this.raf) {
       this.last = performance.now()
+      this.pace = 1000 / 60
       this.raf = requestAnimationFrame(this.tick)
     }
     return { release: () => fx.release?.() }
@@ -115,15 +134,18 @@ export class PileFxStage {
   private tick = (now: number) => {
     const ctx = this.ctx
     if (!ctx) return
-    const dt = Math.min(MAX_DT, Math.max(0, (now - this.last) / 1000))
+    const gap = Math.max(0, now - this.last)
+    const dt = Math.min(MAX_DT, gap / 1000)
     this.last = now
+    this.pace += (Math.min(gap, 100) - this.pace) * 0.15
+    const quality = qualityForPace(this.pace)
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     this.running = this.running.filter(entry => {
       ctx.save()
       const alive = entry.fx.draw({
-        ctx, t: now - entry.start, dt, card: this.card, width: this.width, height: this.height,
+        ctx, t: now - entry.start, dt, card: this.card, width: this.width, height: this.height, quality,
       })
       ctx.restore()
       return alive

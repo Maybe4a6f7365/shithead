@@ -7,7 +7,7 @@
 // Interaction model (§6.1): tap-select → explicit PLAY button. No action ever
 // fires on a single tap of a card. Invalid taps shake + explain in the feed.
 // ============================================================================
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutGroup, useReducedMotion } from 'framer-motion'
 import type { Card as CardT, GameState } from '../engine'
 import { canPlay, getInterruptBurnCards, getMirroredCard, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
@@ -26,7 +26,8 @@ import { ActionBar } from './ActionBar'
 import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
 import { feedLine, latestAnimatedEvents, type FeedContext } from './feedText'
-import { playArrivalMs } from './actionTiming'
+import { actionSettleMs, playArrivalMs } from './actionTiming'
+import { passOverSeats, skippedSeatIds } from './seatFx'
 import { useSoundFromLog, emitSoundDebounced, type AdhdAlertSound } from './soundManager'
 import {
   BroadcastFeedback,
@@ -403,6 +404,8 @@ export function TableScreen({
   const lastActionSeq = useRef(state.seq ?? state.turnCount)
   const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank, run: topRunCards(state) })
   const previousPlayers = useRef(state.players)
+  const cancelSeatPass = useRef<() => void>(() => {})
+  useEffect(() => () => cancelSeatPass.current(), [])
   useEffect(() => {
     const cursor = state.seq ?? state.turnCount
     if (lastActionSeq.current === cursor) return
@@ -410,6 +413,14 @@ export function TableScreen({
     const fresh = latestAnimatedEvents(state.log)
     if (fresh.length === 0) return
     setSpecialEffect(specialEffectFromEvents(fresh, cursor, topRank))
+    // An 8 shows on the players it passes over, once it has landed.
+    const played = fresh.find(e => e.type === 'PLAY_CARDS')
+    if (!reduceMotion && played?.type === 'PLAY_CARDS' && played.cards[0]?.rank === '8' && !fresh.some(e => e.type === 'CLEAR_PILE')) {
+      cancelSeatPass.current()
+      cancelSeatPass.current = passOverSeats(
+        skippedSeatIds(state, played.playerId, played.cards.length), viewerId, actionSettleMs(state.log, false),
+      )
+    }
     const ctx: FeedContext = { meId: viewerId, players: state.players }
     const line = feedLine(state, ctx)
     if (line) announcer.sayPolite(line.text)
@@ -582,9 +593,9 @@ export function TableScreen({
   }, [state.log, viewerId])
 
   useEffect(() => {
-    previousPile.current = { top, pileCount: ps, effectiveRank: topRank, run: topRunCards(state) }
+    previousPile.current = { top, pileCount: ps, effectiveRank: topRank, run: topRunCards({ pile: state.pile }) }
     previousPlayers.current = state.players
-  }, [top, ps, topRank, state.players])
+  }, [top, ps, topRank, state.pile, state.players])
 
   const lastTurnKey = useRef('')
   useEffect(() => {
