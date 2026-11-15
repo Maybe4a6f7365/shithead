@@ -176,8 +176,7 @@ describe('RoomClient authentication ordering', () => {
   })
 
   it('sends reconnect authentication before flushing a queued PLAY and stamps the current protocol', () => {
-    let client!: RoomClient
-    client = new RoomClient({
+    const client: RoomClient = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
       onMessage: () => {},
       onOpen: () => client.send({
@@ -338,8 +337,7 @@ describe('RoomClient authentication ordering', () => {
   })
 
   it('keeps connecting cancel ordered JOIN then LEAVE', () => {
-    let client!: RoomClient
-    client = new RoomClient({
+    const client: RoomClient = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
       onMessage: () => {},
       onOpen: () => client.send({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'Ada' }),
@@ -353,8 +351,7 @@ describe('RoomClient authentication ordering', () => {
   })
 
   it('drops stale chat, reactions, broadcasts, rematch votes, and offline kicks instead of replaying them', () => {
-    let client!: RoomClient
-    client = new RoomClient({
+    const client: RoomClient = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
       onMessage: () => {},
       onOpen: () => client.send({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'Ada' }),
@@ -387,8 +384,7 @@ describe('RoomClient authentication ordering', () => {
   })
 
   it('never queues a race-bound quick follow-up while offline or unauthenticated', () => {
-    let client!: RoomClient
-    client = new RoomClient({
+    const client: RoomClient = new RoomClient({
       url: 'ws://example.test/api/room/ABC123/ws',
       onMessage: () => {},
       onOpen: () => client.send({ type: 'JOIN_ROOM', code: 'ABC123', playerName: 'Ada' }),

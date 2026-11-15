@@ -87,6 +87,7 @@ export function normalizeChatText(text: string): string {
     .normalize('NFC')
     .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
     .replace(/[\u00AD\u180E\u200B\u2060-\u2064\uFEFF\u{E0000}-\u{E007F}]/gu, '')
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what this strips
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
     .replace(/\s+/gu, ' ')
     .trim()

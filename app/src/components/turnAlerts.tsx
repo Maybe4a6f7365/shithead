@@ -71,7 +71,7 @@ function readStoredValue(
     // A policy-blocked localStorage must not prevent the session fallback.
   }
 
-  let legacy: string | null = null
+  let legacy: string | null
   try { legacy = legacyStorage?.getItem(key) ?? null } catch { return null }
   if (legacy === null) return null
 
