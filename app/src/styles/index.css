@@ -772,7 +772,11 @@
   isolation: isolate;
   overflow-x: hidden;
   color: var(--landing-paper);
-  background: var(--landing-felt);
+  /* A lamp-lit table: edge vignette over a fine static grain over the felt. */
+  background:
+    radial-gradient(ellipse 130% 85% at 50% 38%, transparent 52%, rgba(4, 18, 13, 0.6) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.9 0 0 0 0 0.78 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    var(--landing-felt);
 }
 .landing-content {
   position: relative;
@@ -794,25 +798,39 @@
 .landing-brand__stage {
   position: relative;
   width: 100%;
-  height: 170px;
+  /* Taller screens lift the fan further out from behind the wordmark. */
+  height: clamp(170px, 24vh, 200px);
+  height: clamp(170px, 24svh, 200px);
+}
+.landing-brand__stage::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  top: 50%;
+  width: 150%;
+  height: 230%;
+  transform: translate(-50%, -52%);
+  background: radial-gradient(closest-side, rgba(241, 229, 199, 0.17), rgba(241, 229, 199, 0.05) 55%, transparent 100%);
+  pointer-events: none;
 }
 .landing-deal {
   position: absolute;
-  top: 2px;
+  top: 0;
   left: 50%;
-  width: 210px;
-  height: 106px;
+  width: 260px;
+  height: 140px;
   transform: translateX(-50%);
 }
 .landing-dealt-card {
   position: absolute;
-  top: 2px;
-  width: 70px;
-  height: 98px;
-  padding: 7px;
+  top: 0;
+  width: 86px;
+  height: 120px;
+  padding: 8px;
   overflow: hidden;
   border: 2px solid var(--landing-ink);
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--landing-ink);
   background: var(--landing-paper);
   box-shadow: 4px 5px 0 rgba(6, 25, 18, 0.5);
@@ -821,11 +839,11 @@
 }
 .landing-dealt-card--back {
   z-index: 1;
-  left: 42px;
-  top: 5px;
+  left: 28px;
+  top: 14px;
   color: var(--landing-paper);
   background: var(--landing-red);
-  transform: rotate(-7deg);
+  transform: rotate(-15deg);
 }
 .landing-dealt-card--back::before {
   content: '';
@@ -836,40 +854,43 @@
 }
 .landing-dealt-card--back i {
   position: absolute;
-  inset: 0;
+  /* Upper part of the card: the wordmark covers the lower part. */
+  inset: 0 0 38% 0;
   display: grid;
   place-items: center;
   font-family: Georgia, serif;
-  font-size: 28px;
+  font-size: 34px;
   font-style: normal;
   font-weight: 900;
+  line-height: 1;
 }
 .landing-dealt-card--seven {
   z-index: 2;
-  left: 76px;
-  transform: rotate(-1deg);
+  left: 87px;
+  transform: rotate(-2deg);
 }
 .landing-dealt-card--ten {
   z-index: 3;
-  left: 110px;
-  top: 5px;
+  left: 146px;
+  top: 12px;
   color: var(--landing-red);
-  transform: rotate(6deg);
+  transform: rotate(13deg);
 }
+/* Face-card indices only: the back's monogram keeps its own centred layout. */
 .landing-dealt-card b,
-.landing-dealt-card > i {
+.landing-dealt-card:not(.landing-dealt-card--back) > i {
   position: relative;
   display: block;
   font-style: normal;
   line-height: 1;
 }
 .landing-dealt-card b {
-  font-size: 20px;
+  font-size: 24px;
   letter-spacing: -0.06em;
 }
-.landing-dealt-card > i {
+.landing-dealt-card:not(.landing-dealt-card--back) > i {
   margin-top: 1px;
-  font-size: 15px;
+  font-size: 18px;
 }
 .landing-wordmark-lockup {
   position: absolute;
