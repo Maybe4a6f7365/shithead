@@ -980,9 +980,10 @@ export function TableScreen({
 
   if (!viewer && !spectating) return null
 
-  const endgameZoneLive = (
-    viewerActive || canBurnIn || (canPreselectVisible && zone === 'faceUp')
-  ) && (zone === 'faceUp' || zone === 'faceDown')
+  // Once the final row is the zone in play it stays full size, on and off the
+  // turn. Sizing it by whose turn it is made the row (and the pile above it)
+  // grow and shrink with every turn.
+  const endgameZoneLive = zone === 'faceUp' || zone === 'faceDown'
   const emotePlayer = speakerNameForEvent(displayedEmote, state)
   const broadcastPlayer = speakerNameForEvent(displayedBroadcast, state)
   const chatPlayer = speakerNameForEvent(displayedChat, state)
@@ -1143,7 +1144,8 @@ export function TableScreen({
           />
         )}
         <div className="table-hand-zone__inner" onClick={e => e.stopPropagation()}>
-          {(viewerActive || canBurnIn || canQuickFollowUp) && (
+          {/* Always rendered: an idle bar holds the row between turns. */}
+          {(
             <ActionBar
               selectionCount={viewerActive ? effectiveSelection.length : 0}
               canPickUp={viewerActive && ps > 0}

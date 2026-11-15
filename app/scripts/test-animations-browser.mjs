@@ -9,6 +9,7 @@
 //   - a card that burns the pile flies there first; no empty slot in between
 //   - the play that ends the round is shown before the round-over card
 //   - after a resize or rotation, a flight still starts from the seat
+//   - the pile, final row and hand sit in the same place on and off the turn
 //
 // Starts a Vite dev server, drives the single-player store in headless
 // Chromium and samples the DOM every frame. Needs Playwright with Chromium
@@ -74,6 +75,11 @@ await page.evaluate(async () => {
       const store = useSPGame.getState()
       const player = store.state.players[seat]
       store.playCards(player.id, player[zone].slice(0, count))
+    },
+    /** Where the fixed parts of the table sit (top edges, px). */
+    layout() {
+      const top = selector => Math.round(document.querySelector(selector).getBoundingClientRect().top)
+      return { pile: top('.pile-card--waste'), finalRow: top('.tableau-well'), hand: top('.hand-fan'), bar: document.querySelector('.action-bar')?.dataset.mode ?? null }
     },
     /** Force a table re-render that changes no card. */
     rerender(tag) { useSPGame.setState({ lastError: `probe ${tag}` }) },
@@ -333,6 +339,46 @@ await test('resize: an opponent\'s card still flies from their seat after the vi
   assert(miss < 45, `the flight started ${miss}px away from the seat (seat ${seat}, card ${first.entryCenter})`)
   await page.setViewportSize({ width: 390, height: 844 })
   await settle(300)
+})
+
+const sameLayout = (a, b) => a.pile === b.pile && a.finalRow === b.finalRow && a.hand === b.hand
+const describeLayout = layout => `pile ${layout.pile}, final row ${layout.finalRow}, hand ${layout.hand} (bar: ${layout.bar})`
+
+await test('layout: nothing moves between an opponent\'s turn and yours', async () => {
+  const table = { hand: ['8', '9', 'Q', 'Q', 'A'], faceUp: ['10', '3', 'K'], faceDown: ['4', '4', '4'] }
+  const opp = { hand: ['4', '4', '4'], faceUp: ['A', '3', '8'], faceDown: ['4', '4', '4'] }
+  const at = async spec => {
+    await page.evaluate(spec => T.craft(spec), spec)
+    await settle(500)
+    return page.evaluate(() => T.layout())
+  }
+  const waiting = await at({ me: table, opp, pile: ['9'], stock: 6, turn: 'opp' })
+  const myTurn = await at({ me: table, opp, pile: ['9'], stock: 6 })
+  const emptyPile = await at({ me: table, opp, pile: [], stock: 6 })
+  assert(myTurn.bar === 'pickup' && waiting.bar === 'idle', `test setup: unexpected action bar modes ${waiting.bar}/${myTurn.bar}`)
+  assert(sameLayout(waiting, myTurn), `opponent's turn: ${describeLayout(waiting)}; my turn: ${describeLayout(myTurn)}`)
+  assert(sameLayout(emptyPile, myTurn), `my turn, empty pile: ${describeLayout(emptyPile)}; with a pile: ${describeLayout(myTurn)}`)
+  await page.locator('.hand-fan__card button').nth(2).click({ force: true })
+  await settle(300)
+  const selected = await page.evaluate(() => T.layout())
+  assert(selected.bar === 'play' && sameLayout(selected, myTurn), `with a selection: ${describeLayout(selected)}; without: ${describeLayout(myTurn)}`)
+})
+
+await test('layout: the final row keeps its size through the endgame, on and off the turn', async () => {
+  const opp = { hand: ['4', '4', '4'], faceUp: [], faceDown: [] }
+  const at = async spec => {
+    await page.evaluate(spec => T.craft(spec), spec)
+    await settle(500)
+    return page.evaluate(() => T.layout())
+  }
+  for (const [name, me] of [
+    ['face-up row', { hand: [], faceUp: ['10', '3', 'K'], faceDown: ['4', '4', '4'] }],
+    ['face-down row', { hand: [], faceUp: [], faceDown: ['4', '4', '4'] }],
+  ]) {
+    const waiting = await at({ me, opp, pile: ['9'], turn: 'opp' })
+    const myTurn = await at({ me, opp, pile: ['9'] })
+    assert(sameLayout(waiting, myTurn), `${name}, opponent's turn: ${describeLayout(waiting)}; my turn: ${describeLayout(myTurn)}`)
+  }
 })
 
 await test('no uncaught page errors', async () => {

@@ -1,7 +1,8 @@
 // ============================================================================
 // ActionBar (Z4) — 48px, directly above the hand fan / home indicator (§3.1).
 // PICK UP = quiet secondary action; PLAY = coral primary,
-// label carries the count, ABSENT (not disabled) with no selection.
+// label carries the count, ABSENT (not disabled) with no selection. The bar
+// itself always occupies its row, so the table above it never shifts.
 // ============================================================================
 import clsx from 'clsx'
 
@@ -84,7 +85,21 @@ export function ActionBar({
       </div>
     )
   }
-  if (selectionCount === 0 && !canPickUp) return null
+  if (selectionCount === 0 && !canPickUp) {
+    // Nothing to do right now, but the bar keeps its place: if it came and
+    // went with the turn, the tableau and pile above it would jump every turn.
+    return (
+      <div
+        className="action-bar action-bar--idle flex items-center justify-center px-s4 min-h-[var(--actionbar-h)]"
+        data-mode="idle"
+        aria-hidden="true"
+      >
+        {/* An unseen, inert button so the idle row is sized by exactly the same
+            rules as a live one at every breakpoint. */}
+        <button type="button" className="action-button invisible min-h-[48px]" tabIndex={-1} disabled />
+      </div>
+    )
+  }
   return (
     <div
       className={clsx('action-bar flex items-center justify-between gap-s3 px-s4 min-h-[var(--actionbar-h)]', {
