@@ -731,24 +731,44 @@
   box-shadow: var(--shadow-surface);
 }
 
-.primary-action {
+/* Primary and secondary actions share the landing screen's card language:
+   an ink outline, a hard offset shadow, and a press that sinks into it.
+   Primary is the red card back with its inner cream line; secondary is the
+   cream card face. */
+.primary-action,
+.secondary-action {
+  --action-drop-x: 4px;
+  --action-drop-y: 5px;
+  --action-drop-color: rgba(6, 25, 18, 0.62);
+  --action-drop: var(--action-drop-x) var(--action-drop-y) 0 var(--action-drop-color);
   min-height: 50px;
-  border: 2px solid #7c2923;
+  border: 2px solid var(--color-ink);
   border-radius: var(--radius-button);
+  transition: transform 90ms ease;
+}
+.primary-action {
+  --action-shadow:
+    inset 0 0 0 3px var(--color-burgundy),
+    inset 0 0 0 4.5px rgba(241, 229, 199, 0.6),
+    var(--action-drop);
   color: var(--color-cream);
   background: var(--color-burgundy);
-  box-shadow: 3px 4px 0 rgba(6, 25, 18, 0.52);
-  transition: transform var(--dur-1) var(--ease-standard), filter var(--dur-1) var(--ease-standard);
+  box-shadow: var(--action-shadow);
 }
-.primary-action:active:not(:disabled) { transform: scale(0.98); filter: brightness(1.06); }
-.primary-action:focus-visible { box-shadow: 3px 4px 0 rgba(6, 25, 18, 0.52), var(--ring-focus); }
 .secondary-action {
-  min-height: 50px;
-  border: 2px solid rgba(241, 229, 199, 0.58);
-  border-radius: var(--radius-button);
-  color: var(--color-cream);
-  background: var(--color-felt-raised);
+  --action-shadow: var(--action-drop);
+  color: var(--color-ink);
+  background: var(--color-cream);
+  box-shadow: var(--action-shadow);
 }
+.primary-action:active:not(:disabled),
+.secondary-action:active:not(:disabled) {
+  --action-drop-x: 1px;
+  --action-drop-y: 1px;
+  transform: translate(3px, 4px);
+}
+.primary-action:focus-visible,
+.secondary-action:focus-visible { box-shadow: var(--action-shadow), var(--ring-focus); }
 .burn-in-action {
   width: min(100%, 320px);
   border: 2px solid #7d6127;
@@ -1054,9 +1074,12 @@
   outline-offset: 3px;
 }
 .landing-rules-button:focus-visible,
-.landing-links button:focus-visible,
-.landing-about-close:focus-visible {
+.landing-links button:focus-visible {
   box-shadow: none;
+}
+/* The About card is paper, so a paper outline would vanish against it. */
+.landing-about-close:focus-visible {
+  outline-color: var(--landing-ink);
 }
 /* A small playing card rather than a square chip. */
 .landing-mode-suit {
@@ -1189,14 +1212,26 @@
   width: 100%;
   min-height: 48px;
   margin-top: 18px;
-  border: 2px solid var(--landing-red-dark);
+  border: 2px solid var(--landing-ink);
   border-radius: 8px;
   color: var(--landing-paper);
   background: var(--landing-red);
+  box-shadow:
+    inset 0 0 0 3px var(--landing-red),
+    inset 0 0 0 4.5px rgba(241, 229, 199, 0.6),
+    4px 5px 0 rgba(23, 36, 29, 0.34);
   font-size: 14px;
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  transition: transform 90ms ease;
+}
+.landing-about-close:active {
+  box-shadow:
+    inset 0 0 0 3px var(--landing-red),
+    inset 0 0 0 4.5px rgba(241, 229, 199, 0.6),
+    1px 1px 0 rgba(23, 36, 29, 0.34);
+  transform: translate(3px, 4px);
 }
 
 @media (max-width: 340px) {
@@ -1398,7 +1433,11 @@
 @media (prefers-reduced-motion: reduce) {
   .landing-mode-button,
   .landing-mode-choice > p,
-  .landing-rules-button {
+  .landing-rules-button,
+  .landing-about-close,
+  .primary-action,
+  .secondary-action,
+  .room-code-action {
     transition: none;
   }
 }
@@ -2205,9 +2244,8 @@
 /* Android-only hand-off to the installed app, below the primary Join button. */
 .setup-card__handoff { margin-top: 12px; }
 .setup-card__handoff .secondary-action {
+  --action-drop-color: rgba(23, 36, 29, 0.34);
   min-height: 46px;
-  color: var(--color-ink);
-  border-color: rgba(23, 36, 29, 0.45);
   background: #fff8e8;
   text-decoration: none;
 }
@@ -2406,9 +2444,15 @@ input.modern-input { font-size: 16px; }
   border: 2px solid var(--color-ink);
   border-radius: 6px;
   color: var(--color-ink) !important;
-  background: transparent;
+  background: #fff8e8;
+  box-shadow: 2px 3px 0 rgba(23, 36, 29, 0.34);
+  transition: transform 90ms ease;
 }
-.room-code-action--invite { color: var(--color-cream) !important; background: var(--color-burgundy); border-color: #7c2923; }
+.room-code-action:active {
+  box-shadow: none;
+  transform: translate(2px, 3px);
+}
+.room-code-action--invite { color: var(--color-cream) !important; background: var(--color-burgundy); }
 .room-code-ticket__status { color: var(--color-ink-soft) !important; }
 .room-code-ticket__status[role="alert"] { color: #9b2f28 !important; }
 .room-code-ticket__fallback { color: var(--color-ink-soft) !important; }
@@ -2941,16 +2985,14 @@ input.modern-input { font-size: 16px; }
   .game-over-highlights strong { margin-top: 0; }
 }
 .state-panel .phase-action--quiet { border-color: rgba(23, 36, 29, 0.35); color: #8f3029; }
+/* On the paper panel the shadow falls on cream, so it is drawn lighter. */
 .state-panel .phase-action--primary {
-  border: 2px solid #7c2923;
-  color: var(--color-cream);
-  background: var(--color-burgundy);
-  box-shadow: 3px 4px 0 rgba(23, 36, 29, 0.34);
+  --action-drop-color: rgba(23, 36, 29, 0.34);
 }
 .state-panel .phase-action--primary:focus-visible {
   outline: 3px solid var(--color-ink);
   outline-offset: 3px;
-  box-shadow: 3px 4px 0 rgba(23, 36, 29, 0.34);
+  box-shadow: var(--action-shadow);
 }
 
 .segmented-control__option:focus-visible {
