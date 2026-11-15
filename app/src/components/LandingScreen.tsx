@@ -74,7 +74,7 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
                 aria-describedby="online-mode-description"
               >
                 <span className="landing-mode-suit" aria-hidden="true">♠</span>
-                <span>Play Online</span>
+                <span className="landing-mode-title">Play Online</span>
                 <span className="landing-mode-arrow" aria-hidden="true">→</span>
               </button>
               <p id="online-mode-description">Private rooms · 2–5 players</p>
@@ -87,7 +87,7 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
                 aria-describedby="offline-mode-description"
               >
                 <span className="landing-mode-suit" aria-hidden="true">♦</span>
-                <span>Play Offline</span>
+                <span className="landing-mode-title">Play Offline</span>
                 <span className="landing-mode-arrow" aria-hidden="true">→</span>
               </button>
               <p id="offline-mode-description">Same phone · friends or bots</p>
