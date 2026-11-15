@@ -246,14 +246,14 @@ describe('modern game-screen hierarchy', () => {
     act(() => vi.advanceTimersByTime(500))
     expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burning')).toBe('true')
 
-    act(() => vi.advanceTimersByTime(120))
+    act(() => vi.advanceTimersByTime(200))
     expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burning')).toBe('false')
     expect(container.querySelector('.table-pile-stage')?.getAttribute('data-burn-key')).toBeNull()
   })
 
   it('uses a short reduced-motion cleanup without shortening normal burn motion', () => {
     expect(burnCleanupDelay(true)).toBe(140)
-    expect(burnCleanupDelay(false)).toBe(560)
-    expect(burnCleanupDelay(null)).toBe(560)
+    expect(burnCleanupDelay(false)).toBe(700)
+    expect(burnCleanupDelay(null)).toBe(700)
   })
 })

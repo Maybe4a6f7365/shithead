@@ -128,12 +128,27 @@ export interface TableScreenProps {
 
 type Zone = 'hand' | 'faceUp' | 'faceDown'
 
+/** The cards of the same rank lying on top of the pile, newest first. */
+export function topRunCards(state: Pick<GameState, 'pile'>): CardT[] {
+  const run: CardT[] = []
+  for (let index = state.pile.length - 1; index >= 0; index--) {
+    const entry = state.pile[index]
+    if (entry.cleared || entry.cards.length === 0) continue
+    const rank = run[0]?.rank ?? entry.cards[0].rank
+    if (entry.cards.some(card => card.rank !== rank)) break
+    run.push(...entry.cards)
+  }
+  return run
+}
+
 interface BurnSnapshot {
   actionKey: string
   reason: BurnReason
   top: CardT | null
   pileCount: number
   effectiveRank: ReturnType<typeof getTopRank>
+  /** Quartet: the four cards that made the set, top card first. */
+  fan: CardT[] | null
 }
 
 export function burnCleanupDelay(reduceMotion: boolean | null, reason?: BurnReason | null): number {
@@ -386,7 +401,7 @@ export function TableScreen({
 
   // ---- Effects: burn detection, announcements, sounds, turn announce ----
   const lastActionSeq = useRef(state.seq ?? state.turnCount)
-  const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank })
+  const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank, run: topRunCards(state) })
   const previousPlayers = useRef(state.players)
   useEffect(() => {
     const cursor = state.seq ?? state.turnCount
@@ -500,6 +515,7 @@ export function TableScreen({
       top: playedTop,
       pileCount: previousPile.current.pileCount + burnEvent.cards.length,
       effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
+      fan: burnEvent.reason === 'quartet' ? [...burnEvent.cards, ...previousPile.current.run].slice(0, 4) : null,
     }
   }
   // A burn already in the log when the table mounts (reconnect) is history.
@@ -566,7 +582,7 @@ export function TableScreen({
   }, [state.log, viewerId])
 
   useEffect(() => {
-    previousPile.current = { top, pileCount: ps, effectiveRank: topRank }
+    previousPile.current = { top, pileCount: ps, effectiveRank: topRank, run: topRunCards(state) }
     previousPlayers.current = state.players
   }, [top, ps, topRank, state.players])
 
@@ -1102,6 +1118,7 @@ export function TableScreen({
             suppressEntryId={blindEvent?.success ? blindEvent.card.id : null}
             burnKey={burnSnapshot?.actionKey}
             burnReason={burnSnapshot?.reason}
+            burnFan={burnSnapshot?.fan}
             specialEffect={specialEffect}
             teachHint={ps === 0 && viewerActive}
             playedBy={playedBy}

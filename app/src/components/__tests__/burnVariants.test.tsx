@@ -15,13 +15,13 @@ beforeAll(() => {
 afterEach(cleanup)
 
 describe('burn variant timing', () => {
-  it('keeps the ten at 560ms and gives the longer variants more room', () => {
-    expect(burnCleanupMs('ten')).toBe(560)
-    expect(burnCleanupMs('quartet')).toBe(720)
+  it('gives the ten 700ms and the staged variants a little more room', () => {
+    expect(burnCleanupMs('ten')).toBe(700)
+    expect(burnCleanupMs('quartet')).toBe(780)
     expect(burnCleanupMs('joker')).toBe(760)
-    expect(burnCleanupMs(null)).toBe(560)
+    expect(burnCleanupMs(null)).toBe(700)
     expect(burnCleanupDelay(true, 'joker')).toBe(140)
-    expect(burnCleanupDelay(false, 'quartet')).toBe(720)
+    expect(burnCleanupDelay(false, 'quartet')).toBe(780)
   })
 
   it('gives each reason its own stack motion, with the key times ascending', () => {

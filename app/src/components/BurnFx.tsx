@@ -1,151 +1,127 @@
 // ============================================================================
 // BurnFx — what a burn looks like depends on what caused it:
-//   ten     scorches in place (heat wash + rising embers), then lifts away
-//   quartet four cards slam together, the stack punches, a shockwave rings out
-//   joker   a gold ring and sparkles burst around the spinning stack
-// Rendered inside the pile card slot next to the burning stack, which carries
-// the matching base motion (see burnStackMotion). Web Animations API with
-// fill: both — transform/opacity only, no end-of-animation flash. Not rendered
-// under reduced motion.
+//   ten     a corner catches and a glowing, ragged edge eats across the stack
+//   quartet the four cards fan out, slam down, and the stack burns out from
+//           the point of impact
+//   joker   the stack spins, pops into rings, suits and glints, and dissolves
+// The fire is drawn on the pile's effects canvas (see pileFx/burns); this
+// component starts it, owns the quartet's four real cards, and tells the fire
+// when the stack has left the table. The stack carries the matching base
+// motion (see burnStackMotion). Not rendered under reduced motion.
 // ============================================================================
 import { useLayoutEffect, useRef } from 'react'
 import type { Card as CardT } from '../engine'
-import { Card } from './Card'
-import { EASE_LAND_CSS, EASE_LEAVE_CSS } from './motion'
+import { Card, pileTilt } from './Card'
+import { EASE_LAND_CSS, EASE_LEAVE_CSS, EASE_SETTLE_CSS } from './motion'
+import { BURN_MS, QUARTET_IMPACT_MS, burnFx, type BurnReason } from './pileFx/burns'
+import type { PileFxStage } from './pileFx/stage'
 
-export type BurnReason = 'ten' | 'quartet' | 'joker'
+export type { BurnReason }
 
 export function burnCleanupMs(reason: BurnReason | null | undefined): number {
-  return reason === 'joker' ? 760 : reason === 'quartet' ? 720 : 560
+  return BURN_MS[reason ?? 'ten']
 }
 
-/** Base motion for the burning stack itself, per reason. */
+/**
+ * Base motion for the burning stack itself, per reason. The burn removes the
+ * cards through a mask, so opacity only drops at the very end, as a fallback
+ * where the mask is unavailable.
+ */
 export function burnStackMotion(reason: BurnReason | null | undefined) {
   if (reason === 'quartet') {
+    // Braces under the four cards, then takes the hit.
+    const impact = QUARTET_IMPACT_MS / BURN_MS.quartet
     return {
-      animate: { opacity: [1, 1, 1, 0.8, 0], scale: [1, 1, 1.09, 1, 0.9], x: 0, y: 0, rotate: 0 },
-      transition: { duration: 0.72, times: [0, 0.38, 0.45, 0.6, 1], ease: 'easeOut' as const },
+      animate: { opacity: [1, 1, 1, 1, 1, 0], scale: [1, 1, 0.92, 1.01, 1, 1], x: 0, y: 0, rotate: 0 },
+      transition: { duration: BURN_MS.quartet / 1000, times: [0, impact, impact + 0.05, impact + 0.12, 0.9, 1], ease: 'easeOut' as const },
     }
   }
   if (reason === 'joker') {
+    // One full turn, lifted off the felt, back down flat before it dissolves.
     return {
-      animate: { opacity: [1, 1, 0], scale: [1, 1.18, 0.5], x: 0, y: [0, -6, -14], rotate: [0, 200, 360] },
-      transition: { duration: 0.76, times: [0, 0.5, 1], ease: 'easeInOut' as const },
+      animate: {
+        opacity: [1, 1, 1, 1, 0], scale: [1, 1.14, 1, 1, 1], x: 0, y: [0, -12, 0, 0, 0],
+        rotate: 0, rotateY: [0, 180, 360, 360, 360],
+      },
+      // Constant, not animated: a perspective that eases in from zero balloons the card.
+      style: { transformPerspective: 700 },
+      transition: { duration: BURN_MS.joker / 1000, times: [0, 0.19, 0.38, 0.9, 1], ease: 'easeInOut' as const },
     }
   }
   if (reason === 'ten') {
-    // Scorch in place, then lift away like smoke.
+    // Flinches as it catches, then holds still while it burns.
     return {
-      animate: { opacity: [1, 1, 0.8, 0], scale: [1, 1, 1.03, 1.06], x: [0, -1.5, 1.5, 0], y: [0, 0, -10, -22], rotate: 0 },
-      transition: { duration: 0.56, times: [0, 0.4, 0.7, 1], ease: 'easeOut' as const },
+      animate: { opacity: [1, 1, 1, 1, 0], scale: [1, 0.975, 1, 1, 1], x: 0, y: 0, rotate: 0 },
+      transition: { duration: BURN_MS.ten / 1000, times: [0, 0.07, 0.2, 0.9, 1], ease: 'easeOut' as const },
     }
   }
   return null
 }
 
-type Keyframes = Keyframe[]
-
-function play(el: Element | null, keyframes: Keyframes, options: KeyframeAnimationOptions) {
-  if (el && typeof (el as HTMLElement).animate === 'function') {
-    ;(el as HTMLElement).animate(keyframes, { fill: 'both', ...options })
-  }
+function animate(el: Element | null | undefined, keyframes: Keyframe[], options: KeyframeAnimationOptions) {
+  if (el && typeof (el as HTMLElement).animate === 'function') (el as HTMLElement).animate(keyframes, options)
 }
 
-const EASE_OUT = EASE_LAND_CSS
+export interface BurnFxProps {
+  reason: BurnReason
+  /** The card on top of the burning stack. */
+  card: CardT | null
+  /** Quartet: the four cards of the set, top card first. */
+  fan?: CardT[] | null
+  stage: PileFxStage | null
+}
 
-export function BurnFx({ reason, card }: { reason: BurnReason; card: CardT | null }) {
+export function BurnFx({ reason, card, fan, stage }: BurnFxProps) {
   const root = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
     const el = root.current
     if (!el) return
-    const q = (selector: string) => Array.from(el.querySelectorAll(selector))
-    if (reason === 'ten') {
-      play(el.querySelector('[data-fx="scorch"]'), [{ opacity: 0 }, { opacity: 0.8, offset: 0.4 }, { opacity: 0.95, offset: 0.7 }, { opacity: 0 }], { duration: 560 })
-      q('[data-fx="ember"]').forEach((ember, i) => {
-        const drift = (i % 2 === 0 ? -1 : 1) * (6 + i * 4)
-        play(ember, [
-          { transform: 'translate(0, 0) scale(0.6)', opacity: 0 },
-          { opacity: 1, offset: 0.25 },
-          { transform: `translate(${drift}px, -${54 + i * 9}px) scale(1)`, opacity: 0 },
-        ], { duration: 520, delay: 90 + i * 45, easing: 'ease-out' })
+    const tilt = card ? pileTilt(card.id) : 0
+    const handle = stage?.play(box => burnFx(reason, box, {
+      maskEl: el.parentElement?.querySelector<HTMLElement>('.waste-pile__burn-mask') ?? null,
+      tilt,
+      fromRight: tilt > 0,
+    })) ?? null
+
+    if (reason === 'quartet') {
+      // The set shows itself, hangs for a beat, and comes down as one.
+      const layers = Array.from(el.querySelectorAll('[data-fx="slam"]'))
+      const total = QUARTET_IMPACT_MS + 20
+      const at = (ms: number) => ms / total
+      layers.forEach((layer, index) => {
+        const dir = index - (layers.length - 1) / 2 // -1.5 … 1.5, left to right
+        const lift = -30 + Math.abs(dir) * 6
+        const open = `translate(${dir * 27}%, ${lift}%) rotate(${dir * 10}deg) scale(1.05)`
+        const hang = `translate(${dir * 29}%, ${lift - 3}%) rotate(${dir * 11}deg) scale(1.07)`
+        animate(layer, [
+          { transform: 'translate(0%, 0%) rotate(0deg) scale(1)', opacity: 1, offset: 0, easing: EASE_LAND_CSS },
+          { transform: open, opacity: 1, offset: at(170), easing: 'ease-in-out' },
+          { transform: hang, opacity: 1, offset: at(290), easing: EASE_LEAVE_CSS },
+          { transform: 'translate(0%, 0%) rotate(0deg) scale(1)', opacity: 1, offset: at(QUARTET_IMPACT_MS) },
+          { transform: 'translate(0%, 0%) rotate(0deg) scale(1)', opacity: 0, offset: 1 },
+        ], { duration: total, fill: 'both' })
       })
-    } else if (reason === 'quartet') {
-      q('[data-fx="slam"]').forEach((layer, i) => {
-        const dir = i - 1.5 // -1.5, -0.5, 0.5, 1.5
-        play(layer, [
-          { transform: `translate(${dir * 24}px, ${-16 - Math.abs(dir) * 5}px) rotate(${dir * 11}deg) scale(1.1)`, opacity: 0.9 },
-          { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1, offset: 0.55 },
-          { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1, offset: 0.62 },
-          { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 0 },
-        ], { duration: 720, easing: EASE_LEAVE_CSS })
-      })
-      play(el.querySelector('[data-fx="ring"]'), [
-        { transform: 'scale(0.7)', opacity: 0 },
-        { transform: 'scale(0.8)', opacity: 0.85, offset: 0.4 },
-        { transform: 'scale(1.9)', opacity: 0 },
-      ], { duration: 720, easing: EASE_OUT })
-    } else {
-      play(el.querySelector('[data-fx="ring"]'), [
-        { transform: 'scale(0.6)', opacity: 0.9 },
-        { transform: 'scale(2.1)', opacity: 0 },
-      ], { duration: 640, easing: EASE_OUT })
-      q('[data-fx="spark"]').forEach((spark, i, all) => {
-        const angle = (i / all.length) * Math.PI * 2
-        play(spark, [
-          { transform: 'translate(0, 0) scale(0.4)', opacity: 1 },
-          { transform: `translate(${Math.cos(angle) * 78}px, ${Math.sin(angle) * 78}px) scale(1)`, opacity: 0 },
-        ], { duration: 620, delay: 60, easing: EASE_OUT })
-      })
+      // The stock next door jumps with the impact.
+      animate(el.closest('.pile-area__stage')?.querySelector('.pile-card--stock'), [
+        { transform: 'translateY(0)' }, { transform: 'translateY(-5px)' }, { transform: 'translateY(0)' },
+      ], { duration: 260, delay: QUARTET_IMPACT_MS + 20, easing: EASE_SETTLE_CSS })
     }
+    return () => handle?.release()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reason])
+
+  const set = reason === 'quartet' && card
+    ? Array.from({ length: 4 }, (_, index) => fan?.[index] ?? card).reverse()
+    : []
 
   return (
     <div ref={root} className="burn-fx absolute inset-0 pointer-events-none" style={{ zIndex: 4 }} aria-hidden="true" data-burn-fx={reason}>
-      {reason === 'ten' && (
-        <>
-          <div
-            data-fx="scorch"
-            className="absolute inset-0"
-            style={{
-              borderRadius: 'var(--radius-card)',
-              opacity: 0,
-              background: 'radial-gradient(circle at 50% 75%, rgba(255,150,50,0.9), rgba(150,40,15,0.8) 55%, rgba(25,12,6,0.9))',
-            }}
-          />
-          {[0, 1, 2, 3, 4, 5].map(i => (
-            <span
-              key={i}
-              data-fx="ember"
-              className="absolute rounded-full"
-              style={{ left: `${18 + i * 13}%`, bottom: '22%', width: 6, height: 6, opacity: 0, background: i % 2 ? 'var(--color-gold)' : 'var(--color-danger-bright)' }}
-            />
-          ))}
-        </>
-      )}
-      {reason === 'quartet' && (
-        <>
-          {[0, 1, 2, 3].map(i => (
-            <div key={i} data-fx="slam" className="absolute inset-0" style={{ opacity: 0 }}>
-              {card ? <Card card={card} state="in-pile" /> : null}
-            </div>
-          ))}
-          <div data-fx="ring" className="absolute inset-0" style={{ borderRadius: 'var(--radius-card)', border: '2px solid var(--color-gold-bright)', opacity: 0 }} />
-        </>
-      )}
-      {reason === 'joker' && (
-        <>
-          <div data-fx="ring" className="absolute inset-0" style={{ borderRadius: '50%', border: '2px solid var(--color-gold)', opacity: 0 }} />
-          {Array.from({ length: 8 }).map((_, i) => (
-            <span
-              key={i}
-              data-fx="spark"
-              className="absolute rounded-full"
-              style={{ left: 'calc(50% - 3px)', top: 'calc(50% - 3px)', width: 6, height: 6, opacity: 0, background: i % 2 ? 'var(--color-gold-bright)' : 'var(--color-gold)' }}
-            />
-          ))}
-        </>
-      )}
+      {set.map((layerCard, index) => (
+        <div key={index} data-fx="slam" className="absolute inset-0" style={{ opacity: 0 }}>
+          <Card card={layerCard} state="in-pile" />
+        </div>
+      ))}
     </div>
   )
 }

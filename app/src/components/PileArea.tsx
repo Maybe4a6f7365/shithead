@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import clsx from 'clsx'
 import type { Card as CardT, Rank } from '../engine'
-import { Card } from './Card'
+import { Card, pileTilt } from './Card'
 import { BlindReveal, type BlindRevealData } from './BlindReveal'
 import { PileSweep, type PileSweepData } from './PileSweep'
 import { MirrorGhost } from './MirrorGhost'
@@ -19,6 +19,8 @@ import {
   peekSeatRect, registerSeat, staggerDelay, type FlightOffset,
 } from './cardFlight'
 import { EASE_LAND, EASE_EXIT } from './motion'
+import { landingFx } from './pileFx/landings'
+import { PileFxStage, canvasFxSupported } from './pileFx/stage'
 
 export type PileEntryKind = 'reset' | 'mirror' | 'low' | 'skip' | 'standard'
 
@@ -115,6 +117,8 @@ export interface WastepileProps {
   burning?: boolean
   burnKey?: string
   burnReason?: BurnReason | null
+  /** Quartet burn: the four cards of the set, top card first. */
+  burnFan?: CardT[] | null
   skipCount?: number
   /** Empty-pile rule teaching (§4.2): shown only while pile empty + my turn. */
   teachHint?: boolean
@@ -141,6 +145,7 @@ export function Wastepile({
   burning,
   burnKey,
   burnReason,
+  burnFan,
   skipCount = 1,
   teachHint,
   playedBy,
@@ -154,6 +159,20 @@ export function Wastepile({
 }: WastepileProps) {
   const reduceMotion = useReducedMotion()
   const pileRef = useRef<HTMLDivElement>(null)
+  // One canvas over the pile carries every special-card effect.
+  const fxCanvasRef = useRef<HTMLCanvasElement>(null)
+  const fxStageRef = useRef<PileFxStage | null>(null)
+  useLayoutEffect(() => {
+    const canvas = fxCanvasRef.current
+    const anchor = pileRef.current
+    if (!canvas || !anchor || !canvasFxSupported()) return
+    const stage = new PileFxStage(canvas, anchor)
+    fxStageRef.current = stage
+    return () => {
+      stage.destroy()
+      fxStageRef.current = null
+    }
+  }, [reduceMotion])
   // A 3 already on top when the table mounts (reconnect) is history, not news.
   const mountTopId = useRef(top?.id)
   const copiesRank = top?.rank === '3'
@@ -205,6 +224,33 @@ export function Wastepile({
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [top?.id, burning])
+  // A rule card marks the felt the moment it lands. A card that is about to
+  // burn the pile does not: the burn is its mark.
+  const landingKind = entryKind === 'standard' ? null : entryKind
+  // The skip count is derived a render after the card arrives; read it when the mark is drawn.
+  const skipCountRef = useRef(skipCount)
+  skipCountRef.current = skipCount
+  useEffect(() => {
+    if (reduceMotion || !top || !landingKind || burning || burnReason) return
+    if (top.id === mountTopId.current) return
+    const play = () => fxStageRef.current?.play(box =>
+      landingFx(landingKind, box, { tilt: pileTilt(top.id), count: skipCountRef.current }))
+    // The blind reveal has already put the card down; anything else is still flying.
+    if (suppressEntryId === top.id) {
+      play()
+      return
+    }
+    const timer = window.setTimeout(play, Math.max(0, landMs - 110))
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top?.id])
+  // Fire leaves the felt scorched for a moment after the stack is gone. The
+  // mark outlives the burn, so it removes itself when its own fade has ended.
+  const [scorchKey, setScorchKey] = useState<string | null>(null)
+  const scorches = burning && !reduceMotion && (burnReason === 'ten' || burnReason === 'quartet')
+  useEffect(() => {
+    if (scorches) setScorchKey(burnKey ?? 'burn')
+  }, [scorches, burnKey])
   const variantMotion = reduceMotion ? null : burnStackMotion(burnReason)
   const baseEntry = pileEntryChoreography(entryKind, skipCount, Boolean(reduceMotion))
   const entry = top && suppressEntryId === top.id
@@ -242,6 +288,14 @@ export function Wastepile({
       data-skip-count={entryKind === 'skip' ? skipCount : undefined}
     >
       <div ref={pileRef} className="pile-card pile-card--waste relative">
+        {scorchKey && (
+          <span
+            key={`scorch-${scorchKey}`}
+            className="waste-pile__scorch"
+            onAnimationEnd={() => setScorchKey(null)}
+            aria-hidden="true"
+          />
+        )}
         {under && !burning && under.forId === top?.id && (
           <div className="waste-pile__under absolute inset-0 pointer-events-none" aria-hidden="true">
             <Card card={under.card} state="in-pile" />
@@ -276,6 +330,7 @@ export function Wastepile({
             <motion.div
               key={`burn-${burnKey ?? top?.id ?? 'empty'}`}
               className="waste-pile__burn-stack"
+              style={variantMotion && 'style' in variantMotion ? variantMotion.style : undefined}
               initial={{ opacity: 1 }}
               animate={reduceMotion
                 ? { opacity: 0 }
@@ -290,13 +345,16 @@ export function Wastepile({
                 ? { duration: 0.12 }
                 : variantMotion?.transition ?? { duration: 0.52, times: [0, 0.18, 0.58, 1], ease: EASE_EXIT }}
             >
-              {top && underCount > 0 && (
-                <span className="waste-pile__burn-edges" aria-hidden="true">
-                  <span />
-                  <span />
-                </span>
-              )}
-              {top ? <Card card={top} state="in-pile" /> : <EmptySlot teachHint={teachHint} />}
+              {/* The burn cuts its hole out of this box, shadows and all. */}
+              <div className="waste-pile__burn-mask">
+                {top && underCount > 0 && (
+                  <span className="waste-pile__burn-edges" aria-hidden="true">
+                    <span />
+                    <span />
+                  </span>
+                )}
+                {top ? <Card card={top} state="in-pile" /> : <EmptySlot teachHint={teachHint} />}
+              </div>
             </motion.div>
           ) : top ? (
             <motion.div
@@ -321,8 +379,10 @@ export function Wastepile({
         )}
         {sweep && onSweepDone && <PileSweep key={sweep.key} data={sweep} onDone={onSweepDone} />}
         {blind && onBlindDone && <BlindReveal key={blind.key} data={blind} onDone={onBlindDone} />}
-        {burning && burnReason && !reduceMotion && <BurnFx key={burnKey} reason={burnReason} card={top ?? null} />}
-        {burning && (
+        {burning && burnReason && !reduceMotion && (
+          <BurnFx key={burnKey} reason={burnReason} card={top ?? null} fan={burnFan} stage={fxStageRef.current} />
+        )}
+        {burning && (reduceMotion || !burnReason) && (
           <motion.span
             aria-hidden="true"
             className="absolute inset-0 rounded-button pointer-events-none"
@@ -350,6 +410,7 @@ export function Wastepile({
             </motion.span>
           )}
         </AnimatePresence>
+        {!reduceMotion && <canvas ref={fxCanvasRef} className="pile-fx" data-active="false" aria-hidden="true" />}
       </div>
       <div className="pile-column__meta pile-column__meta--waste">
         <span className="pile-column__label" aria-hidden="true">Pile</span>
@@ -389,6 +450,7 @@ export interface PileAreaProps {
   burning?: boolean
   burnKey?: string
   burnReason?: BurnReason | null
+  burnFan?: CardT[] | null
   specialEffect?: SpecialEffect | null
   teachHint?: boolean
   playedBy?: string | null
@@ -445,6 +507,7 @@ export function PileArea({
   burning,
   burnKey,
   burnReason,
+  burnFan,
   specialEffect,
   teachHint,
   playedBy,
@@ -491,6 +554,7 @@ export function PileArea({
           burning={burning}
           burnKey={burnKey}
           burnReason={burnReason}
+          burnFan={burnFan}
           skipCount={skipCount}
           teachHint={teachHint}
           playedBy={playedBy}

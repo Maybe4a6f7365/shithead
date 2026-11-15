@@ -3815,7 +3815,36 @@ input.modern-input { font-size: 16px; }
 .game-screen .pile-card .card[data-state="in-pile"] {
   box-shadow: 0 14px 30px rgba(6, 25, 18, 0.32), 0 2px 5px rgba(6, 25, 18, 0.22);
 }
-.game-screen .waste-pile__burn-stack { position: relative; }
+.game-screen .waste-pile__burn-stack { position: relative; display: flow-root; }
+/* A burn cuts its hole out of this box with a mask, and a mask crops whatever
+   lies outside the box it is set on. The box is therefore grown well past the
+   card, so the stack's shadow and offset edges burn away with it. */
+.game-screen .waste-pile__burn-mask { margin: -48px; padding: 48px; }
+/* Every special-card effect is drawn on one canvas that overhangs the pile. */
+.game-screen .pile-fx {
+  position: absolute;
+  left: calc(var(--card-w) * -1.6);
+  top: calc(var(--card-w) * -1.9);
+  width: calc(var(--card-w) * 4.2);
+  height: calc(var(--card-w) * 4.5);
+  z-index: 6;
+  pointer-events: none;
+}
+/* What a fire leaves on the felt once the stack is gone. */
+.game-screen .waste-pile__scorch {
+  position: absolute;
+  inset: -12% -18% -8%;
+  background: radial-gradient(ellipse at 50% 54%, rgba(4, 12, 9, 0.6) 0%, rgba(4, 12, 9, 0.38) 36%, rgba(4, 12, 9, 0) 70%);
+  opacity: 0;
+  pointer-events: none;
+  animation: pile-scorch 1700ms linear both;
+}
+@keyframes pile-scorch {
+  0% { opacity: 0; }
+  28% { opacity: 1; }
+  52% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .game-screen .waste-pile__burn-edges {
   position: absolute;
   inset: 0;
