@@ -15,6 +15,7 @@
 // Chromium and samples the DOM every frame. Needs Playwright with Chromium
 // (not a project dependency):  npm run test:browser
 // ============================================================================
+/* global T -- the test harness installed on the page's window (see the first page.evaluate) */
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
@@ -152,7 +153,6 @@ function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
 const settle = ms => page.waitForTimeout(ms)
-const filler = { hand: ['4', '4'], faceUp: [], faceDown: [] }
 
 console.log('Table animations (Chromium)')
 
@@ -315,7 +315,11 @@ await test('game over: the deciding card lands before the round-over card', asyn
   const frames = await page.evaluate(() => T.record(1500, () => T.play(0, 'hand')))
   const firstOverlay = frames.find(frame => frame.overlay)
   assert(firstOverlay, 'the round-over card never appeared')
-  const landed = frames.find(frame => frame.entryRank === 'Ace' && frame.entryDistance < 4)
+  // A card rests on the pile at a small random tilt, which moves its corner a
+  // few pixels off the slot's: "landed" is where this card ends up, not zero.
+  const rest = frames[frames.length - 1].entryDistance
+  const landed = frames.find(frame => frame.entryRank === 'Ace' && frame.entryDistance <= rest + 1)
+  assert(rest !== null && rest < 8, `the last card came to rest ${rest}px off the pile`)
   assert(landed && landed.t <= firstOverlay.t, 'the round-over card appeared before the last card had landed')
 })
 
