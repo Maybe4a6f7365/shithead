@@ -15,10 +15,10 @@
     "generate:build-meta": "node scripts/write-build-meta.mjs",
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "deploy:build": "npm run generate:build-meta && npm run typecheck:worker && npm run build",
-    "worker:dev": "wrangler dev --local",
+    "worker:dev": "wrangler dev --local --config ../wrangler.toml",
     "test:worker:adversarial": "node scripts/test-worker-adversarial.mjs",
-    "worker:deploy": "npm run deploy:build && wrangler deploy",
-    "worker:tail": "wrangler tail",
+    "worker:deploy": "npm run deploy:build && wrangler deploy --config ../wrangler.toml",
+    "worker:tail": "wrangler tail --config ../wrangler.toml",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

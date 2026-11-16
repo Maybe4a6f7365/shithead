@@ -1,8 +1,9 @@
 // ============================================================================
-// Vitest config — engine + multiplayer tests
-// Two modes:
-//   - default (engine/protocol): node pool
-//   - worker/: cloudflare pool (loaded with vitest --config vitest.worker.config.ts)
+// Vitest config — engine, protocol, client and component tests (node pool;
+// component tests opt into jsdom per file).
+// src/worker is not unit-tested here: its extracted helpers are covered from
+// engine/__tests__, and the Worker itself by scripts/test-worker-adversarial.mjs
+// against a local wrangler dev.
 // ============================================================================
 import { defineConfig } from 'vitest/config'
 

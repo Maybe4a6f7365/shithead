@@ -745,11 +745,11 @@ npm --prefix app ci
 npm --prefix app run deploy:build
 ```
 
-The root Wrangler config serves `app/dist`; `app/wrangler.toml` is the path-adjusted copy for commands executed from `app/`. Keep both bindings/migrations synchronized.
+The root `wrangler.toml` is the only Worker config. It serves `app/dist`, and the `worker:*` scripts in `app/` pass it with `--config ../wrangler.toml`, so local development, CI and production read the same bindings and migrations.
 
 ### Production domains and DNS
 
-The canonical player origin is `https://shead.online`. It is attached to the `shithead` Worker as a Cloudflare Custom Domain in the Cloudflare dashboard; the current repository-root and `app/` Wrangler files do **not** declare a `routes` block or `workers_dev` setting. Cloudflare manages the generated routing DNS record and edge certificate for the exact hostname. The zone must be **Active** and the registrar must delegate to the two nameservers assigned by Cloudflare before the route can serve traffic. Resolver caches can continue returning the previous delegation until its TTL expires, so split answers during a nameserver change indicate DNS propagation rather than application routing.
+The canonical player origin is `https://shead.online`. It is attached to the `shithead` Worker as a Cloudflare Custom Domain in the Cloudflare dashboard; the repository-root Wrangler file does **not** declare a `routes` block or `workers_dev` setting. Cloudflare manages the generated routing DNS record and edge certificate for the exact hostname. The zone must be **Active** and the registrar must delegate to the two nameservers assigned by Cloudflare before the route can serve traffic. Resolver caches can continue returning the previous delegation until its TTL expires, so split answers during a nameserver change indicate DNS propagation rather than application routing.
 
 Custom Domain matching is exact: the apex route does not also cover `www.shead.online`. The hostname policy is therefore:
 
@@ -804,11 +804,10 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   │   ├── App.tsx                     # Mode coordinator and refresh boot routing
 │   │   └── main.tsx                    # React/PWA/Visual Viewport bootstrap
 │   ├── vite.config.ts                  # Vite, manifest and Workbox policy
-│   ├── vitest.config.ts                # Default unit/component suite
-│   └── wrangler.toml                   # Local/manual Worker config
+│   └── vitest.config.ts                # Default unit/component suite
 ├── assets/                             # Source/reference art; not deployed by Vite
 ├── package.json                        # Cloudflare Workers Builds wrapper
-├── wrangler.toml                       # Authoritative production Worker config
+├── wrangler.toml                       # The Worker config: local, CI and production
 └── README.md
 ```
 
