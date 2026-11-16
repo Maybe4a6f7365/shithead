@@ -674,7 +674,7 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 | `npm run worker:deploy` | Build and deploy manually with Wrangler |
 | `npm run worker:tail` | Stream remote Worker logs |
 
-`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules). It currently reports no errors and nine `react-hooks/exhaustive-deps` warnings in older components; it is not yet part of the CI workflow. Both frontend and Worker TypeScript configs compile without TypeScript `strict` mode.
+`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules). It currently reports no errors and nine `react-hooks/exhaustive-deps` warnings in older components; it is not yet part of the CI workflow. Both the frontend and the Worker TypeScript configs compile in `strict` mode with unused locals and parameters reported as errors.
 
 ## Test strategy
 

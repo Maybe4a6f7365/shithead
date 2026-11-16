@@ -17,7 +17,7 @@ function audioBytes(file: string) {
 
 describe('turn alert audio assets', () => {
   it('ships the expected gabber and metadata-stripped chime recordings', () => {
-    expect(readdirSync(audioRoot).filter((file) => file.endsWith('.mp3')).sort()).toEqual([
+    expect(readdirSync(audioRoot).filter((file: string) => file.endsWith('.mp3')).sort()).toEqual([
       'adhd-beat.mp3',
       'turn-notification.mp3',
     ])

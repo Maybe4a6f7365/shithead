@@ -76,7 +76,7 @@ export function clearSession(): void {
  * RESUME_ROOM first, while the fallback can never accidentally re-create an
  * already allocated room code.
  */
-export function loadRestoredRoomIntent(): UseMultiplayerRoomArgs | null {
+export function loadRestoredRoomIntent(): (UseMultiplayerRoomArgs & { roomId: string }) | null {
   const session = loadSession()
   if (!session?.resumeToken) return null
   return {

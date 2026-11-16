@@ -7,7 +7,9 @@
     "types": ["@cloudflare/workers-types"],
     "noEmit": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "allowImportingTsExtensions": false,
     "resolveJsonModule": true
   },

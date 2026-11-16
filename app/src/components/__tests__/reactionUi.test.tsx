@@ -641,7 +641,7 @@ describe('reaction assets and responsive cascade', () => {
     const reactionsDir = `${process.cwd()}/public/reactions`
     const files = readdirSync(reactionsDir)
     expect(REACTION_OPTIONS).toHaveLength(28)
-    expect(files.filter(file => file.endsWith('.svg'))).toHaveLength(28)
+    expect(files.filter((file: string) => file.endsWith('.svg'))).toHaveLength(28)
     for (const option of REACTION_OPTIONS) {
       expect(existsSync(`${process.cwd()}/public${option.asset}`)).toBe(true)
     }

@@ -95,8 +95,8 @@ function CardInner({ card, faceDown, state = 'rest', size = 'full', onActivate, 
   const interactive = Boolean(onActivate)
   const isBack = faceDown || !card
   const label = cardAriaLabel(card, faceDown, ariaHint)
-  const style: React.CSSProperties = {}
-  if (state === 'in-pile' && card) style['--pile-tilt' as string] = `${pileTilt(card.id)}deg`
+  const style: React.CSSProperties & { '--pile-tilt'?: string } = {}
+  if (state === 'in-pile' && card) style['--pile-tilt'] = `${pileTilt(card.id)}deg`
   const className = clsx('card table-select-none', size === 'mini' && 'card--mini')
   const body = isBack ? <CardBack /> : <CardFace card={card} size={size} />
 

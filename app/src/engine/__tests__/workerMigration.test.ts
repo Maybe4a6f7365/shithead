@@ -182,7 +182,7 @@ describe('legacy worker state migration', () => {
       playerId: index === 0 ? 'a' : 'c',
     }))
     expect(deriveLegacyWinnerId(stateWithOutPlayers(['a', 'c'], fullLog))).toBeNull()
-    const legacy = stateWithOutPlayers(['a', 'c'], fullLog) as GameState & { winnerId?: string }
+    const legacy: Omit<GameState, 'winnerId'> & { winnerId?: string | null } = stateWithOutPlayers(['a', 'c'], fullLog)
     delete legacy.winnerId
     expect(normalizePersistedGameState(legacy)?.winnerId).toBeNull()
   })
