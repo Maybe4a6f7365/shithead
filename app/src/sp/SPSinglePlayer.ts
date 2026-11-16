@@ -10,6 +10,7 @@ import {
   type Card,
   type GameRules,
   type GameState,
+  type PileEntry,
   type Player,
   type PreviousRoundResult,
   exchangeFaceUpCards,
@@ -219,6 +220,11 @@ const isCardList = (value: unknown): boolean =>
   Array.isArray(value) && value.every(card =>
     typeof card === 'object' && card !== null && typeof (card as Card).id === 'string' &&
     typeof (card as Card).rank === 'string')
+/** The pile is a list of plays (cards + whether a burn cleared them), not of cards. */
+const isPile = (value: unknown): boolean =>
+  Array.isArray(value) && value.every(entry =>
+    typeof entry === 'object' && entry !== null && isCardList((entry as PileEntry).cards) &&
+    typeof (entry as PileEntry).cleared === 'boolean')
 
 /** Accept only a snapshot the current table can render; anything else is dropped. */
 export function isResumableRound(value: unknown): value is PersistedRound {
@@ -232,7 +238,7 @@ export function isResumableRound(value: unknown): value is PersistedRound {
     typeof player === 'object' && player !== null && typeof player.id === 'string' &&
     typeof player.name === 'string' &&
     isCardList(player.hand) && isCardList(player.faceUp) && isCardList(player.faceDown))) return false
-  if (!isCardList(state.stock) || !isCardList(state.pile) || !Array.isArray(state.log)) return false
+  if (!isCardList(state.stock) || !isPile(state.pile) || !Array.isArray(state.log)) return false
   if (!Number.isInteger(state.currentPlayerIdx) ||
     state.currentPlayerIdx < 0 || state.currentPlayerIdx >= state.players.length) return false
   if (typeof state.rules !== 'object' || state.rules === null) return false

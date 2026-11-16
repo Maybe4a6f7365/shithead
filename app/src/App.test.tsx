@@ -74,6 +74,44 @@ describe('pass-and-play round survives a reload', () => {
     expect(initialMode('?room=abc123')).toEqual({ name: 'join-create' })
   })
 
+  it('restores a round that is under way, with cards on the pile', async () => {
+    startRound()
+    const store = useSPGame.getState()
+    for (const player of store.state.players) store.endRearrange(player.id)
+    // Play until a card stays on the pile (a 10 or a quartet would burn it).
+    for (let turn = 0; turn < 20 && useSPGame.getState().state.pile.every(entry => entry.cleared); turn++) {
+      const { state, playCards, pickUpPile } = useSPGame.getState()
+      const current = state.players[state.currentPlayerIdx]
+      const before = state.turnCount
+      for (const card of current.hand) {
+        playCards(current.id, [card])
+        if (useSPGame.getState().state.turnCount !== before) break
+      }
+      if (useSPGame.getState().state.turnCount === before) pickUpPile(current.id)
+    }
+    const playing = useSPGame.getState().state
+    expect(playing.pile.some(entry => !entry.cleared)).toBe(true)
+
+    const saved = localStorage.getItem(SP_STORAGE_KEY)!
+    expect(isResumableRound(JSON.parse(saved).state)).toBe(true)
+    useSPGame.getState().reset()
+    localStorage.setItem(SP_STORAGE_KEY, saved)
+    await useSPGame.persist.rehydrate()
+    expect(useSPGame.getState().state.pile).toEqual(playing.pile)
+    expect(useSPGame.getState().state.turnCount).toBe(playing.turnCount)
+    expect(initialMode('')).toEqual({ name: 'hotseat' })
+  })
+
+  it('drops a snapshot whose pile is not a pile', async () => {
+    startRound()
+    const saved = JSON.parse(localStorage.getItem(SP_STORAGE_KEY)!)
+    const withPile = (pile: unknown) => ({ ...saved.state, state: { ...saved.state.state, pile } })
+    expect(isResumableRound(withPile([{ cards: [{ id: 'c1', rank: '9', suit: '♠' }], cleared: false }]))).toBe(true)
+    expect(isResumableRound(withPile([{ id: 'c1', rank: '9', suit: '♠' }]))).toBe(false)
+    expect(isResumableRound(withPile([{ cards: 'nope', cleared: false }]))).toBe(false)
+    expect(isResumableRound(withPile([{ cards: [], cleared: 'no' }]))).toBe(false)
+  })
+
   it('drops a malformed or outdated snapshot instead of resuming it', async () => {
     startRound()
     const saved = JSON.parse(localStorage.getItem(SP_STORAGE_KEY)!)
