@@ -58,7 +58,23 @@ describe('pile effects: timing', () => {
 
   it('draws nothing where there is no canvas to draw on', () => {
     expect(canvasFxSupported()).toBe(false)
-    expect(burnMaskSupported()).toBe(false)
+  })
+
+  it('cuts burn holes only where the engine can subtract one mask from another', () => {
+    // Restored by hand: this file's other globals are stubbed once, for all tests.
+    const real = globalThis.CSS
+    try {
+      vi.stubGlobal('CSS', { supports: (property: string) => property === 'mask-composite' })
+      expect(burnMaskSupported()).toBe(true)
+      vi.stubGlobal('CSS', { supports: (property: string) => property === '-webkit-mask-composite' })
+      expect(burnMaskSupported()).toBe(true)
+      vi.stubGlobal('CSS', { supports: () => false })
+      expect(burnMaskSupported()).toBe(false)
+      vi.stubGlobal('CSS', undefined)
+      expect(burnMaskSupported()).toBe(false)
+    } finally {
+      vi.stubGlobal('CSS', real)
+    }
   })
 })
 

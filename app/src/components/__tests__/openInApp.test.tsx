@@ -34,11 +34,13 @@ describe('invite link hand-off button', () => {
 
   const stubPlatform = (userAgent: string) => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent)
-    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList)
+    // jsdom has no matchMedia: provide one that reports a browser tab.
+    vi.stubGlobal('matchMedia', () => ({ matches: false }) as MediaQueryList)
   }
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
   })
 

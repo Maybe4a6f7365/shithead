@@ -36,12 +36,12 @@ Online rooms do not currently contain AI seats. Offline games live in Zustand me
 | UI | React 18, TypeScript (declared `^5.6.3`, lockfile `5.9.3`), Tailwind CSS 3.4, handwritten CSS design tokens |
 | Local controller | Zustand 4.5 |
 | Motion | Framer Motion 11 with reduced-motion branches |
-| Frontend build | Vite 5, `vite-plugin-pwa`, Workbox |
+| Frontend build | Vite 8 (Rolldown, Lightning CSS), `vite-plugin-pwa` 2, Workbox 7 |
 | Shared rules | Dependency-free pure TypeScript reducers |
 | Transport | Versioned JSON messages over native WebSocket |
 | Edge runtime | Cloudflare Workers, Wrangler 4 |
 | Room authority | One SQLite-backed Durable Object per room code |
-| Tests | Vitest 2, Testing Library, jsdom, a live local-Worker adversarial script, and a production WebSocket smoke test |
+| Tests | Vitest 5, Testing Library, jsdom 31, a headless-Chromium animation suite, a live local-Worker adversarial script, and a production WebSocket smoke test |
 
 ## System architecture
 
@@ -630,7 +630,7 @@ Optional APIs degrade as follows:
 
 ### Prerequisites
 
-- Node.js 22 or newer
+- Node.js 22.12 or newer to build (Vite 8); 22.22.2 or newer to run the tests (jsdom 31)
 - npm compatible with the lockfile; CI currently pins npm 11.19
 - Wrangler authentication only for manual remote deployment/tailing
 
