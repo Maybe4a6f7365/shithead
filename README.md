@@ -685,7 +685,7 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 | `npm run worker:deploy` | Build and deploy manually with Wrangler |
 | `npm run worker:tail` | Stream remote Worker logs |
 
-`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules). It currently reports no errors and five `react-hooks/exhaustive-deps` warnings in older components; it is not yet part of the CI workflow. Both the frontend and the Worker TypeScript configs compile in `strict` mode with unused locals and parameters reported as errors.
+`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules). It currently reports no errors and five `react-hooks/exhaustive-deps` warnings in older components, where an effect is deliberately keyed on a derived string. The CI verify job runs it, so an error (a broken rule of hooks, an unused binding) fails the build; warnings do not. Both the frontend and the Worker TypeScript configs compile in `strict` mode with unused locals and parameters reported as errors.
 
 ## Test strategy
 
@@ -746,10 +746,11 @@ The command above sets `BASE_URL` explicitly so it exercises the canonical hostn
 The **verify** job uses Node 22 and npm 11.19, then executes:
 
 1. `npm ci`
-2. `npm test`
-3. `npm run typecheck:worker`
-4. `npm run build`
-5. local Wrangler plus the adversarial Worker script
+2. `npm run lint`
+3. `npm test`
+4. `npm run typecheck:worker`
+5. `npm run build`
+6. local Wrangler plus the adversarial Worker script
 
 For non-PR `main` revisions, **production-smoke** waits for verify, then polls the Workers.dev fallback for the exact `${{ github.sha }}` for up to ten minutes and runs the end-to-end multiplayer smoke flow. A manual smoke run with `BASE_URL=https://shead.online` additionally validates the dashboard-managed Custom Domain path.
 
