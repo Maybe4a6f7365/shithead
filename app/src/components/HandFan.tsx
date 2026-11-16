@@ -39,6 +39,19 @@ function sameOrder(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
+/**
+ * The order to show `cards` in, given the order they were last shown in.
+ * Played cards drop out and the rest stay put; as soon as a card arrives (a
+ * draw or a pickup) the whole hand is sorted again.
+ */
+export function nextHandOrder(shown: string[] | undefined, cards: CardT[]): string[] {
+  const reconciled = reconcileHandOrder(shown ?? [], cards)
+  const arrived = shown === undefined || reconciled.some(id => !shown.includes(id))
+  if (!arrived) return reconciled
+  const sorted = sortHandByDisplay(cards)
+  return sameOrder(reconciled, sorted) ? reconciled : sorted
+}
+
 export interface HandFanProps {
   cards: CardT[]
   /** Visual state per card id (missing = 'rest'). */
@@ -57,10 +70,8 @@ export function HandFan({
 }: HandFanProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
-  const ordersByKey = useRef(new Map<string, string[]>())
-  const activeOrderKey = useRef(orderKey)
+  const shownOrders = useRef(new Map<string, string[]>())
   const [metrics, setMetrics] = useState({ avail: 0, cardW: 0 })
-  const [order, setOrder] = useState(() => sortHandByDisplay(cards))
   // Roving tabindex: exactly one card is the hand's tab stop.
   const [tabStop, setTabStop] = useState(0)
   // Which edges hide more cards; drives the fade that says "this scrolls".
@@ -79,30 +90,20 @@ export function HandFan({
     return () => ro.disconnect()
   }, [])
 
-  useEffect(() => {
-    setOrder(current => {
-      if (activeOrderKey.current !== orderKey) {
-        ordersByKey.current.set(activeOrderKey.current, current)
-        activeOrderKey.current = orderKey
-      }
-      const stored = ordersByKey.current.get(orderKey)
-      const reconciled = reconcileHandOrder(stored ?? [], cards)
-      const pickedUp = stored === undefined || reconciled.some(id => !stored.includes(id))
-      const canonical = sortHandByDisplay(cards)
-      const next = pickedUp && !sameOrder(reconciled, canonical) ? canonical : reconciled
-      ordersByKey.current.set(orderKey, next)
-      return sameOrder(current, next) ? current : next
-    })
-  }, [cards, orderKey])
-
+  // The order is decided during render, from the order last committed for this
+  // viewer. A drawn card therefore appears in its sorted slot straight away.
+  // Sorting one render later laid the hand out twice: the fly-in was aimed at
+  // the wrong slot, and the cards slid a second time once they had landed.
   const orderedCards = useMemo(() => {
-    const reconciled = reconcileHandOrder(order, cards)
     const byId = new Map(cards.map(card => [card.id, card] as const))
-    return reconciled.flatMap(id => {
+    return nextHandOrder(shownOrders.current.get(orderKey), cards).flatMap(id => {
       const card = byId.get(id)
       return card ? [card] : []
     })
-  }, [cards, order])
+  }, [cards, orderKey])
+  useLayoutEffect(() => {
+    shownOrders.current.set(orderKey, orderedCards.map(card => card.id))
+  }, [orderedCards, orderKey])
   const n = orderedCards.length
   const { avail, cardW } = metrics
   // §2.5 fan step; 24px floor guarantees index visibility + WCAG 24px target.

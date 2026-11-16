@@ -722,7 +722,7 @@ The current script reports 45 adversarial checks in a normal run (one of the ter
 
 ### Browser animation suite
 
-jsdom has no layout and runs no animations, so sequencing faults in the table (a slide that replays, a burn over a pile that has moved on, a pile that looks empty mid-flight) are invisible to Vitest. `npm run test:browser` starts a Vite dev server, drives the offline store in headless Chromium and samples the DOM every frame; it currently runs 17 checks. It needs Playwright with Chromium, which is not a project dependency, and it is not part of the CI workflow.
+jsdom has no layout and runs no animations, so sequencing faults in the table (a slide that replays, a burn over a pile that has moved on, a pile that looks empty mid-flight) are invisible to Vitest. `npm run test:browser` starts a Vite dev server, drives the offline store in headless Chromium and samples the DOM every frame; it currently runs 18 checks. It needs Playwright with Chromium, which is not a project dependency, and it is not part of the CI workflow.
 
 ### Production smoke test
 

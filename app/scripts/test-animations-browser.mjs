@@ -2,6 +2,8 @@
 // Browser tests for the table animations. jsdom has no layout and runs no
 // animations, so these sequencing bugs are invisible to the vitest suite:
 //   - a hand/tableau slide must play once, not again on every later render
+//   - a drawn or picked-up card goes straight to its sorted slot: each card of
+//     the hand moves once, not a second time when the hand is next rendered
 //   - a burn caused by a blind flip must never play over a pile that moved on
 //   - a failed blind flip must not fill the hand before the card has turned
 //   - no playable highlights or turn ripple while an opponent's flip is hidden
@@ -86,6 +88,23 @@ await page.evaluate(async () => {
     rerender(tag) { useSPGame.setState({ lastError: `probe ${tag}` }) },
     moving(selector) {
       return document.getAnimations().filter(animation => animation.effect?.target?.matches?.(selector)).length
+    },
+    pickUp(seat) {
+      const store = useSPGame.getState()
+      store.pickUpPile(store.state.players[seat].id)
+    },
+    /** Count the animations each matching element starts from now until stopWatching(). */
+    watchStarts(selector) {
+      const starts = new Map()
+      const original = Element.prototype.animate
+      Element.prototype.animate = function (...args) {
+        if (this.matches?.(selector)) starts.set(this, (starts.get(this) ?? 0) + 1)
+        return original.apply(this, args)
+      }
+      window.T.stopWatching = () => {
+        Element.prototype.animate = original
+        return [...starts.values()]
+      }
     },
     frame() {
       const pile = document.querySelector('.pile-card--waste')
@@ -174,14 +193,36 @@ await test('hand: closing a gap slides once and never replays on later renders',
 })
 
 await test('hand: a drawn card flies in once and never replays', async () => {
+  // The drawn 4 sorts in front of the Jack and King the player keeps, into the
+  // slot the played 9 left: the Jack and King have no reason to move at all.
   await page.evaluate(() => T.craft({ me: { hand: ['9', 'J', 'K'], faceUp: ['4', '4', '4'], faceDown: ['4', '4', '4'] }, opp: { hand: ['4', '4'] }, pile: ['4'], stock: 6 }))
   await settle(600)
-  await page.evaluate(() => T.play(0, 'hand'))
+  await page.evaluate(() => { T.watchStarts('.hand-fan__card'); T.play(0, 'hand') })
   await settle(1000)
   await page.evaluate(() => T.rerender('draw'))
   await settle(40)
   const replayed = await page.evaluate(() => T.moving('.hand-fan__card'))
+  const starts = await page.evaluate(() => T.stopWatching())
   assert(replayed === 0, `re-render restarted ${replayed} hand animation(s) after a draw`)
+  assert(starts.length >= 1, 'expected the drawn card to fly into the hand')
+  const again = starts.filter(count => count > 1).length
+  assert(again === 0, `${again} hand card(s) moved a second time after the draw had landed`)
+})
+
+await test('hand: a picked-up pile is sorted into the hand in one move', async () => {
+  // 5, J and Q land between and around the 9 and King already held.
+  await page.evaluate(() => T.craft({ me: { hand: ['9', 'K'], faceUp: ['4', '4', '4'], faceDown: ['4', '4', '4'] }, opp: { hand: ['4', '4'] }, pile: ['5', 'J', 'Q'], stock: 6 }))
+  await settle(600)
+  await page.evaluate(() => { T.watchStarts('.hand-fan__card'); T.pickUp(0) })
+  await settle(1500)
+  await page.evaluate(() => T.rerender('pickup'))
+  await settle(40)
+  const replayed = await page.evaluate(() => T.moving('.hand-fan__card'))
+  const starts = await page.evaluate(() => T.stopWatching())
+  assert(replayed === 0, `re-render restarted ${replayed} hand animation(s) after a pickup`)
+  assert(starts.length >= 3, `expected the picked-up cards to fly into the hand, saw ${starts.length} card(s) move`)
+  const again = starts.filter(count => count > 1).length
+  assert(again === 0, `${again} hand card(s) moved a second time after the pickup had landed`)
 })
 
 await test('hand: a re-render in the middle of a slide does not restart it', async () => {

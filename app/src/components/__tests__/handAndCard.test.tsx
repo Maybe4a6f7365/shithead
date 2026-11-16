@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+import { useLayoutEffect } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Card as CardT, Player } from '../../engine'
 import { Card } from '../Card'
-import { HandFan, sortHandByDisplay } from '../HandFan'
+import { HandFan, nextHandOrder, sortHandByDisplay } from '../HandFan'
 import { OpponentSeat } from '../OpponentStrip'
 import { PileArea } from '../PileArea'
 import { QuietMenu } from '../QuietMenu'
@@ -36,6 +37,34 @@ describe('hand display ordering', () => {
       'opaque-secret-3', 'opaque-secret-7', 'opaque-secret-4', 'opaque-secret-8',
       'opaque-secret-6', 'opaque-secret-5', 'opaque-secret-2', 'opaque-secret-1',
     ])
+  })
+
+  it('keeps the shown order while cards leave and sorts again when one arrives', () => {
+    const six = card(1, '6'), nine = card(2, '9'), nineB = card(3, '9'), four = card(4, '4')
+    // First sight of a hand: sorted.
+    expect(nextHandOrder(undefined, [nine, six])).toEqual([six.id, nine.id])
+    // A played card drops out; equal ranks keep the order they were shown in,
+    // even when the hand arrives listed the other way round.
+    expect(nextHandOrder([six.id, nine.id, nineB.id], [nineB, nine])).toEqual([nine.id, nineB.id])
+    // A drawn card sorts the hand again.
+    expect(nextHandOrder([six.id, nine.id], [six, nine, four])).toEqual([four.id, six.id, nine.id])
+  })
+
+  it('lays a drawn card out in its sorted slot in the commit it arrives in', () => {
+    // Every layout the browser is handed, one entry per commit of the parent.
+    const layouts: string[][] = []
+    function Probe() {
+      useLayoutEffect(() => {
+        layouts.push([...document.querySelectorAll<HTMLElement>('.hand-fan__card')].map(el => el.dataset.cardId!))
+      })
+      return null
+    }
+    const six = card(1, '6'), nine = card(2, '9'), four = card(3, '4')
+    const table = (cards: CardT[]) => <><HandFan cards={cards} states={new Map()} /><Probe /></>
+    const { rerender } = render(table([six, nine]))
+    rerender(table([six, nine, four]))
+    // Appending the draw and sorting a render later moved every card twice.
+    expect(layouts.filter(layout => layout.length === 3)).toEqual([[four.id, six.id, nine.id]])
   })
 
   it('stays canonically sorted after a simulated pickup and exposes no reorder hooks', async () => {
