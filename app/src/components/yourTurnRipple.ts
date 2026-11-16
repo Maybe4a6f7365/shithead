@@ -68,7 +68,7 @@ export function rippleCards(root: ParentNode | null): number {
  * so the layout effect sees the playable states already in the DOM.
  */
 export function useYourTurnRipple(
-  root: RefObject<HTMLElement>,
+  root: RefObject<HTMLElement | null>,
   key: string | null,
   reduceMotion: boolean | null,
 ): void {
