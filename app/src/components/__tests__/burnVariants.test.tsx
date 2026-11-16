@@ -2,7 +2,8 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import type { Card, GameEvent, GameState, Player } from '../../engine'
-import { TableScreen, burnCleanupDelay } from '../TableScreen'
+import { TableScreen } from '../TableScreen'
+import { burnCleanupDelay } from '../table/usePileSequence'
 import { burnCleanupMs, burnStackMotion } from '../BurnFx'
 
 beforeAll(() => {

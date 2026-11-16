@@ -6,16 +6,20 @@
 //
 // Interaction model (§6.1): tap-select → explicit PLAY button. No action ever
 // fires on a single tap of a card. Invalid taps shake + explain in the feed.
+//
+// This file wires the table together and owns the viewer's actions. The parts
+// with a life of their own live in ./table:
+//   usePileSequence    what the pile shows while the latest action plays out
+//   usePlayDraft       the selected cards and the armed pick-up guard
+//   useActionFeedback  effect banner, skip, going-out moment, announcements
+//   useTableReactions  emotes, broadcasts and custom messages
+//   cardStates         how each of the viewer's cards looks and reads
 // ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutGroup, useReducedMotion } from 'framer-motion'
 import type { Card as CardT, GameState } from '../engine'
-import { canPlay, getInterruptBurnCards, getMirroredCard, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
-import { CardDefs, type CardVisualState } from './Card'
-import type { BlindRevealData } from './BlindReveal'
-import type { PileSweepData } from './PileSweep'
-import { burnCleanupMs, type BurnReason } from './BurnFx'
-import { peekCardRect, peekSeatRect, type FlightRect } from './cardFlight'
+import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
+import { CardDefs } from './Card'
 import { useYourTurnRipple } from './yourTurnRipple'
 import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
 import { PileArea } from './PileArea'
@@ -25,10 +29,8 @@ import { TableauWell } from './TableauWell'
 import { ActionBar } from './ActionBar'
 import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
-import { feedLine, latestAnimatedEvents, type FeedContext } from './feedText'
-import { actionSettleMs, playArrivalMs } from './actionTiming'
-import { passOverSeats, skippedSeatIds } from './seatFx'
-import { useSoundFromLog, emitSoundDebounced, type AdhdAlertSound } from './soundManager'
+import { feedLine } from './feedText'
+import { useSoundFromLog, emitSoundDebounced, type AdhdAlertSound, type SoundName } from './soundManager'
 import {
   BroadcastFeedback,
   ChatFeedback,
@@ -44,17 +46,17 @@ import type {
   EmoteId,
   SystemEvent,
 } from '../engine/protocol'
-import {
-  acceptedCustomMessageBurst,
-  CUSTOM_MESSAGE_BURST_LIMIT,
-  CUSTOM_MESSAGE_BURST_WINDOW_MS,
-  isValidChatText,
-  normalizeChatText,
-} from '../engine/protocol'
-import { SpecialEffectFeedback, specialEffectFromEvents, type SpecialEffect } from './SpecialEffectFeedback'
+import { SpecialEffectFeedback } from './SpecialEffectFeedback'
 import { TurnAttentionBeacon, vibrate } from './turnAlerts'
-import { OutMoment, outMomentCopy, type OutMomentEvent } from './WinMoment'
+import { OutMoment } from './WinMoment'
 import { SpectatorIndicator } from './SpectatorIndicator'
+import { activeZoneOf, nextRankSelection, type Zone } from './table/selection'
+import { viewerCardStates } from './table/cardStates'
+import { useTransient } from './table/useTransient'
+import { usePlayDraft } from './table/usePlayDraft'
+import { usePileSequence } from './table/usePileSequence'
+import { useActionFeedback } from './table/useActionFeedback'
+import { speakerNameForEvent, useTableReactions } from './table/useTableReactions'
 
 export interface TableScreenProps {
   state: GameState
@@ -76,13 +78,6 @@ export interface TableScreenProps {
       instead of) the server echo. Needed when the dealt roster cannot name the
       viewer — a queued watcher is absent from state.players. */
   viewerName?: string
-  /** Synchronous transport-epoch guard for the disconnect transition before
-      the actionsEnabled render catches up. */
-  canSubmitAction?: () => boolean
-  /** Optional in-memory bridge used by the multiplayer wrapper to retain a
-      local draft while the table is temporarily unmounted by offline UI. */
-  initialSelectionDraft?: string[]
-  onSelectionDraftChange?: (selection: string[]) => void
   /** Server-side error text to surface in the feed (MP). */
   error?: string | null
   onPlay: (cards: CardT[]) => void | boolean
@@ -127,132 +122,14 @@ export interface TableScreenProps {
   latestSystemEvent?: SystemEvent | null
 }
 
-type Zone = 'hand' | 'faceUp' | 'faceDown'
-
-/** The cards of the same rank lying on top of the pile, newest first. */
-export function topRunCards(state: Pick<GameState, 'pile'>): CardT[] {
-  const run: CardT[] = []
-  for (let index = state.pile.length - 1; index >= 0; index--) {
-    const entry = state.pile[index]
-    if (entry.cleared || entry.cards.length === 0) continue
-    const rank = run[0]?.rank ?? entry.cards[0].rank
-    if (entry.cards.some(card => card.rank !== rank)) break
-    run.push(...entry.cards)
-  }
-  return run
-}
-
-interface BurnSnapshot {
-  actionKey: string
-  reason: BurnReason
-  top: CardT | null
-  pileCount: number
-  effectiveRank: ReturnType<typeof getTopRank>
-  /** Quartet: the four cards that made the set, top card first. */
-  fan: CardT[] | null
-}
-
-export function burnCleanupDelay(reduceMotion: boolean | null, reason?: BurnReason | null): number {
-  return reduceMotion ? 140 : burnCleanupMs(reason)
-}
-
-/**
- * Same-rank cards form a multi-play. Choosing another playable rank replaces
- * the whole set in one tap, so the interface never traps the user behind a
- * separate "unselect" step.
- */
-export function nextRankSelection(selection: string[], tapped: CardT, cards: CardT[]): string[] {
-  if (selection.includes(tapped.id)) return selection.filter(id => id !== tapped.id)
-  const selected = cards.find(card => selection.includes(card.id))
-  if (selected && selected.rank !== tapped.rank) return [tapped.id]
-  return [...selection, tapped.id]
-}
-
-/**
- * Revalidate a local hand/face-up draft against the latest authoritative pile.
- * A multi-card choice is atomic: ownership, rank, or legality changes clear the
- * complete draft rather than silently playing only the surviving subset.
- */
-export function reconcilePlayableSelection(
-  selection: string[],
-  cards: CardT[],
-  topRank: ReturnType<typeof getTopRank>,
-): string[] {
-  if (selection.length === 0) return selection
-  if (new Set(selection).size !== selection.length) return []
-  const byId = new Map(cards.map(card => [card.id, card] as const))
-  const selected = selection.flatMap(id => {
-    const card = byId.get(id)
-    return card ? [card] : []
-  })
-  if (selected.length !== selection.length) return []
-  if (selected.some(card => card.rank !== selected[0].rank)) return []
-  if (selected.some(card => !canPlay(card, topRank))) return []
-  return selection
-}
-
-function sameSelection(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((id, index) => id === right[index])
-}
-
-/**
- * Name the speaker behind a table message. The dealt roster wins so a seated
- * player always shows their live name, then the server's stamp, which is the
- * only way to name a queued watcher: watchers are deliberately absent from both
- * the game state and the room summary until they take a seat.
- */
-export function speakerNameForEvent(
-  event: { playerId: string; playerName?: string } | null,
-  state: Pick<GameState, 'players'>,
-): string | undefined {
-  if (!event) return undefined
-  return state.players.find(player => player.id === event.playerId)?.name ?? event.playerName
-}
-
-export function isMatchingSelfEmoteEcho(
-  pending: { emote: EmoteId; sentAt: number } | null,
-  latest: EmoteEvent,
-  viewerId: string,
-  now = Date.now(),
-): boolean {
-  return Boolean(
-    pending &&
-    latest.playerId === viewerId &&
-    latest.emote === pending.emote &&
-    now - pending.sentAt >= 0 && now - pending.sentAt < 2500,
-  )
-}
-
-export function isMatchingSelfBroadcastEcho(
-  pending: { broadcast: BroadcastId; sentAt: number } | null,
-  latest: BroadcastEvent,
-  viewerId: string,
-  now = Date.now(),
-): boolean {
-  return Boolean(
-    pending &&
-    latest.playerId === viewerId &&
-    latest.broadcast === pending.broadcast &&
-    now - pending.sentAt >= 0 && now - pending.sentAt < 2500,
-  )
-}
-
-export const REACTION_CLIENT_COOLDOWN_MS = 800
-
-export function canSendReaction(lastSentAt: number | null, now = Date.now()): boolean {
-  return lastSentAt === null || now - lastSentAt >= REACTION_CLIENT_COOLDOWN_MS
-}
-
-function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }): Zone {
-  if (p.hand.length > 0) return 'hand'
-  if (p.faceUp.length > 0) return 'faceUp'
-  return 'faceDown'
-}
+const NO_CARDS: CardT[] = []
+const NO_ROWS = { hand: NO_CARDS, faceUp: NO_CARDS, faceDown: NO_CARDS }
+/** §6.3: a second action within this window of the last accepted one is ignored. */
+const SUBMIT_DEBOUNCE_MS = 300
 
 export function TableScreen({
   state, viewerId, viewerActive: viewerTurn, spectating = false, spectatorCount = 0,
-  actionsEnabled = true, reactionsEnabled, viewerName, canSubmitAction = () => true,
-  initialSelectionDraft = [], onSelectionDraftChange,
+  actionsEnabled = true, reactionsEnabled, viewerName,
   error, onPlay, onQuickFollowUp,
   onDeclineQuickFollowUp, quickFollowUpDeclineLabel = 'Pass', onBurnIn, onPickUp, onLeave, onOpenRules,
   soundOn, onToggleSound,
@@ -265,110 +142,76 @@ export function TableScreen({
   recentCustomMessages = [], onLocalChatAccepted, latestSystemEvent,
 }: TableScreenProps) {
   const viewer = state.players.find(p => p.id === viewerId)
-  const canReact = reactionsEnabled ?? actionsEnabled
   const current = state.players[state.currentPlayerIdx]
+  const isViewerTurn = current?.id === viewerId
   const top = getTopCard(state)
   const topRank = getTopRank(state)
   const ps = pileSize(state)
+  const inPlay = state.phase === 'play' || state.phase === 'endgame'
 
-  const [selection, setSelectionState] = useState<string[]>(() => [...initialSelectionDraft])
-  const selectionRef = useRef(selection)
-  const selectionZoneRef = useRef<Zone | null>(null)
-  const [invalidId, setInvalidId] = useState<string | null>(null)
-  const [flash, setFlash] = useState<string | null>(null)     // transient feed copy (errors, guards)
-  const [pickupArmed, setPickupArmed] = useState(false)
-  const [dismissedQuickSourceSeq, setDismissedQuickSourceSeq] = useState<number | null>(null)
-  const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null)
-  const [outMoment, setOutMoment] = useState<OutMomentEvent | null>(null)
-  const [displayedEmote, setDisplayedEmote] = useState<EmoteEvent | null>(null)
-  const [displayedBroadcast, setDisplayedBroadcast] = useState<BroadcastEvent | null>(null)
-  const [displayedChat, setDisplayedChat] = useState<ChatEvent | null>(null)
-  const selectionOwner = useRef(viewerId)
-  const invalidDraftNoticeKey = useRef('')
-  const pendingSelfEmote = useRef<{ emote: EmoteId; sentAt: number } | null>(null)
-  const pendingSelfBroadcast = useRef<{ broadcast: BroadcastId; sentAt: number } | null>(null)
-  // Pass-and-play reuses one mounted table for several viewers. Keep reaction
-  // gates per viewer so one local player neither blocks nor lends a fresh
-  // burst window to another player when the device changes hands.
-  const lastReactionSentAtByViewer = useRef(new Map<string, number>())
-  const recentSelfChatTimestampsByViewer = useRef(new Map<string, number[]>())
-  const debounceRef = useRef(0)
-  const pickupDraftBackup = useRef<string[]>([])
-  const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const announcer = useAnnouncer()
   const reduceMotion = useReducedMotion()
+  const { flash, showFlash, later } = useTransient()
+  const [invalidId, setInvalidId] = useState<string | null>(null)
+  const [dismissedQuickSourceSeq, setDismissedQuickSourceSeq] = useState<number | null>(null)
 
   // Light touch feedback for card handling. Follows the turn-alert switch so
   // one setting silences every vibration; unsupported devices do nothing.
   const haptic = (pattern: number | number[]) => {
     if (turnAlertsEnabled) vibrate(pattern)
   }
-
-  const later = (ms: number, fn: () => void) => {
-    timers.current.push(setTimeout(fn, ms))
+  /** A passing notice: in the feed, and politely to assistive tech. */
+  const notice = (text: string, ms: number) => {
+    showFlash(text, ms)
+    announcer.sayPolite(text)
   }
-  useEffect(() => () => {
-    timers.current.forEach(clearTimeout)
-  }, [])
 
-  // A face-down play is revealed by the flip, not by anything else on screen.
-  // While it plays, the table behaves as if the action has not landed yet: no
-  // input, no playable highlights, no turn ripple, and the taker's hand waits.
-  const blindEvent = useMemo(() => {
-    const event = latestAnimatedEvents(state.log).find(e => e.type === 'BLIND_REVEAL')
-    return event?.type === 'BLIND_REVEAL'
-      ? { key: `blind-${state.seq ?? state.turnCount}`, playerId: event.playerId, card: event.card, success: event.success }
-      : null
-  }, [state.log, state.seq, state.turnCount])
-  // A reveal already in the log when the table mounts (reconnect, late join) is history.
-  const [dismissedBlind, setDismissedBlind] = useState<string | null>(() => blindEvent?.key ?? null)
-  const blindActive = Boolean(blindEvent) && !reduceMotion && blindEvent?.key !== dismissedBlind
+  const { specialEffect, outMoment } = useActionFeedback({
+    state, viewerId, viewerTurn, topRank, reduceMotion, error, announcer, haptic,
+  })
+  const sequence = usePileSequence({
+    state, viewerId, reduceMotion, top, pileCount: ps, topRank, onBurn: () => haptic(28),
+  })
+  // While a face-down flip plays, the table behaves as if the action has not
+  // landed yet: no input, no playable highlights, no turn ripple.
+  const { blindActive, heldHandOf } = sequence
   const viewerActive = viewerTurn && !blindActive
 
-  // ---- Derived ----
-  const zone: Zone | null = viewer ? activeZoneOf(viewer) : null
-  const zoneCards: CardT[] = viewer ? viewer[zone ?? 'hand'] : []
-  selectionRef.current = selection
-  selectionZoneRef.current = zone
-  const setSelection = useCallback((next: string[] | ((current: string[]) => string[])) => {
-    const resolved = typeof next === 'function' ? next(selectionRef.current) : next
-    selectionRef.current = resolved
-    // Only stable, visible hand/tableau ids survive the multiplayer offline screen.
-    // Never persist a position-based blind choice across resynchronization.
-    onSelectionDraftChange?.(
-      selectionZoneRef.current === 'hand' || selectionZoneRef.current === 'faceUp' ? resolved : []
-    )
-    setSelectionState(resolved)
-  }, [onSelectionDraftChange])
-  const playableNow = useCallback(
-    (c: CardT) => canPlay(c, topRank),
-    [topRank],
+  // The turn just reached the viewer: ripple their playable cards left to right.
+  const screenRef = useRef<HTMLDivElement>(null)
+  useYourTurnRipple(
+    screenRef,
+    isViewerTurn && viewerActive && state.phase !== 'roundEnd' && state.phase !== 'gameOver'
+      ? `turn-${state.turnCount}`
+      : null,
+    reduceMotion,
   )
-  const anyPlayable = viewerActive && zone !== 'faceDown' && zoneCards.some(playableNow)
+  useSoundFromLog(state, soundOn)
+  const reactions = useTableReactions({
+    viewerId, viewerName, spectating, canReact: reactionsEnabled ?? actionsEnabled,
+    latestEmote, latestBroadcast, latestChat,
+    onSendEmote, onSendBroadcast, onSendChat, onLocalChatAccepted,
+    onNotSent: text => notice(text, 2200),
+  })
 
-  const ownedSelection = selectionOwner.current === viewerId ? selection : []
-  const effectiveSelection = useMemo(() => {
-    if (state.phase !== 'play' && state.phase !== 'endgame') return []
-    if (zone === 'faceDown') {
-      return viewerActive && ownedSelection.length <= 1 &&
-        ownedSelection.every(id => zoneCards.some(card => card.id === id))
-        ? ownedSelection
-        : []
-    }
-    return reconcilePlayableSelection(ownedSelection, zoneCards, topRank)
-  }, [ownedSelection, state.phase, topRank, viewerActive, zone, zoneCards])
-  const selectedCards = useMemo(
-    () => zoneCards.filter(c => effectiveSelection.includes(c.id)),
-    [effectiveSelection, zoneCards],
-  )
-  const selectedRank = selectedCards[0]?.rank ?? null
+  // ---- The viewer's cards ----
+  const zone: Zone | null = viewer ? activeZoneOf(viewer) : null
+  const zoneCards = viewer ? viewer[zone ?? 'hand'] : NO_CARDS
+  const playableNow = useCallback((c: CardT) => canPlay(c, topRank), [topRank])
+  const anyPlayable = viewerActive && zone !== 'faceDown' && zoneCards.some(playableNow)
+  const { selection, selectedCards, setSelection, pickupArmed, setPickupArmed } = usePlayDraft({
+    phase: state.phase, actionSeq: state.seq ?? state.turnCount, viewerId, viewerActive, zone, zoneCards, topRank,
+    onDraftDropped: text => notice(text, 3000),
+  })
+
+  // ---- Out-of-turn offers: burn-in and quick follow-up ----
   const interruptCards = useMemo(
-    () => (actionsEnabled && !blindActive && !viewerTurn && onBurnIn ? getInterruptBurnCards(state, viewerId) : []),
+    () => (actionsEnabled && !blindActive && !viewerTurn && onBurnIn ? getInterruptBurnCards(state, viewerId) : NO_CARDS),
     [actionsEnabled, blindActive, state, viewerId, viewerTurn, onBurnIn],
   )
   const interruptIds = useMemo(() => new Set(interruptCards.map(card => card.id)), [interruptCards])
   const quickFollowUpCards = useMemo(
-    () => (actionsEnabled && !blindActive && onQuickFollowUp ? getQuickFollowUpCards(state, viewerId) : []),
+    () => (actionsEnabled && !blindActive && onQuickFollowUp ? getQuickFollowUpCards(state, viewerId) : NO_CARDS),
     [actionsEnabled, blindActive, state, viewerId, onQuickFollowUp],
   )
   const quickFollowUpIds = useMemo(() => new Set(quickFollowUpCards.map(card => card.id)), [quickFollowUpCards])
@@ -379,19 +222,17 @@ export function TableScreen({
     ? state.pendingQuickFollowUp.sourceSeq
     : null
   const showQuickFollowUp = canQuickFollowUp && dismissedQuickSourceSeq !== quickSourceSeq
-  const quickActionVisible = showQuickFollowUp && (!viewerActive || effectiveSelection.length === 0)
-  const canPreselectVisible = Boolean(
+  const quickActionVisible = showQuickFollowUp && (!viewerActive || selection.length === 0)
+  const canPreselect = Boolean(
     viewer && !viewer.isAI && !viewer.isOut && (zone === 'hand' || zone === 'faceUp') &&
-    (state.phase === 'play' || state.phase === 'endgame') && !canQuickFollowUp && !canBurnIn && !blindActive,
+    inPlay && !canQuickFollowUp && !canBurnIn && !blindActive,
   )
 
   // ---- Feed: transient flash > server error > latest table event ----
   // Turn ownership has a persistent, spatial cue in the header/opponent seat.
   // Repeating "Your turn" here turns the feed into a second status badge and
   // pushes the last useful table event out of view.
-  const feedCtx: FeedContext = { meId: viewerId, players: state.players }
-  const lastEvent = feedLine(state, feedCtx)
-  const isViewerTurn = current?.id === viewerId
+  const lastEvent = feedLine(state, { meId: viewerId, players: state.players })
   const feed = flash
     ? { text: flash, key: `flash-${flash}`, tone: 'error' as const }
     : error
@@ -400,295 +241,9 @@ export function TableScreen({
         ? { text: lastEvent.text, key: lastEvent.key, tone: 'normal' as const }
         : { text: null, key: 'idle', tone: 'normal' as const }
 
-  // ---- Effects: burn detection, announcements, sounds, turn announce ----
-  const lastActionSeq = useRef(state.seq ?? state.turnCount)
-  const previousPile = useRef({ top, pileCount: ps, effectiveRank: topRank, run: topRunCards(state) })
-  const previousPlayers = useRef(state.players)
-  const cancelSeatPass = useRef<() => void>(() => {})
-  useEffect(() => () => cancelSeatPass.current(), [])
-  useEffect(() => {
-    const cursor = state.seq ?? state.turnCount
-    if (lastActionSeq.current === cursor) return
-    lastActionSeq.current = cursor
-    const fresh = latestAnimatedEvents(state.log)
-    if (fresh.length === 0) return
-    setSpecialEffect(specialEffectFromEvents(fresh, cursor, topRank))
-    // An 8 shows on the players it passes over, once it has landed.
-    const played = fresh.find(e => e.type === 'PLAY_CARDS')
-    if (!reduceMotion && played?.type === 'PLAY_CARDS' && played.cards[0]?.rank === '8' && !fresh.some(e => e.type === 'CLEAR_PILE')) {
-      cancelSeatPass.current()
-      cancelSeatPass.current = passOverSeats(
-        skippedSeatIds(state, played.playerId, played.cards.length), viewerId, actionSettleMs(state.log, false),
-      )
-    }
-    const ctx: FeedContext = { meId: viewerId, players: state.players }
-    const line = feedLine(state, ctx)
-    if (line) announcer.sayPolite(line.text)
-    // The viewer just shed their last card while the round carries on. When
-    // the same action ends the round, the round-over card celebrates instead.
-    const viewerWentOut = fresh.some(e => e.type === 'PLAYER_OUT' && e.playerId === viewerId)
-    if (viewerWentOut && !fresh.some(e => e.type === 'GAME_OVER')) {
-      const place = Math.max(1, state.players.filter(player => player.isOut).length)
-      const copy = outMomentCopy(place)
-      setOutMoment({ key: `${viewerId}:${cursor}`, place })
-      announcer.sayPolite(`${copy.title}. ${copy.detail}.`)
-      haptic([30, 60, 30, 60, 90])
-    }
-    if (fresh.some(e => e.type === 'GAME_OVER')) {
-      const loser = state.players.find(p => p.id === state.loserId)
-      announcer.sayPolite(`Round over. ${loser?.name ?? ''} is the Shithead.`)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.seq, state.turnCount, state.log])
-
-  // Who played the card now on top; an opponent's seat is its flight origin.
-  const playedBy = useMemo(() => {
-    const play = latestAnimatedEvents(state.log).find(event => event.type === 'PLAY_CARDS')
-    return play?.type === 'PLAY_CARDS' && play.playerId !== viewerId ? play.playerId : null
-  }, [state.log, viewerId])
-
-  // A multi-card play lands as a quick staggered sequence, top card last.
-  const playedGroup = useMemo(() => {
-    const play = latestAnimatedEvents(state.log).find(e => e.type === 'PLAY_CARDS')
-    return play?.type === 'PLAY_CARDS' && play.cards.length > 1 ? play.cards : null
-  }, [state.log])
-
-  // Face-down play: the reveal overlay keeps the pile as it was until the flip
-  // has played, so the new top card never spoils the suspense.
-  const blindOriginRef = useRef<FlightRect | null>(null)
-  const blindHoldRef = useRef<{ key: string; top: CardT | null | undefined; pileCount: number; effectiveRank: ReturnType<typeof getTopRank>; hand: CardT[] | null } | null>(null)
-  if (blindEvent && blindHoldRef.current?.key !== blindEvent.key) {
-    blindHoldRef.current = {
-      key: blindEvent.key,
-      ...previousPile.current,
-      // A failed flip hands the pile to the player; their hand waits for the flip.
-      hand: blindEvent.success
-        ? null
-        : previousPlayers.current.find(player => player.id === blindEvent.playerId)?.hand ?? null,
-    }
-  }
-  const blindData = useMemo<BlindRevealData | null>(() => {
-    if (!blindEvent || !blindActive) return null
-    const mine = blindEvent.playerId === viewerId
-    const handRect = document.querySelector('.hand-fan')?.getBoundingClientRect()
-    return {
-      key: blindEvent.key,
-      card: blindEvent.card,
-      success: blindEvent.success,
-      from: mine ? blindOriginRef.current : peekSeatRect(blindEvent.playerId),
-      toward: blindEvent.success ? null
-        : mine
-          ? handRect ? { left: handRect.left, top: handRect.top, width: handRect.width, height: handRect.height } : null
-          : peekSeatRect(blindEvent.playerId),
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blindEvent?.key, blindActive])
-  const onBlindDone = useCallback((key: string) => setDismissedBlind(key), [])
-  const holdPile = blindActive ? blindHoldRef.current : null
-  const heldHandOf = (playerId: string): CardT[] | null =>
-    holdPile?.hand && blindEvent?.playerId === playerId ? holdPile.hand : null
-  // The turn just reached the viewer: ripple their playable cards left to right.
-  const screenRef = useRef<HTMLDivElement>(null)
-  useYourTurnRipple(
-    screenRef,
-    isViewerTurn && viewerActive && state.phase !== 'roundEnd' && state.phase !== 'gameOver'
-      ? `turn-${state.turnCount}`
-      : null,
-    reduceMotion,
-  )
-  // ---- Burn: derived from the latest action during render, so the pile never
-  // paints one frame of the cleared (empty) state between a play and its burn.
-  //   arriving  the card that causes the burn flies to the pile like any other
-  //   burning   the pile burns (straight away after a blind flip, whose reveal
-  //             already put the card there, and under reduced motion)
-  // A newer action replaces the burn at once; it never plays over a pile that
-  // has moved on.
-  const burnEvent = useMemo(() => {
-    const events = latestAnimatedEvents(state.log)
-    const clear = events.find(e => e.type === 'CLEAR_PILE')
-    if (clear?.type !== 'CLEAR_PILE') return null
-    const play = events.find(e => e.type === 'PLAY_CARDS')
-    const cards = play?.type === 'PLAY_CARDS' ? play.cards : []
-    return {
-      // The first card of a play is the one on top of the pile (getTopCard).
-      key: `${state.seq ?? state.turnCount}:${clear.reason}:${cards[0]?.id ?? 'empty'}`,
-      reason: clear.reason,
-      cards,
-      blind: events.some(e => e.type === 'BLIND_REVEAL'),
-    }
-  }, [state.log, state.seq, state.turnCount])
-  const burnHoldRef = useRef<BurnSnapshot | null>(null)
-  if (burnEvent && burnHoldRef.current?.actionKey !== burnEvent.key) {
-    const playedTop = burnEvent.cards[0] ?? previousPile.current.top
-    burnHoldRef.current = {
-      actionKey: burnEvent.key,
-      reason: burnEvent.reason,
-      top: playedTop,
-      pileCount: previousPile.current.pileCount + burnEvent.cards.length,
-      effectiveRank: playedTop?.rank === '3' ? previousPile.current.effectiveRank : playedTop?.rank ?? null,
-      fan: burnEvent.reason === 'quartet' ? [...burnEvent.cards, ...previousPile.current.run].slice(0, 4) : null,
-    }
-  }
-  // A burn already in the log when the table mounts (reconnect) is history.
-  const [burnDoneKey, setBurnDoneKey] = useState<string | null>(() => burnEvent?.key ?? null)
-  const [burnLandedKey, setBurnLandedKey] = useState<string | null>(null)
-  const burnSnapshot = burnEvent && burnEvent.key !== burnDoneKey ? burnHoldRef.current : null
-  const burnKey = burnSnapshot?.actionKey ?? null
-  const burnNeedsArrival = Boolean(burnEvent) && !burnEvent?.blind && !reduceMotion
-  const burning = Boolean(burnSnapshot) && !blindActive && (!burnNeedsArrival || burnLandedKey === burnKey)
-  const burnArriveMs = playArrivalMs(burnEvent?.cards.length ?? 1)
-  useEffect(() => {
-    if (!burnKey || !burnNeedsArrival) return
-    const timer = setTimeout(() => setBurnLandedKey(burnKey), burnArriveMs)
-    return () => clearTimeout(timer)
-  }, [burnKey, burnNeedsArrival, burnArriveMs])
-  const burningKey = burning ? burnKey : null
-  const burnReason = burnSnapshot?.reason
-  useEffect(() => {
-    if (!burningKey) return
-    haptic(28)
-    const timer = setTimeout(() => setBurnDoneKey(burningKey), burnCleanupDelay(reduceMotion, burnReason))
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [burningKey])
-
-  // Picking up the pile sweeps the stack to the taker. A failed blind flip has
-  // its own sweep, so it is excluded here.
-  const pickupEvent = useMemo(() => {
-    const events = latestAnimatedEvents(state.log)
-    const pickup = events.find(e => e.type === 'PICK_UP_PILE')
-    if (pickup?.type !== 'PICK_UP_PILE' || events.some(e => e.type === 'BLIND_REVEAL')) return null
-    return { key: `pickup-${state.seq ?? state.turnCount}`, playerId: pickup.playerId }
-  }, [state.log, state.seq, state.turnCount])
-  const [dismissedPickup, setDismissedPickup] = useState<string | null>(() => pickupEvent?.key ?? null)
-  const pickupHoldRef = useRef<{ key: string; top: CardT | null | undefined; pileCount: number } | null>(null)
-  if (pickupEvent && pickupHoldRef.current?.key !== pickupEvent.key) {
-    pickupHoldRef.current = { key: pickupEvent.key, top: previousPile.current.top, pileCount: previousPile.current.pileCount }
-  }
-  const sweepActive = Boolean(pickupEvent) && !reduceMotion && pickupEvent?.key !== dismissedPickup
-  const sweepData = useMemo<PileSweepData | null>(() => {
-    const hold = pickupHoldRef.current
-    if (!pickupEvent || !sweepActive || !hold?.top) return null
-    const handRect = document.querySelector('.hand-fan')?.getBoundingClientRect()
-    return {
-      key: pickupEvent.key,
-      card: hold.top,
-      count: hold.pileCount,
-      takerId: pickupEvent.playerId,
-      toward: pickupEvent.playerId === viewerId
-        ? handRect ? { left: handRect.left, top: handRect.top, width: handRect.width, height: handRect.height } : null
-        : peekSeatRect(pickupEvent.playerId),
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickupEvent?.key, sweepActive])
-  const onSweepDone = useCallback((key: string) => setDismissedPickup(key), [])
-
-  // Cards that just arrived in the viewer's hand fly in from the stock (draw)
-  // or the pile (pickup).
-  const handEntryFrom = useMemo<'stock' | 'pile' | null>(() => {
-    const events = latestAnimatedEvents(state.log)
-    if (events.some(e => e.type === 'PICK_UP_PILE' && e.playerId === viewerId)) return 'pile'
-    if (events.some(e => e.type === 'DRAW' && e.playerId === viewerId)) return 'stock'
-    return null
-  }, [state.log, viewerId])
-
-  useEffect(() => {
-    previousPile.current = { top, pileCount: ps, effectiveRank: topRank, run: topRunCards({ pile: state.pile }) }
-    previousPlayers.current = state.players
-  }, [top, ps, topRank, state.pile, state.players])
-
-  const lastTurnKey = useRef('')
-  useEffect(() => {
-    const key = `${current?.id ?? 'none'}-${viewerId}-${viewerTurn ? 'active' : 'passive'}`
-    if (key === lastTurnKey.current) return
-    lastTurnKey.current = key
-    if (!current) return
-    if (current.id === viewerId && viewerTurn) {
-      announcer.sayPolite('Your turn')
-    } else {
-      announcer.sayPolite(`${current.name}'s turn`)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, viewerId, viewerTurn])
-
-  useSoundFromLog(state, soundOn)
-
-  useEffect(() => {
-    if (!latestEmote) return
-    const pending = pendingSelfEmote.current
-    if (isMatchingSelfEmoteEcho(pending, latestEmote, viewerId)) {
-      pendingSelfEmote.current = null
-      return
-    }
-    setDisplayedEmote(latestEmote)
-  }, [latestEmote, viewerId])
-
-  useEffect(() => {
-    if (!latestBroadcast) return
-    const pending = pendingSelfBroadcast.current
-    if (isMatchingSelfBroadcastEcho(pending, latestBroadcast, viewerId)) {
-      pendingSelfBroadcast.current = null
-      return
-    }
-    setDisplayedBroadcast(latestBroadcast)
-  }, [latestBroadcast, viewerId])
-
-  useEffect(() => {
-    if (!latestChat) return
-    setDisplayedChat(latestChat)
-  }, [latestChat])
-
-  // Surface external (server) errors assertively.
-  useEffect(() => { if (error) announcer.sayAssertive(error) }, [error]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Keep an off-turn draft across harmless actions. Reconcile it against each
-  // authoritative hand/pile update and clear it only when it is no longer a
-  // complete legal play (or the private hot-seat viewer changes).
-  useEffect(() => {
-    if (selectionOwner.current !== viewerId) {
-      selectionOwner.current = viewerId
-      setSelection([])
-      setPickupArmed(false)
-      return
-    }
-    setSelection(current => {
-      let next: string[]
-      if (state.phase !== 'play' && state.phase !== 'endgame') next = []
-      else if (zone === 'faceDown') {
-        next = viewerActive && current.length <= 1 &&
-          current.every(id => zoneCards.some(card => card.id === id))
-          ? current
-          : []
-      } else {
-        next = reconcilePlayableSelection(current, zoneCards, topRank)
-      }
-      return sameSelection(current, next) ? current : next
-    })
-    setPickupArmed(false)
-  }, [state.phase, topRank, viewerActive, viewerId, zone, zoneCards])
-
-  const draftInvalidated = ownedSelection.length > 0 && effectiveSelection.length === 0 &&
-    zone !== 'faceDown' && (state.phase === 'play' || state.phase === 'endgame')
-  useEffect(() => {
-    if (!draftInvalidated) {
-      invalidDraftNoticeKey.current = ''
-      return
-    }
-    const key = `${viewerId}:${state.seq ?? state.turnCount}:${ownedSelection.join(',')}`
-    if (invalidDraftNoticeKey.current === key) return
-    invalidDraftNoticeKey.current = key
-    const text = 'Prepared cards no longer fit the pile — choose again'
-    setFlash(text)
-    announcer.sayPolite(text)
-    later(3000, () => setFlash(current => current === text ? null : current))
-    // The draft is cleared by the reconciliation effect above in the same
-    // commit; this effect only explains why its highlight disappeared.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftInvalidated, state.seq, state.turnCount, viewerId])
-
   // ---- Actions ----
   const explain = (text: string, cardId?: string) => {
-    setFlash(text)
+    showFlash(text, 3000)
     announcer.sayAssertive(text)
     if (cardId) {
       setInvalidId(cardId)
@@ -696,44 +251,63 @@ export function TableScreen({
       haptic([12, 40, 12])
       later(300, () => setInvalidId(null))
     }
-    later(3000, () => setFlash(f => (f === text ? null : f)))
   }
+  const explainReconnect = () => notice('Reconnecting — prepared cards kept', 2200)
 
-  const explainReconnect = () => {
-    const text = 'Reconnecting — prepared cards kept'
-    setFlash(text)
-    announcer.sayPolite(text)
-    later(2200, () => setFlash(current => current === text ? null : current))
+  const lastSubmitAt = useRef(0)
+  /** May an action go out now? Explains itself when the connection is the reason. */
+  const maySubmit = (): boolean => {
+    if (!actionsEnabled) { explainReconnect(); return false }
+    return Date.now() - lastSubmitAt.current >= SUBMIT_DEBOUNCE_MS
   }
-
-  const maySubmitNow = () => actionsEnabled && canSubmitAction()
-
-  const commitPlay = () => {
-    if (!viewerActive || selectedCards.length === 0) return
-    if (!maySubmitNow()) { explainReconnect(); return }
-    if (Date.now() - debounceRef.current < 300) return // §6.3 input debounce
-    if (onPlay(selectedCards) === false) { explainReconnect(); return }
-    debounceRef.current = Date.now()
-    emitSoundDebounced(selectedCards.length > 1 ? 'play_multi' : 'play')
+  /** Send one action. Once it is out, the draft is spent. */
+  const submit = (send: () => void | boolean, sound: SoundName) => {
+    if (!maySubmit()) return
+    if (send() === false) { explainReconnect(); return }
+    lastSubmitAt.current = Date.now()
+    emitSoundDebounced(sound)
     setSelection([])
     setPickupArmed(false)
   }
 
+  const commitPlay = () => {
+    if (!viewerActive || selectedCards.length === 0) return
+    submit(() => onPlay(selectedCards), selectedCards.length > 1 ? 'play_multi' : 'play')
+  }
+
+  const commitBurnIn = () => {
+    if (!canBurnIn || !onBurnIn) return
+    submit(() => onBurnIn(interruptCards), 'burn')
+  }
+
+  const commitQuickFollowUp = () => {
+    const card = quickFollowUpCards[0]
+    if (!card || !onQuickFollowUp) return
+    submit(() => onQuickFollowUp(card), 'play')
+  }
+
+  const dismissQuickFollowUp = () => {
+    if (quickSourceSeq === null) return
+    setDismissedQuickSourceSeq(quickSourceSeq)
+    showFlash('Quick match skipped — take your turn', 2200)
+  }
+
+  // Picking up with a playable card in hand takes a second, confirming tap
+  // within 3s (§6.1). The draft is set aside meanwhile and comes back if the
+  // pick-up could not be sent.
+  const pickupDraftBackup = useRef<string[]>([])
   const commitPickup = () => {
     if (!viewerActive || ps === 0) return
-    if (!maySubmitNow()) { explainReconnect(); return }
-    if (Date.now() - debounceRef.current < 300) return
+    if (!maySubmit()) return
     if (anyPlayable && !pickupArmed) {
-      // §6.1: guard — second confirming tap within 3s.
-      pickupDraftBackup.current = effectiveSelection
+      pickupDraftBackup.current = selection
       setSelection([])
       setPickupArmed(true)
-      setFlash('Pick up anyway? — tap again')
       later(3000, () => setPickupArmed(false))
-      later(3000, () => setFlash(f => (f === 'Pick up anyway? — tap again' ? null : f)))
+      showFlash('Pick up anyway? — tap again', 3000)
       return
     }
-    const restoreOnFailure = pickupArmed ? pickupDraftBackup.current : effectiveSelection
+    const restoreOnFailure = pickupArmed ? pickupDraftBackup.current : selection
     if (onPickUp() === false) {
       if (restoreOnFailure.length > 0) setSelection(restoreOnFailure)
       pickupDraftBackup.current = []
@@ -741,137 +315,25 @@ export function TableScreen({
       explainReconnect()
       return
     }
-    debounceRef.current = Date.now()
+    lastSubmitAt.current = Date.now()
     pickupDraftBackup.current = []
     setSelection([])
     setPickupArmed(false)
   }
 
-  const commitBurnIn = () => {
-    if (!canBurnIn || !onBurnIn) return
-    if (!maySubmitNow()) { explainReconnect(); return }
-    if (Date.now() - debounceRef.current < 300) return
-    if (onBurnIn(interruptCards) === false) { explainReconnect(); return }
-    debounceRef.current = Date.now()
-    emitSoundDebounced('burn')
-    setSelection([])
-    setPickupArmed(false)
-  }
-
-  const commitQuickFollowUp = () => {
-    const card = quickFollowUpCards[0]
-    if (!card || !onQuickFollowUp) return
-    if (!maySubmitNow()) { explainReconnect(); return }
-    if (Date.now() - debounceRef.current < 300) return
-    if (onQuickFollowUp(card) === false) { explainReconnect(); return }
-    debounceRef.current = Date.now()
-    emitSoundDebounced('play')
-    setSelection([])
-    setPickupArmed(false)
-  }
-
-  const dismissQuickFollowUp = () => {
-    if (quickSourceSeq === null) return
-    setDismissedQuickSourceSeq(quickSourceSeq)
-    setFlash('Quick match skipped — take your turn')
-    later(2200, () => setFlash(value => value === 'Quick match skipped — take your turn' ? null : value))
-  }
-
-  // Your own emote/broadcast renders locally and suppresses the server echo, so
-  // the optimistic event has to carry the attribution the echo would have
-  // brought. Without it a watcher — absent from the dealt roster — would watch
-  // their own reaction come back labelled "Player" and untagged.
-  const selfAttribution = { playerName: viewerName, role: spectating ? 'spectator' as const : 'player' as const }
-
-  const explainReactionReconnect = () => {
-    const text = 'Reconnecting — reaction not sent'
-    setFlash(text)
-    announcer.sayPolite(text)
-    later(2200, () => setFlash(current => current === text ? null : current))
-  }
-
-  const sendEmote = (emote: EmoteId) => {
-    const sentAt = Date.now()
-    if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return
-    if (!canReact || onSendEmote?.(emote) === false) {
-      explainReactionReconnect()
-      return
-    }
-    lastReactionSentAtByViewer.current.set(viewerId, sentAt)
-    const event: EmoteEvent = { playerId: viewerId, emote, ts: sentAt, ...selfAttribution }
-    if (onSendEmote) pendingSelfEmote.current = { emote, sentAt }
-    setDisplayedEmote(event)
-  }
-
-  const sendBroadcast = (broadcast: BroadcastId) => {
-    const sentAt = Date.now()
-    if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return
-    if (!canReact || onSendBroadcast?.(broadcast) === false) {
-      explainReactionReconnect()
-      return
-    }
-    lastReactionSentAtByViewer.current.set(viewerId, sentAt)
-    const event: BroadcastEvent = { playerId: viewerId, broadcast, ts: sentAt, ...selfAttribution }
-    if (onSendBroadcast) pendingSelfBroadcast.current = { broadcast, sentAt }
-    setDisplayedBroadcast(event)
-  }
-
-  const sendChat = (rawText: string): boolean => {
-    const text = normalizeChatText(rawText)
-    if (!isValidChatText(text)) return false
-    const sentAt = Date.now()
-    if (!canSendReaction(lastReactionSentAtByViewer.current.get(viewerId) ?? null, sentAt)) return false
-    if (!canReact) {
-      explainReactionReconnect()
-      return false
-    }
-    const burst = acceptedCustomMessageBurst(
-      recentSelfChatTimestampsByViewer.current.get(viewerId) ?? [],
-      sentAt,
-    )
-    if (!burst.accepted) {
-      recentSelfChatTimestampsByViewer.current.set(viewerId, burst.timestamps)
-      const message = `Custom messages are limited to ${CUSTOM_MESSAGE_BURST_LIMIT} every ${CUSTOM_MESSAGE_BURST_WINDOW_MS / 1000} seconds`
-      setFlash(message)
-      announcer.sayPolite(message)
-      later(2200, () => setFlash(current => current === message ? null : current))
-      return false
-    }
-    if (onSendChat && onSendChat(text) === false) {
-      explainReactionReconnect()
-      return false
-    }
-    recentSelfChatTimestampsByViewer.current.set(viewerId, burst.timestamps)
-    lastReactionSentAtByViewer.current.set(viewerId, sentAt)
-    // Multiplayer waits for the authenticated server echo. This keeps a
-    // transport drop or authoritative rate-limit rejection from appearing as
-    // a message that other players never received. Single-player remains
-    // local-only and can render immediately.
-    if (onSendChat) return true
-    const event: ChatEvent = { playerId: viewerId, text, ts: sentAt, ...selfAttribution }
-    setDisplayedChat(event)
-    onLocalChatAccepted?.(text)
-    return true
-  }
-
   const tapCard = (card: CardT, cardZone: Zone) => {
     if (blindActive) return
-    const preparingNextTurn = !viewerActive && canPreselectVisible && cardZone === zone
+    const preparingNextTurn = !viewerActive && canPreselect && cardZone === zone
     if (!viewerActive && !preparingNextTurn) return
     setPickupArmed(false)
     if (cardZone !== zone) return // only the active zone is live (D6)
+    const isSelected = selection.includes(card.id)
     if (zone === 'faceDown') {
       // Blind plays are single cards (D7): tap toggles a single selection.
-      const isSelected = effectiveSelection.includes(card.id)
       // Remember where the card sits: the reveal flies out of this slot.
-      if (!isSelected) blindOriginRef.current = peekCardRect(card.id)
+      if (!isSelected) sequence.rememberBlindOrigin(card.id)
       setSelection(isSelected ? [] : [card.id])
-      haptic(8)
-      emitSoundDebounced(isSelected ? 'deselect' : 'select')
-      return
-    }
-
-    if (!playableNow(card)) {
+    } else if (!playableNow(card)) {
       explain(
         topRank
           ? `${card.rank === 'JOKER' ? 'The Joker' : `The ${card.rank}`} cannot be played on the ${topRank}`
@@ -879,98 +341,36 @@ export function TableScreen({
         card.id,
       )
       return
+    } else {
+      setSelection(nextRankSelection(selection, card, zoneCards))
     }
-    const next = nextRankSelection(effectiveSelection, card, zoneCards)
-    if (next === effectiveSelection) {
-      explain('Four cards maximum per play', card.id)
-      return
-    }
-    setSelection(next)
     haptic(8)
-    emitSoundDebounced(effectiveSelection.includes(card.id) ? 'deselect' : 'select')
+    emitSoundDebounced(isSelected ? 'deselect' : 'select')
   }
 
   // Stable, ref-routed activators — Card's memo ignores onActivate identity,
   // so these must never go stale semantically (they read the latest render).
-  const latest = useRef({ viewer, zone, tapCard })
-  latest.current = { viewer, zone, tapCard }
+  const latest = useRef({ viewer, tapCard })
+  latest.current = { viewer, tapCard }
   const onHandId = useCallback((id: string) => {
-    const l = latest.current
-    const c = l.viewer?.hand.find(x => x.id === id)
-    if (c) l.tapCard(c, 'hand')
+    const card = latest.current.viewer?.hand.find(x => x.id === id)
+    if (card) latest.current.tapCard(card, 'hand')
   }, [])
   const onFaceUpId = useCallback((id: string) => {
-    const l = latest.current
-    const c = l.viewer?.faceUp.find(x => x.id === id)
-    if (c) l.tapCard(c, 'faceUp')
+    const card = latest.current.viewer?.faceUp.find(x => x.id === id)
+    if (card) latest.current.tapCard(card, 'faceUp')
   }, [])
   const onFaceDownId = useCallback((id: string) => {
-    const l = latest.current
-    const c = l.viewer?.faceDown.find(x => x.id === id)
-    if (c) l.tapCard(c, 'faceDown')
+    const card = latest.current.viewer?.faceDown.find(x => x.id === id)
+    if (card) latest.current.tapCard(card, 'faceDown')
   }, [])
-  const states = new Map<string, CardVisualState>()
-  const hints = new Map<string, string>()
-  const effectiveSelectionIds = new Set(effectiveSelection)
-  if (viewer) {
-    for (const c of [...viewer.hand, ...viewer.faceUp]) {
-      if (quickActionVisible && quickFollowUpIds.has(c.id)) {
-        states.set(c.id, 'joinable')
-        hints.set(c.id, 'matching card, quick follow-up available')
-        continue
-      }
-      if (canBurnIn && interruptIds.has(c.id)) {
-        states.set(c.id, 'joinable')
-        hints.set(c.id, 'can burn in now')
-        continue
-      }
-      if (effectiveSelectionIds.has(c.id)) {
-        states.set(c.id, 'selected')
-        hints.set(c.id, viewerActive ? 'selected' : 'selected for your next turn')
-        continue
-      }
-      if (quickFollowUpIds.has(c.id)) {
-        states.set(c.id, 'joinable')
-        hints.set(c.id, 'matching card, quick follow-up available')
-        continue
-      }
-      if (invalidId === c.id) {
-        states.set(c.id, 'invalid')
-        hints.set(c.id, 'not playable')
-        continue
-      }
-      if (!viewerActive) {
-        if (interruptIds.has(c.id)) {
-          states.set(c.id, 'joinable')
-          hints.set(c.id, 'can burn in now')
-        } else if (canPreselectVisible && zoneCards.some(zoneCard => zoneCard.id === c.id)) {
-          states.set(c.id, 'rest')
-          hints.set(c.id, playableNow(c) ? 'available to select for your next turn' : 'not playable on the current pile')
-        } else {
-          states.set(c.id, 'rest')
-        }
-        continue
-      }
-      const inZone = zone !== 'faceDown' && zoneCards.some(z => z.id === c.id)
-      if (!inZone) { states.set(c.id, 'rest'); continue }
-      if (playableNow(c)) {
-        if (selectedRank && c.rank !== selectedRank) { states.set(c.id, 'playable'); hints.set(c.id, 'playable, replaces selection') }
-        else if (selectedRank) { states.set(c.id, 'joinable'); hints.set(c.id, 'playable') }
-        else { states.set(c.id, 'playable'); hints.set(c.id, 'playable') }
-      } else {
-        states.set(c.id, 'disabled')
-        hints.set(c.id, 'not playable')
-      }
-    }
-  }
-  const downStates = new Map<string, CardVisualState>()
-  const downHints = new Map<string, string>()
-  if (viewer && viewerActive && zone === 'faceDown') {
-    for (const c of viewer.faceDown) {
-      downStates.set(c.id, effectiveSelectionIds.has(c.id) ? 'selected' : 'playable')
-      downHints.set(c.id, effectiveSelectionIds.has(c.id) ? 'selected' : 'blind play')
-    }
-  }
+
+  const { states, hints, downStates, downHints } = viewerCardStates({
+    viewer: viewer ?? NO_ROWS, zone, zoneCards, viewerActive, selection,
+    selectedRank: selectedCards[0]?.rank ?? null, invalidId,
+    canBurnIn, interruptIds, quickFollowUpIds, quickActionVisible,
+    canPreselect, playable: playableNow,
+  })
 
   // ---- Seats ----
   const seats: Seat[] = orderSeats(state.players, viewerId).map(p => ({
@@ -1002,18 +402,12 @@ export function TableScreen({
     return () => document.removeEventListener('keydown', onKey)
   })
 
-  // The burning pile as it was, from the card's arrival to the end of the burn.
-  const burnShown = burnSnapshot
-
   if (!viewer && !spectating) return null
 
   // Once the final row is the zone in play it stays full size, on and off the
   // turn. Sizing it by whose turn it is made the row (and the pile above it)
   // grow and shrink with every turn.
   const endgameZoneLive = zone === 'faceUp' || zone === 'faceDown'
-  const emotePlayer = speakerNameForEvent(displayedEmote, state)
-  const broadcastPlayer = speakerNameForEvent(displayedBroadcast, state)
-  const chatPlayer = speakerNameForEvent(displayedChat, state)
   const visibleSystemEvent = latestSystemEvent?.kind === 'ondra-mode' && state.phase === 'gameOver'
     ? null
     : latestSystemEvent ?? null
@@ -1026,16 +420,16 @@ export function TableScreen({
       data-viewer-active={viewerActive ? 'true' : 'false'}
       data-viewer-role={spectating ? 'spectator' : 'player'}
       data-active-zone={zone ?? undefined}
-      data-selection-count={effectiveSelection.length}
+      data-selection-count={selection.length}
     >
       <CardDefs />
       <Announcer polite={announcer.polite} assertive={announcer.assertive} />
       <TurnAttentionBeacon active={attentionAlertActive} />
       <div className="table-reaction-feedback-stack" aria-label="Table reactions">
         <SystemEventFeedback event={visibleSystemEvent} />
-        <ChatFeedback event={displayedChat} playerName={chatPlayer} />
-        <BroadcastFeedback event={displayedBroadcast} playerName={broadcastPlayer} />
-        <EmoteFeedback event={displayedEmote} playerName={emotePlayer} />
+        <ChatFeedback event={reactions.chat} playerName={speakerNameForEvent(reactions.chat, state)} />
+        <BroadcastFeedback event={reactions.broadcast} playerName={speakerNameForEvent(reactions.broadcast, state)} />
+        <EmoteFeedback event={reactions.emote} playerName={speakerNameForEvent(reactions.emote, state)} />
       </div>
 
       <LayoutGroup id={`table-turn-${viewerId}`}>
@@ -1070,9 +464,9 @@ export function TableScreen({
             {(!spectating || Boolean(onSendEmote || onSendBroadcast || onSendChat)) && (
               <EmoteButton
                 key={viewerId}
-                onSend={sendEmote}
-                onSendBroadcast={sendBroadcast}
-                onSendChat={sendChat}
+                onSend={reactions.sendEmote}
+                onSendBroadcast={reactions.sendBroadcast}
+                onSendChat={reactions.sendChat}
                 recentCustomMessages={recentCustomMessages}
               />
             )}
@@ -1111,30 +505,16 @@ export function TableScreen({
       >
         <div
           className="table-pile-stage"
-          data-burning={burning ? 'true' : 'false'}
-          data-burn-key={burnSnapshot?.actionKey}
+          data-burning={sequence.burning ? 'true' : 'false'}
+          data-burn-key={sequence.pile.burnKey}
         >
           <SpecialEffectFeedback effect={specialEffect} />
           <OutMoment event={outMoment?.key.startsWith(`${viewerId}:`) ? outMoment : null} />
           <PileArea
             stockCount={state.stock.length}
-            top={holdPile ? holdPile.top : burnShown ? burnShown.top : top}
-            pileCount={holdPile ? holdPile.pileCount : burnShown ? burnShown.pileCount : ps}
-            effectiveRank={holdPile ? holdPile.effectiveRank : burnShown ? burnShown.effectiveRank : topRank}
-            burning={burning && !holdPile}
-            blind={blindData}
-            sweep={sweepData}
-            onSweepDone={onSweepDone}
-            onBlindDone={onBlindDone}
-            suppressEntryId={blindEvent?.success ? blindEvent.card.id : null}
-            burnKey={burnSnapshot?.actionKey}
-            burnReason={burnSnapshot?.reason}
-            burnFan={burnSnapshot?.fan}
+            {...sequence.pile}
             specialEffect={specialEffect}
             teachHint={ps === 0 && viewerActive}
-            playedBy={playedBy}
-            group={playedGroup}
-            mirrorOf={holdPile || burnShown ? null : getMirroredCard(state)}
           />
         </div>
         <div className="game-feed table-feed">
@@ -1152,7 +532,7 @@ export function TableScreen({
           faceUpHints={hints}
           faceDownStates={downStates}
           faceDownHints={downHints}
-          onActivateFaceUp={(viewerActive || canPreselectVisible) && zone === 'faceUp' ? onFaceUpId : undefined}
+          onActivateFaceUp={(viewerActive || canPreselect) && zone === 'faceUp' ? onFaceUpId : undefined}
           onActivateFaceDown={viewerActive && zone === 'faceDown' ? onFaceDownId : undefined}
         />
       )}
@@ -1175,7 +555,7 @@ export function TableScreen({
           {/* Always rendered: an idle bar holds the row between turns. */}
           {(
             <ActionBar
-              selectionCount={viewerActive ? effectiveSelection.length : 0}
+              selectionCount={viewerActive ? selection.length : 0}
               canPickUp={viewerActive && ps > 0}
               pickupArmed={pickupArmed}
               onPlay={commitPlay}
@@ -1197,9 +577,9 @@ export function TableScreen({
             cards={heldHandOf(viewer.id) ?? viewer.hand}
             states={states}
             ariaHints={hints}
-            onSelect={(viewerActive || canPreselectVisible) && zone === 'hand' ? onHandId : undefined}
+            onSelect={(viewerActive || canPreselect) && zone === 'hand' ? onHandId : undefined}
             orderKey={viewerId}
-            entryFrom={handEntryFrom}
+            entryFrom={sequence.handEntryFrom}
           />
         </div>
       </footer> : (

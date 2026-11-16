@@ -6,7 +6,8 @@ import type { GameState, Player } from '../engine'
 import { orderSeats } from './OpponentStrip'
 import { feedLine, latestActionEvents } from './feedText'
 import { pileTilt } from './Card'
-import { isMatchingSelfEmoteEcho, nextRankSelection } from './TableScreen'
+import { nextRankSelection } from './table/selection'
+import { isMatchingSelfEmoteEcho } from './table/useTableReactions'
 
 function player(id: string): Player {
   const name = id.charAt(0).toUpperCase() + id.slice(1)

@@ -14,11 +14,8 @@ import {
 } from '../EmoteButton'
 import { LobbySystemFeedback } from '../MultiplayerGameTable'
 import { BROADCAST_OPTIONS, REACTION_OPTIONS } from '../reactionCatalog'
-import {
-  canSendReaction,
-  isMatchingSelfBroadcastEcho,
-  TableScreen,
-} from '../TableScreen'
+import { TableScreen } from '../TableScreen'
+import { canSendReaction, isMatchingSelfBroadcastEcho } from '../table/useTableReactions'
 
 declare const process: { cwd: () => string }
 

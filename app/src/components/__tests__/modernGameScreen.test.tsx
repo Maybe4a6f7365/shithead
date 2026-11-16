@@ -5,7 +5,8 @@ import type { Card, GameState, Player } from '../../engine'
 import { ActionBar } from '../ActionBar'
 import { OpponentSeat } from '../OpponentStrip'
 import { pileEntryChoreography, pileEntryKind, pileRuleChipInitial, PileArea } from '../PileArea'
-import { burnCleanupDelay, TableScreen } from '../TableScreen'
+import { TableScreen } from '../TableScreen'
+import { burnCleanupDelay } from '../table/usePileSequence'
 
 beforeAll(() => {
   class ResizeObserverMock {

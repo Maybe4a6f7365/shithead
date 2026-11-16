@@ -482,6 +482,17 @@ At bootstrap, a complete saved online credential resumes directly into its room.
 
 `GameTable` adapts the local Zustand store and `MultiplayerGameTable` adapts authoritative network state into the same `TableScreen`. Selection rules, card zones, mobile geometry, announcements, emotes, and accessibility behavior are therefore shared between modes.
 
+`TableScreen` wires the table together and owns the viewer's actions (play, pick up, burn in, quick follow-up, keyboard). The parts with a life of their own live in `components/table/`:
+
+| Module | Responsibility |
+|---|---|
+| `usePileSequence` | What the pile shows while the latest action plays out: the hold during a blind flip, the card that lands before a burn, the sweep on a pick-up. Derived during render so the pile never paints a state the player has not been shown yet |
+| `usePlayDraft` | The selected cards and the armed pick-up guard; a draft survives harmless updates and is dropped as a whole once it stops being a complete legal play |
+| `useActionFeedback` | What an accepted action sets off besides the cards: effect banner, the skip shown on passed seats, the going-out moment, screen-reader announcements |
+| `useTableReactions` | Emotes, broadcasts and custom messages, with the optimistic local render and client-side cooldown and burst limits |
+| `cardStates`, `selection` | Pure rules: how each of the viewer's cards looks and reads, and how a tap changes the selection |
+| `useTransient` | One-shot timers and the passing feed line |
+
 ### Card interaction
 
 - Tapping a card selects it; it never commits immediately.
@@ -674,19 +685,19 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 | `npm run worker:deploy` | Build and deploy manually with Wrangler |
 | `npm run worker:tail` | Stream remote Worker logs |
 
-`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules). It currently reports no errors and nine `react-hooks/exhaustive-deps` warnings in older components; it is not yet part of the CI workflow. Both the frontend and the Worker TypeScript configs compile in `strict` mode with unused locals and parameters reported as errors.
+`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules). It currently reports no errors and five `react-hooks/exhaustive-deps` warnings in older components; it is not yet part of the CI workflow. Both the frontend and the Worker TypeScript configs compile in `strict` mode with unused locals and parameters reported as errors.
 
 ## Test strategy
 
-At this revision, the default suite contains **458 tests across 41 Vitest files**:
+At this revision, the default suite contains **614 tests across 62 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
 | Engine | 12 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, round counters, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
-| Components/UI | 25 | Setup, waiting, spectator masking/indicator, offline-host controls, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
+| Components/UI | 44 | Setup, waiting, spectator masking/indicator, offline-host controls, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
 | Network | 1 | Session validation, auth ordering, sequence guard, terminal release, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
-| Root routing | 1 | Invite-link and hard-refresh resume routing |
+| Root | 3 | Invite-link and hard-refresh resume routing, service-worker update guard, custom-message history |
 
 Configured V8 thresholds apply to engine source: 80% lines/functions/statements and 75% branches. The project deliberately does not claim 100% coverage.
 
@@ -707,7 +718,11 @@ cd app
 BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial
 ```
 
-The current script reports 42 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
+The current script reports 45 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
+
+### Browser animation suite
+
+jsdom has no layout and runs no animations, so sequencing faults in the table (a slide that replays, a burn over a pile that has moved on, a pile that looks empty mid-flight) are invisible to Vitest. `npm run test:browser` starts a Vite dev server, drives the offline store in headless Chromium and samples the DOM every frame; it currently runs 17 checks. It needs Playwright with Chromium, which is not a project dependency, and it is not part of the CI workflow.
 
 ### Production smoke test
 
@@ -787,10 +802,12 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   ├── public/                        # Manifest icons and static assets
 │   ├── scripts/
 │   │   ├── smoke-multiplayer.mjs      # Production end-to-end smoke
+│   │   ├── test-animations-browser.mjs # Table animation checks in Chromium
 │   │   ├── test-worker-adversarial.mjs # Live local-Worker security/rules suite
 │   │   └── write-build-meta.mjs       # Commit stamping
 │   ├── src/
 │   │   ├── components/                # Screens and shared game UI
+│   │   │   └── table/                 # TableScreen's hooks and pure rules
 │   │   ├── engine/
 │   │   │   ├── index.ts               # Pure rules, reducers, deck and AI policy
 │   │   │   ├── protocol.ts            # Protocol-v8 types, roles, validation and masking
