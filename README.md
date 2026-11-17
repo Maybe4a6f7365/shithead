@@ -33,7 +33,7 @@ Online rooms do not currently contain AI seats. Offline games live in Zustand me
 
 | Layer | Technology |
 |---|---|
-| UI | React 19, TypeScript (declared `^5.6.3`, lockfile `5.9.3`), Tailwind CSS 3.4, handwritten CSS design tokens |
+| UI | React 19, TypeScript (declared `^5.6.3`, lockfile `5.9.3`), Tailwind CSS 4 (imported without cascade layers, so the handwritten stylesheet keeps its place in the cascade), handwritten CSS design tokens |
 | Local controller | Zustand 5 |
 | Motion | Framer Motion 14 with reduced-motion branches |
 | Frontend build | Vite 8 (Rolldown, Lightning CSS), `vite-plugin-pwa` 2, Workbox 7 |

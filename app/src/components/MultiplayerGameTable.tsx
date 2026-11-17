@@ -584,7 +584,7 @@ export function PrimaryBtn({ onClick, children }: { onClick: () => void; childre
     <button
       type="button"
       onClick={onClick}
-      className="phase-action phase-action--primary primary-action w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase active:scale-[0.97] transition-transform duration-dur-1"
+      className="phase-action phase-action--primary primary-action w-full min-h-[48px] rounded-button bg-burgundy text-cream text-button font-bold tracking-button uppercase"
     >
       {children}
     </button>

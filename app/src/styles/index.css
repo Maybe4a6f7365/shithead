@@ -1,5 +1,55 @@
-@tailwind base;
-@tailwind components;
+/* Tailwind 4, wired so the cascade stays what this stylesheet was written
+   against: reset, then the base rules below, then the utilities, then
+   everything else in this file, all in source order and none of it in a
+   cascade layer. The stock `@import "tailwindcss"` puts the utilities in a
+   layer, where any unlayered rule here would beat them whatever its
+   specificity, and `disabled:`/`active:` utilities would stop winning. */
+@import "tailwindcss/theme.css";
+@import "tailwindcss/preflight.css";
+@config "../../tailwind.config.js";
+
+/* Tailwind 3's reset gave every border this colour; Tailwind 4's uses
+   currentColor. Borders drawn here without a colour of their own keep the
+   one they were designed with. */
+*, ::before, ::after, ::backdrop, ::file-selector-button {
+  border-color: #e5e7eb;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  font-family: var(--font-ui);
+}
+
+body {
+  color: var(--color-cream);
+  background: var(--color-felt-deep);
+  touch-action: manipulation;
+}
+
+button, input {
+  font: inherit;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+  outline-offset: 2px;
+}
+
 @tailwind utilities;
 
 :root {
@@ -657,43 +707,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .game-screen .reaction-picker__emoji { transition: none; }
-}
-
-@layer base {
-  html, body, #root {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    overscroll-behavior: none;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-touch-callout: none;
-    font-family: var(--font-ui);
-  }
-
-  body {
-    color: var(--color-cream);
-    background: var(--color-felt-deep);
-    touch-action: manipulation;
-  }
-
-  button, input {
-    font: inherit;
-  }
-
-  button:not(:disabled) {
-    cursor: pointer;
-  }
-
-  input, textarea {
-    user-select: text;
-    -webkit-user-select: text;
-  }
-
-  :focus-visible {
-    outline: none;
-    box-shadow: var(--ring-focus);
-    outline-offset: 2px;
-  }
 }
 
 .app-viewport {
@@ -2146,11 +2159,6 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
-}
-
-@layer utilities {
-  .safe-top { padding-top: env(safe-area-inset-top); }
-  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 }
 
 @media (max-height: 680px) {
