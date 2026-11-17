@@ -689,7 +689,7 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **614 tests across 62 Vitest files**:
+At this revision, the default suite contains **619 tests across 62 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
