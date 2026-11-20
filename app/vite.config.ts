@@ -60,6 +60,22 @@ export default defineConfig({
     target: 'es2020',
     // Never ship source maps to production assets (they are publicly served).
     // `vite dev` still serves sourcemaps during local development.
-    sourcemap: false
+    sourcemap: false,
+    rolldownOptions: {
+      output: {
+        // The libraries are two thirds of the JavaScript and change only when
+        // a dependency is upgraded; the app code changes with nearly every
+        // deploy. In chunks of their own their hashes stay put, so a returning
+        // player's service worker downloads just the app chunk after a deploy.
+        // Everything is still loaded up front: no screen is fetched on demand.
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 3 },
+            { name: 'motion', test: /[\\/]node_modules[\\/](framer-motion|motion-dom|motion-utils)[\\/]/, priority: 2 },
+            { name: 'vendor', test: /[\\/]node_modules[\\/]/, priority: 1 },
+          ],
+        },
+      },
+    },
   }
 })

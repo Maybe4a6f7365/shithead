@@ -610,6 +610,8 @@ The app contains no advertising, analytics, or behavioral-tracking SDK. Online p
 
 The manifest configures standalone display, theme `#173d2f`, background `#0c2b21`, and 192 px, 512 px, and maskable 512 px icons. The production build targets ES2020 and emits no source maps.
 
+The JavaScript is split by how often it changes, not by screen: `react-*.js` (React, React DOM, scheduler), `motion-*.js` (Framer Motion and its engine), `vendor-*.js` (every other library), a tiny `rolldown-runtime-*.js`, and `index-*.js`, the app itself. All of them load up front through `modulepreload`; nothing is fetched on demand, so a deploy can never leave a running page asking for a chunk that no longer exists. An app-only change re-hashes `index-*.js` alone, and the service worker downloads only that file (about 68 kB gzipped of 184 kB). `index-*.js` must stay the entry the HTML references by `src`, and it carries the multiplayer client, which the production smoke test checks for.
+
 Workbox precaches generated JavaScript, CSS, HTML, SVG, PNG, WebP, and MP3 assets; `fonts/**` are excluded. A new service worker uses `skipWaiting`, `clientsClaim`, and old-cache cleanup. `main.tsx` registers it immediately and checks for updates at startup, hourly, and whenever the document becomes visible.
 
 Build metadata is generated from `WORKERS_CI_COMMIT_SHA`, then `GITHUB_SHA`, falling back to `local`. The value is written into `src/worker/build-meta.ts` for `/api/version` and into `<meta name="build-commit">` in `index.html`. It is used by deployment smoke tests rather than displayed as normal player UI.
