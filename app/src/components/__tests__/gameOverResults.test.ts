@@ -74,6 +74,18 @@ describe('gameOverResults', () => {
     ])
   })
 
+  it('leaves out a winner who left a round that recorded no counters, instead of crashing', () => {
+    const state = gameState()
+    delete state.roundStats
+    // The first finisher left the table afterwards. Nothing but their id is
+    // known, so there is no row to show for them.
+    state.players = state.players.filter(seat => seat.id !== 'first')
+    expect(gameOverResults(state).leaderboard.map(row => [row.playerId, row.place])).toEqual([
+      ['middle', null],
+      ['last', 2],
+    ])
+  })
+
   it('labels states without authoritative counters as legacy', () => {
     const state = gameState()
     delete state.roundStats

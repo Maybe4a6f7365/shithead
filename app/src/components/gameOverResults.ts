@@ -27,17 +27,20 @@ export function gameOverResults(state: GameState): GameOverResultsView {
     ? stats.players
     : state.players.map(emptyStats)
   const byId = new Map(snapshots.map(player => [player.playerId, player] as const))
-  const orderedIds: string[] = []
-  const add = (playerId: string | null | undefined) => {
-    if (playerId && byId.has(playerId) && !orderedIds.includes(playerId)) orderedIds.push(playerId)
+  // Only players there is a record of get a row: a winner who left a round
+  // that kept no counters is known by id alone, and is left out.
+  const ordered: PlayerRoundStats[] = []
+  const add = (playerId: string | null | undefined, where: 'first' | 'last' = 'last') => {
+    const player = playerId ? byId.get(playerId) : undefined
+    if (!player || ordered.includes(player)) return
+    if (where === 'first') ordered.unshift(player)
+    else ordered.push(player)
   }
 
   for (const playerId of stats?.finishOrder ?? []) add(playerId)
   // A migrated round may know its first winner even when the old bounded log
   // no longer contains the PLAYER_OUT event.
-  if (state.winnerId && !orderedIds.includes(state.winnerId)) {
-    orderedIds.unshift(state.winnerId)
-  }
+  add(state.winnerId, 'first')
 
   for (const player of snapshots) {
     if (player.playerId !== state.loserId) add(player.playerId)
@@ -50,8 +53,8 @@ export function gameOverResults(state: GameState): GameOverResultsView {
   )
   const exactPlacesAvailable = stats?.complete === true && completeOrderIsCoherent
   const participantCount = snapshots.length
-  const leaderboard = orderedIds.map(playerId => {
-    const player = byId.get(playerId)!
+  const leaderboard = ordered.map(player => {
+    const { playerId } = player
     const exactIndex = exactFinishOrder.indexOf(playerId)
     const place = playerId === state.loserId && participantCount > 0
       ? participantCount
