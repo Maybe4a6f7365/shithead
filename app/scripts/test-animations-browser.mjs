@@ -14,20 +14,20 @@
 //   - the pile, final row and hand sit in the same place on and off the turn
 //
 // Starts a Vite dev server, drives the single-player store in headless
-// Chromium and samples the DOM every frame. Needs Playwright with Chromium
-// (not a project dependency):  npm run test:browser
+// Chromium and samples the DOM every frame. Playwright is a dev dependency;
+// its browser is installed once with `npx playwright install chromium`.
+// Run with `npm run test:browser`. CI runs it on every push and pull request.
 // ============================================================================
 /* global T -- the test harness installed on the page's window (see the first page.evaluate) */
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { chromium } from 'playwright'
 import { createServer } from 'vite'
 
-const require = createRequire(import.meta.url)
-let chromium
+let browser
 try {
-  ({ chromium } = require('playwright'))
-} catch {
-  console.error('Playwright is not installed. Install it (npm i -D playwright && npx playwright install chromium) to run the browser tests.')
+  browser = await chromium.launch()
+} catch (error) {
+  console.error(`Chromium did not start (${error.message.split('\n')[0]}). Install it once with: npx playwright install chromium`)
   process.exit(2)
 }
 
@@ -37,7 +37,6 @@ await server.listen()
 const address = server.httpServer.address()
 const url = `http://127.0.0.1:${address.port}/`
 
-const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
 const pageErrors = []
 page.on('pageerror', error => pageErrors.push(error.message))

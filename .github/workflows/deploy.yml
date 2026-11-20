@@ -64,6 +64,31 @@ jobs:
           cat "$RUNNER_TEMP/wrangler.log"
           exit 1
 
+  browser:
+    # jsdom has no layout and runs no animations; these checks sample a real
+    # Chromium frame by frame. Independent of verify, so it runs alongside.
+    name: Browser animation tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ./app
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            package-lock.json
+      - name: Use current npm
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
+      - run: npm ci
+      - name: Install headless Chromium for the pinned Playwright
+        run: npx playwright install --with-deps --only-shell chromium
+      - run: npm run test:browser
+
   production-smoke:
     name: Verify deployed multiplayer
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

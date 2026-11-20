@@ -724,7 +724,7 @@ The current script reports 45 adversarial checks in a normal run (one of the ter
 
 ### Browser animation suite
 
-jsdom has no layout and runs no animations, so sequencing faults in the table (a slide that replays, a burn over a pile that has moved on, a pile that looks empty mid-flight) are invisible to Vitest. `npm run test:browser` starts a Vite dev server, drives the offline store in headless Chromium and samples the DOM every frame; it currently runs 18 checks. It needs Playwright with Chromium, which is not a project dependency, and it is not part of the CI workflow.
+jsdom has no layout and runs no animations, so sequencing faults in the table (a slide that replays, a burn over a pile that has moved on, a pile that looks empty mid-flight, a hand that lays out twice) are invisible to Vitest. `npm run test:browser` starts a Vite dev server, drives the offline store in headless Chromium and samples the DOM every frame; it currently runs 18 checks in about 40 seconds. Playwright is a pinned dev dependency; install its browser once with `npx playwright install chromium`. CI runs the suite on every push to `main` and every pull request.
 
 ### Production smoke test
 
@@ -753,6 +753,8 @@ The **verify** job uses Node 22 and npm 11.19, then executes:
 4. `npm run typecheck:worker`
 5. `npm run build`
 6. local Wrangler plus the adversarial Worker script
+
+The **browser** job runs alongside it: `npm ci`, the headless Chromium build matching the pinned Playwright, then `npm run test:browser`.
 
 For non-PR `main` revisions, **production-smoke** waits for verify, then polls the Workers.dev fallback for the exact `${{ github.sha }}` for up to ten minutes and runs the end-to-end multiplayer smoke flow. A manual smoke run with `BASE_URL=https://shead.online` additionally validates the dashboard-managed Custom Domain path.
 
