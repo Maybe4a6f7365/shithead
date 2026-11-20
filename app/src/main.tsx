@@ -4,7 +4,6 @@ import { App } from './App'
 import { installBrowserAudioBackend } from './components/soundManager'
 import { registerServiceWorker } from './swUpdate'
 import './styles/index.css'
-import './styles/performance.css'
 
 // Android browser chrome can leave CSS viewport units taller than the area a
 // player can actually see and tap. Keep the clipped app shell tied to the live

@@ -1,0 +1,46 @@
+/* Legal sheet, scrolling screen content, form panels and text inputs. */
+
+.legal-sheet { overscroll-behavior-y: contain; }
+.legal-close {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  margin: -8px -8px 0 0;
+  border: 0;
+  border-radius: 12px;
+  color: var(--color-ink-soft);
+  background: transparent;
+  font-size: 30px;
+  line-height: 1;
+}
+.legal-close:hover { background: rgba(15, 23, 42, 0.06); }
+.legal-copy { line-height: 1.55; }
+.legal-copy > * + * { margin-top: 14px; }
+.legal-copy h3 {
+  margin-top: 22px;
+  color: var(--color-ink);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 800;
+}
+.legal-copy address { color: var(--color-ink); font-style: normal; }
+.legal-copy a { color: #087568; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+
+.screen-content { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.3) transparent; }
+.form-panel,
+.player-config,
+.room-code-panel {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(155deg, rgba(23, 35, 58, 0.78), rgba(13, 21, 37, 0.7));
+  box-shadow: 0 14px 36px rgba(2, 6, 23, 0.18);
+}
+.form-panel { padding: 18px; border-radius: 18px; }
+.player-config { padding: 12px; border-radius: 16px; }
+.room-code-panel { padding: 18px 16px 14px; border-radius: 18px; }
+.modern-input { transition: border-color var(--dur-1), background var(--dur-1), box-shadow var(--dur-1); }
+.modern-input:focus { border-color: rgba(77, 224, 196, 0.62); box-shadow: 0 0 0 3px rgba(77, 224, 196, 0.1); }
+.modern-input:focus-visible { box-shadow: var(--ring-focus); }
+.form-divider { height: 36px; display: grid; place-items: center; color: var(--color-cream-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; }
+.form-divider span { padding: 0 9px; background: var(--color-felt); }

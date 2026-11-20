@@ -1,0 +1,107 @@
+/* Final reaction cascade contract. Keep this after the legacy emote rules. */
+.game-screen .emote-picker.reaction-picker {
+  position: fixed;
+  z-index: calc(var(--z-overlay) + 1);
+  top: 58px;
+  right: 10px;
+  bottom: auto;
+  left: auto;
+  width: min(376px, calc(100vw - 20px));
+  max-height: min(520px, calc(var(--app-viewport-height, 100dvh) - 72px));
+  padding: 0;
+  display: flex;
+  grid-template-columns: none;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 20px;
+  background: #15372b;
+}
+
+.game-screen .emote-picker.reaction-picker .reaction-picker__header {
+  min-height: 58px;
+  padding: 10px 10px 8px 16px;
+  display: flex;
+  gap: 12px;
+  color: inherit;
+  text-transform: none;
+}
+
+.game-screen .emote-picker.reaction-picker .reaction-picker__title {
+  color: var(--table-copy);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+  text-transform: none;
+}
+
+.game-screen .reaction-picker .emote-picker__grid.reaction-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(44px, 1fr));
+  gap: 6px;
+}
+
+.game-screen .reaction-picker .emote-picker__item.reaction-picker__emoji {
+  width: 100%;
+  min-width: 44px;
+  min-height: 50px;
+  padding: 5px;
+  border-radius: 13px;
+  background: rgba(241, 229, 199, 0.065);
+}
+
+.game-screen .emote-picker.reaction-picker .reaction-picker__panel {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.game-screen .emote-feedback.reaction-feedback--emoji {
+  filter: drop-shadow(0 15px 25px rgba(6, 25, 18, 0.38));
+}
+
+.game-screen .reaction-feedback--emoji .emote-feedback__name {
+  border: 1px solid var(--table-line-strong);
+  border-radius: 999px;
+  color: var(--table-copy);
+  background: #17392d;
+}
+
+@media (max-width: 540px) {
+  .game-screen .emote-picker.reaction-picker {
+    top: max(58px, calc(env(safe-area-inset-top) + 48px));
+    right: 8px;
+    bottom: auto;
+    left: 8px;
+    width: auto;
+    max-height: min(
+      480px,
+      calc(
+        var(--app-viewport-height, 100dvh) - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+      )
+    );
+  }
+}
+
+@media (max-width: 340px) {
+  .game-screen .reaction-picker .emote-picker__grid.reaction-picker__grid { gap: 4px; }
+  .game-screen .reaction-picker .emote-picker__item.reaction-picker__emoji {
+    min-height: 48px;
+    padding: 4px;
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .game-screen .emote-picker.reaction-picker {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: auto;
+    left: auto;
+    width: min(410px, calc(100vw - 16px));
+    max-height: calc(
+      var(--app-viewport-height, 100dvh) - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    );
+  }
+}

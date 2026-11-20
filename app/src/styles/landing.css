@@ -1,0 +1,797 @@
+/* The landing screen: the dealt hero cards, the wordmark, the two modes,
+   and their short entrance and idle motion. */
+
+.landing-screen {
+  --landing-felt: #173d2f;
+  --landing-felt-deep: #0c2b21;
+  --landing-paper: #f1e5c7;
+  --landing-paper-muted: #cbbd9d;
+  --landing-ink: #17241d;
+  --landing-red: #b43c32;
+  --landing-red-dark: #7c2923;
+  --landing-line: rgba(241, 229, 199, 0.22);
+  position: relative;
+  isolation: isolate;
+  overflow-x: hidden;
+  color: var(--landing-paper);
+  /* A lamp-lit table: edge vignette over a fine static grain over the felt. */
+  background:
+    radial-gradient(ellipse 130% 85% at 50% 38%, transparent 52%, rgba(4, 18, 13, 0.6) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.9 0 0 0 0 0.78 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    var(--landing-felt);
+}
+.landing-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 460px;
+  flex: 1 0 auto;
+  margin: 0 auto;
+  padding: clamp(14px, 2.6vh, 24px) 16px 10px;
+  display: grid;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: clamp(16px, 3vh, 26px);
+}
+.landing-brand {
+  min-width: 0;
+  text-align: center;
+}
+.landing-brand__stage {
+  position: relative;
+  width: 100%;
+  /* Taller screens lift the fan further out from behind the wordmark. */
+  height: clamp(170px, 24vh, 200px);
+  height: clamp(170px, 24svh, 200px);
+}
+.landing-brand__stage::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  top: 50%;
+  width: 150%;
+  height: 230%;
+  transform: translate(-50%, -52%);
+  background: radial-gradient(closest-side, rgba(241, 229, 199, 0.17), rgba(241, 229, 199, 0.05) 55%, transparent 100%);
+  pointer-events: none;
+}
+.landing-deal {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 260px;
+  height: 140px;
+  transform: translateX(-50%);
+}
+.landing-dealt-card {
+  position: absolute;
+  top: 0;
+  width: 86px;
+  height: 120px;
+  padding: 8px;
+  overflow: hidden;
+  border: 2px solid var(--landing-ink);
+  border-radius: 8px;
+  color: var(--landing-ink);
+  background: var(--landing-paper);
+  box-shadow: 4px 5px 0 rgba(6, 25, 18, 0.5);
+  text-align: left;
+  --fan: 0deg;
+  --breathe-turn: 0deg;
+  --breathe-lift: 0px;
+  --deal-delay: 0ms;
+  transform: rotate(var(--fan));
+  transform-origin: 50% 100%;
+}
+.landing-dealt-card--back {
+  z-index: 1;
+  left: 28px;
+  top: 14px;
+  color: var(--landing-paper);
+  background: var(--landing-red);
+  --fan: -15deg;
+  --breathe-turn: -1.5deg;
+  --deal-delay: 110ms;
+}
+.landing-dealt-card--back::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 2px solid rgba(241, 229, 199, 0.75);
+  border-radius: 3px;
+}
+.landing-dealt-card--back i {
+  position: absolute;
+  /* Upper part of the card: the wordmark covers the lower part. */
+  inset: 0 0 38% 0;
+  display: grid;
+  place-items: center;
+  font-family: Georgia, serif;
+  font-size: 34px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+}
+.landing-dealt-card--seven {
+  z-index: 2;
+  left: 87px;
+  --fan: -2deg;
+  --breathe-lift: -3px;
+  --deal-delay: 180ms;
+}
+.landing-dealt-card--ten {
+  z-index: 3;
+  left: 146px;
+  top: 12px;
+  color: var(--landing-red);
+  --fan: 13deg;
+  --breathe-turn: 1.5deg;
+  --deal-delay: 250ms;
+}
+/* Face-card indices only: the back's monogram keeps its own centred layout. */
+.landing-dealt-card b,
+.landing-dealt-card:not(.landing-dealt-card--back) > i {
+  position: relative;
+  display: block;
+  font-style: normal;
+  line-height: 1;
+}
+.landing-dealt-card b {
+  font-size: 24px;
+  letter-spacing: -0.06em;
+}
+.landing-dealt-card:not(.landing-dealt-card--back) > i {
+  margin-top: 1px;
+  font-size: 18px;
+}
+.landing-wordmark-lockup {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 0;
+  width: max-content;
+  max-width: calc(100% - 2px);
+  padding: 6px 12px 9px;
+  border: 3px solid var(--landing-ink);
+  color: var(--landing-ink);
+  background: var(--landing-paper);
+  box-shadow: 5px 6px 0 rgba(6, 25, 18, 0.58);
+  transform: translateX(-50%) rotate(-1deg);
+}
+.landing-wordmark-lockup > span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--landing-red-dark);
+  font-size: 9px;
+  line-height: 11px;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.brand-wordmark {
+  color: var(--landing-ink);
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif;
+  font-size: clamp(44px, 14.8vw, 58px);
+  line-height: 0.88;
+  font-weight: 950;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.landing-wordmark-lockup::after {
+  content: '';
+  position: absolute;
+  width: 44%;
+  height: 5px;
+  right: 10px;
+  bottom: -3px;
+  background: var(--landing-red);
+}
+.landing-copy {
+  max-width: 355px;
+  margin: 11px auto 0;
+  color: var(--landing-paper);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 650;
+}
+.landing-menu {
+  width: 100%;
+  max-width: 410px;
+  margin: 0 auto;
+}
+.landing-menu h2 {
+  margin: 0 0 10px;
+  color: var(--landing-paper);
+  font-size: 22px;
+  line-height: 27px;
+  font-weight: 850;
+  letter-spacing: -0.025em;
+}
+.landing-actions {
+  display: grid;
+  gap: 14px;
+}
+/* The caption stays a sibling of the button so the button keeps its exact
+   accessible name; it is laid over the button's second line instead. These
+   three sizes keep the two in step wherever the button is resized. */
+.landing-mode-choice {
+  --mode-height: 70px;
+  --mode-title-line: 24px;
+  --mode-caption-line: 16px;
+  --mode-icon-width: 36px;
+  --mode-gap: 13px;
+  position: relative;
+  min-width: 0;
+}
+.landing-mode-button {
+  --mode-drop-x: 4px;
+  --mode-drop-y: 5px;
+  width: 100%;
+  min-height: var(--mode-height);
+  padding: 8px 14px 8px 13px;
+  display: grid;
+  grid-template-columns: var(--mode-icon-width) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--mode-gap);
+  border: 2px solid var(--landing-ink);
+  border-radius: 10px;
+  font-size: 20px;
+  line-height: var(--mode-title-line);
+  font-weight: 900;
+  letter-spacing: -0.015em;
+  text-align: left;
+  transition: transform 90ms ease;
+}
+/* Card back: red with the same inner cream line as the dealt card. */
+.landing-mode-choice--online .landing-mode-button {
+  color: var(--landing-paper);
+  background: var(--landing-red);
+  box-shadow:
+    inset 0 0 0 4px var(--landing-red),
+    inset 0 0 0 5.5px rgba(241, 229, 199, 0.6),
+    var(--mode-drop-x) var(--mode-drop-y) 0 rgba(6, 25, 18, 0.62);
+}
+/* Card face: cream paper with ink type. */
+.landing-mode-choice--offline .landing-mode-button {
+  color: var(--landing-ink);
+  background: var(--landing-paper);
+  box-shadow: var(--mode-drop-x) var(--mode-drop-y) 0 rgba(6, 25, 18, 0.62);
+}
+.landing-mode-title {
+  padding-bottom: calc(var(--mode-caption-line) + 2px);
+}
+.landing-mode-choice > p {
+  position: absolute;
+  top: calc((var(--mode-height) + var(--mode-title-line) + 2px - var(--mode-caption-line)) / 2);
+  left: calc(15px + var(--mode-icon-width) + var(--mode-gap));
+  right: 62px;
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: var(--mode-caption-line);
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  transition: transform 90ms ease;
+}
+.landing-mode-choice--online > p {
+  color: var(--landing-paper);
+}
+.landing-mode-choice--offline > p {
+  color: #4c5a52;
+}
+.landing-mode-button:hover,
+.landing-mode-button:hover + p,
+.landing-rules-button:hover {
+  transform: translateY(-1px);
+}
+.landing-rules-button:active {
+  transform: translate(1px, 1px);
+}
+/* Pressing a mode sinks it into its own shadow. */
+.landing-mode-button:active {
+  --mode-drop-x: 1px;
+  --mode-drop-y: 1px;
+}
+.landing-mode-button:active,
+.landing-mode-button:active + p {
+  transform: translate(3px, 4px);
+}
+.landing-mode-button:focus-visible,
+.landing-rules-button:focus-visible,
+.landing-links button:focus-visible,
+.landing-about-close:focus-visible {
+  outline: 3px solid var(--landing-paper);
+  outline-offset: 3px;
+}
+.landing-rules-button:focus-visible,
+.landing-links button:focus-visible {
+  box-shadow: none;
+}
+/* The About card is paper, so a paper outline would vanish against it. */
+.landing-about-close:focus-visible {
+  outline-color: var(--landing-ink);
+}
+/* A small playing card rather than a square chip. */
+.landing-mode-suit {
+  width: var(--mode-icon-width);
+  height: calc(var(--mode-icon-width) * 4 / 3);
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--landing-ink);
+  border-radius: 5px;
+  color: var(--landing-ink);
+  background: var(--landing-paper);
+  box-shadow: 2px 2px 0 rgba(6, 25, 18, 0.45);
+  font-family: Georgia, serif;
+  font-size: 24px;
+  line-height: 1;
+  transform: rotate(-6deg);
+}
+.landing-mode-choice--offline .landing-mode-suit {
+  color: var(--landing-red);
+}
+.landing-mode-arrow {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--landing-paper);
+  background: var(--landing-ink);
+  font-size: 17px;
+  line-height: 1;
+}
+.landing-rules-button {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 17px;
+  padding: 0 12px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--landing-line);
+  border-radius: 8px;
+  color: var(--landing-paper);
+  background: transparent;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 800;
+  text-align: left;
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+.landing-rules-button:hover {
+  border-color: rgba(241, 229, 199, 0.52);
+}
+.landing-rules-button > span:first-child {
+  color: var(--landing-paper-muted);
+  font-family: Georgia, serif;
+  font-size: 18px;
+}
+.landing-rules-button > span:last-child {
+  color: var(--landing-paper-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+.landing-footer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 460px;
+  min-height: 48px;
+  margin: 0 auto;
+  padding-inline: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid rgba(241, 229, 199, 0.1);
+}
+.landing-footer-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-block: 10px;
+}
+.landing-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.landing-links button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--landing-paper-muted);
+  background: transparent;
+  font-size: 11px;
+  line-height: 15px;
+  font-weight: 700;
+  transition: color 120ms ease;
+}
+.landing-links button:hover {
+  color: var(--landing-paper);
+}
+.landing-about-card {
+  width: 100%;
+  max-width: 340px;
+  padding: 24px;
+  border: 3px solid var(--landing-ink);
+  border-radius: 10px;
+  color: var(--landing-ink);
+  background: var(--landing-paper);
+  box-shadow: 6px 7px 0 rgba(6, 25, 18, 0.65);
+  text-align: center;
+}
+.landing-about-card h2 {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif;
+  font-size: 38px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.landing-about-card p {
+  margin-top: 10px;
+  color: #48544d;
+  font-size: 14px;
+  line-height: 20px;
+}
+.landing-about-close {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 18px;
+  border: 2px solid var(--landing-ink);
+  border-radius: 8px;
+  color: var(--landing-paper);
+  background: var(--landing-red);
+  box-shadow:
+    inset 0 0 0 3px var(--landing-red),
+    inset 0 0 0 4.5px rgba(241, 229, 199, 0.6),
+    4px 5px 0 rgba(23, 36, 29, 0.34);
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: transform 90ms ease;
+}
+.landing-about-close:active {
+  box-shadow:
+    inset 0 0 0 3px var(--landing-red),
+    inset 0 0 0 4.5px rgba(241, 229, 199, 0.6),
+    1px 1px 0 rgba(23, 36, 29, 0.34);
+  transform: translate(3px, 4px);
+}
+
+@media (max-width: 340px) {
+  .landing-content {
+    padding-inline: 12px;
+  }
+  .landing-brand__stage {
+    height: 158px;
+  }
+  .brand-wordmark {
+    font-size: 43px;
+  }
+  .landing-wordmark-lockup {
+    padding-inline: 9px;
+  }
+  .landing-rules-button > span:last-child {
+    font-size: 9px;
+  }
+  .landing-mode-choice > p {
+    font-size: 11px;
+  }
+  .landing-links button {
+    padding-inline: 6px;
+  }
+}
+
+@media (max-height: 620px) and (orientation: portrait) {
+  .landing-content {
+    padding-top: 8px;
+    padding-bottom: 6px;
+    gap: 11px;
+  }
+  .landing-brand__stage {
+    height: 132px;
+  }
+  .landing-deal {
+    top: -2px;
+    transform: translateX(-50%) scale(0.82);
+    transform-origin: top center;
+  }
+  .landing-wordmark-lockup {
+    padding-block: 4px 7px;
+  }
+  .brand-wordmark {
+    font-size: clamp(41px, 13.8vw, 49px);
+  }
+  .landing-copy {
+    max-width: 320px;
+    margin-top: 7px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .landing-menu h2 {
+    margin-bottom: 7px;
+    font-size: 19px;
+    line-height: 23px;
+  }
+  .landing-actions {
+    gap: 10px;
+  }
+  .landing-mode-choice {
+    --mode-height: 58px;
+    --mode-title-line: 20px;
+    --mode-caption-line: 13px;
+    --mode-icon-width: 29px;
+    --mode-gap: 11px;
+  }
+  .landing-mode-button {
+    padding-block: 6px;
+    font-size: 17px;
+  }
+  .landing-mode-suit {
+    font-size: 19px;
+  }
+  .landing-mode-arrow {
+    width: 28px;
+    height: 28px;
+    font-size: 15px;
+  }
+  .landing-mode-choice > p {
+    right: 56px;
+    font-size: 11px;
+  }
+  .landing-rules-button {
+    min-height: 44px;
+    margin-top: 12px;
+  }
+  .landing-footer {
+    min-height: 44px;
+  }
+}
+
+@media (orientation: landscape) and (min-width: 620px) and (max-height: 540px), (min-width: 760px) {
+  .landing-content {
+    max-width: 920px;
+    padding: 12px clamp(20px, 4vw, 38px) 8px;
+    /* Both columns must be allowed to shrink inside landscape safe areas.
+       Fixed minima clip the actions on 667px phones with side insets. */
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    grid-template-rows: auto;
+    align-items: center;
+    column-gap: clamp(28px, 6vw, 72px);
+  }
+  .landing-brand {
+    grid-column: 1;
+  }
+  /* The brand column is under half the viewport here, so the phone sizing
+     (driven by full viewport width) would run the wordmark out of its box. */
+  .brand-wordmark {
+    font-size: clamp(38px, 6.2vw, 58px);
+  }
+  .landing-menu {
+    grid-column: 2;
+    max-width: 420px;
+  }
+  .landing-footer {
+    max-width: 920px;
+  }
+}
+
+@media (orientation: landscape) and (min-width: 620px) and (max-height: 400px) {
+  .landing-brand__stage {
+    height: 128px;
+  }
+  .landing-deal {
+    transform: translateX(-50%) scale(0.78);
+    transform-origin: top center;
+  }
+  .landing-wordmark-lockup {
+    padding-block: 4px 7px;
+  }
+  .brand-wordmark {
+    font-size: min(43px, 6.2vw);
+  }
+  .landing-copy {
+    margin-top: 7px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .landing-menu h2 {
+    margin-bottom: 6px;
+    font-size: 19px;
+    line-height: 23px;
+  }
+  .landing-actions {
+    gap: 9px;
+  }
+  .landing-mode-choice {
+    --mode-height: 56px;
+    --mode-title-line: 20px;
+    --mode-caption-line: 13px;
+    --mode-icon-width: 28px;
+    --mode-gap: 11px;
+  }
+  .landing-mode-button {
+    padding-block: 5px;
+    font-size: 17px;
+  }
+  .landing-mode-suit {
+    font-size: 18px;
+  }
+  .landing-mode-arrow {
+    width: 28px;
+    height: 28px;
+    font-size: 15px;
+  }
+  .landing-mode-choice > p {
+    right: 56px;
+    font-size: 11px;
+  }
+  .landing-rules-button {
+    min-height: 44px;
+    margin-top: 11px;
+  }
+  .landing-footer {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 900px) and (min-height: 600px) {
+  .landing-brand__stage {
+    height: 208px;
+  }
+  .landing-deal {
+    transform: translateX(-50%) scale(1.16);
+    transform-origin: top center;
+  }
+  .brand-wordmark {
+    /* The widest size the brand column holds without the text leaving its box. */
+    font-size: 60px;
+  }
+  .landing-copy {
+    margin-top: 14px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+}
+
+/* Landing motion. One short deal when the screen arrives, then a single slow
+   rhythm while it waits: the fan breathes and the primary arrow nudges once
+   per cycle. Everything runs on transform and opacity only.
+
+   The entrance animations fill backwards, not forwards: once they finish they
+   stop applying, so hover and press transforms keep working. The idle loops
+   use the individual rotate/translate properties so they add to an element's
+   own transform instead of replacing it; a browser without them simply shows
+   the still layout. */
+.landing-screen {
+  --landing-ease-land: cubic-bezier(0.16, 1, 0.3, 1);
+  --landing-ease-settle: cubic-bezier(0.34, 1.3, 0.4, 1);
+  --landing-idle: 6.5s;
+}
+
+/* The plaque lands first; the cards are dealt up from behind it. */
+.landing-wordmark-lockup {
+  animation: landing-plaque-land 340ms var(--landing-ease-settle) backwards;
+}
+.landing-wordmark-lockup::after {
+  transform-origin: 0 50%;
+  animation: landing-rule-draw 460ms var(--landing-ease-land) 420ms backwards;
+}
+.landing-dealt-card {
+  animation:
+    landing-deal-in 540ms var(--landing-ease-settle) var(--deal-delay) backwards,
+    landing-fan-breathe var(--landing-idle) ease-in-out 1200ms infinite;
+}
+
+.landing-copy,
+.landing-menu h2,
+.landing-mode-choice,
+.landing-rules-button,
+.landing-footer {
+  animation: landing-rise 400ms var(--landing-ease-land) var(--rise-delay, 0ms) backwards;
+}
+.landing-copy { --rise-delay: 200ms; }
+.landing-menu h2 { --rise-delay: 250ms; }
+.landing-mode-choice--online { --rise-delay: 300ms; }
+.landing-mode-choice--offline { --rise-delay: 360ms; }
+.landing-rules-button { --rise-delay: 420ms; }
+.landing-footer {
+  --rise-delay: 480ms;
+  animation-name: landing-fade;
+}
+
+.landing-mode-choice--online .landing-mode-arrow {
+  animation: landing-arrow-nudge var(--landing-idle) ease-in-out 1200ms infinite;
+}
+
+/* Touching a mode straightens its little card and leans the arrow forward. */
+.landing-mode-suit,
+.landing-mode-arrow {
+  transition: transform 180ms var(--landing-ease-settle);
+}
+.landing-mode-button:active .landing-mode-suit,
+.landing-mode-button:focus-visible .landing-mode-suit {
+  transform: rotate(0deg) translateY(-2px);
+}
+.landing-mode-button:active .landing-mode-arrow,
+.landing-mode-button:focus-visible .landing-mode-arrow {
+  transform: translateX(3px);
+}
+@media (hover: hover) {
+  .landing-mode-button:hover .landing-mode-suit {
+    transform: rotate(0deg) translateY(-2px);
+  }
+  .landing-mode-button:hover .landing-mode-arrow {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes landing-plaque-land {
+  from { transform: translateX(-50%) rotate(-3.5deg) scale(1.06); }
+  to { transform: translateX(-50%) rotate(-1deg) scale(1); }
+}
+@keyframes landing-rule-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes landing-deal-in {
+  from { opacity: 0; transform: translateY(46px) rotate(0deg) scale(0.94); }
+  45% { opacity: 1; }
+  to { opacity: 1; transform: translateY(0) rotate(var(--fan)) scale(1); }
+}
+@keyframes landing-fan-breathe {
+  0%, 100% { rotate: 0deg; translate: 0 0; }
+  50% { rotate: var(--breathe-turn); translate: 0 var(--breathe-lift); }
+}
+@keyframes landing-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes landing-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes landing-arrow-nudge {
+  0%, 80%, 100% { translate: 0 0; }
+  87% { translate: 4px 0; }
+  94% { translate: -1px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-wordmark-lockup,
+  .landing-wordmark-lockup::after,
+  .landing-dealt-card,
+  .landing-copy,
+  .landing-menu h2,
+  .landing-mode-choice,
+  .landing-rules-button,
+  .landing-footer,
+  .landing-mode-choice--online .landing-mode-arrow {
+    animation: none;
+  }
+  .landing-mode-suit,
+  .landing-mode-arrow {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-mode-button,
+  .landing-mode-choice > p,
+  .landing-rules-button,
+  .landing-about-close,
+  .primary-action,
+  .secondary-action,
+  .room-code-action {
+    transition: none;
+  }
+}

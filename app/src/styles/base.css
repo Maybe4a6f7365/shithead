@@ -1,0 +1,44 @@
+/* App-wide base rules, applied right after Tailwind's reset and before its
+   utilities, exactly where Tailwind 3 used to emit them. */
+
+/* Tailwind 3's reset gave every border this colour; Tailwind 4's uses
+   currentColor. Borders drawn here without a colour of their own keep the
+   one they were designed with. */
+*, ::before, ::after, ::backdrop, ::file-selector-button {
+  border-color: #e5e7eb;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  font-family: var(--font-ui);
+}
+
+body {
+  color: var(--color-cream);
+  background: var(--color-felt-deep);
+  touch-action: manipulation;
+}
+
+button, input {
+  font: inherit;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+  outline-offset: 2px;
+}

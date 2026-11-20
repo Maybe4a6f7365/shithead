@@ -1,0 +1,56 @@
+/* The shared primary and secondary actions and the panels they sit on. */
+
+/* Shared modern surfaces and controls. */
+.surface-panel,
+.game-over-card {
+  border: 2px solid var(--color-felt-deep);
+  box-shadow: var(--shadow-surface);
+}
+
+/* Primary and secondary actions share the landing screen's card language:
+   an ink outline, a hard offset shadow, and a press that sinks into it.
+   Primary is the red card back with its inner cream line; secondary is the
+   cream card face. */
+.primary-action,
+.secondary-action {
+  --action-drop-x: 4px;
+  --action-drop-y: 5px;
+  --action-drop-color: rgba(6, 25, 18, 0.62);
+  --action-drop: var(--action-drop-x) var(--action-drop-y) 0 var(--action-drop-color);
+  min-height: 50px;
+  border: 2px solid var(--color-ink);
+  border-radius: var(--radius-button);
+  transition: transform 90ms ease;
+}
+.primary-action {
+  --action-shadow:
+    inset 0 0 0 3px var(--color-burgundy),
+    inset 0 0 0 4.5px rgba(241, 229, 199, 0.6),
+    var(--action-drop);
+  color: var(--color-cream);
+  background: var(--color-burgundy);
+  box-shadow: var(--action-shadow);
+}
+.secondary-action {
+  --action-shadow: var(--action-drop);
+  color: var(--color-ink);
+  background: var(--color-cream);
+  box-shadow: var(--action-shadow);
+}
+.primary-action:active:not(:disabled),
+.secondary-action:active:not(:disabled) {
+  --action-drop-x: 1px;
+  --action-drop-y: 1px;
+  transform: translate(3px, 4px);
+}
+.primary-action:focus-visible,
+.secondary-action:focus-visible { box-shadow: var(--action-shadow), var(--ring-focus); }
+.burn-in-action {
+  width: min(100%, 320px);
+  border: 2px solid #7d6127;
+  border-radius: var(--radius-button);
+  color: #161006;
+  background: var(--color-gold);
+  box-shadow: 3px 4px 0 rgba(6, 25, 18, 0.48);
+}
+.burn-in-action:active { transform: scale(0.98); }

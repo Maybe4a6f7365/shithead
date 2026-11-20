@@ -2,8 +2,9 @@
 // tsconfig intentionally does not include the full Node type surface.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readStylesheet } from './stylesheet'
 
-const css = readFileSync(new URL('../../styles/index.css', import.meta.url), 'utf8')
+const css = readStylesheet()
 const main = readFileSync(new URL('../../main.tsx', import.meta.url), 'utf8')
 const handFan = readFileSync(new URL('../HandFan.tsx', import.meta.url), 'utf8')
 

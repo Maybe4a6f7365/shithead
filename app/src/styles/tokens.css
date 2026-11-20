@@ -1,0 +1,108 @@
+/* Design tokens: the "Last Call" palette, type, spacing, card geometry and
+   motion durations, plus the global reduced-motion switch. */
+
+:root {
+  /* “Last Call”: a physical after-hours card table. Legacy token names are
+     retained as semantic aliases so every phase shares one visual language. */
+  --color-felt: #173d2f;
+  --color-felt-raised: #234b3a;
+  --color-felt-deep: #0c2b21;
+  --color-cream: #f1e5c7;
+  --color-cream-dim: rgba(241, 229, 199, 0.74);
+  --color-ink: #17241d;
+  --color-ink-soft: #566158;
+  --color-burgundy: #b43c32;
+  --color-gold: #d0a64d;
+  --color-gold-bright: #f1e5c7;
+  --color-success: #92b89a;
+  --color-danger: #b43c32;
+  --color-danger-bright: #f08072;
+  --color-muted-felt: #b7aa8e;
+  --color-online: #a7c8aa;
+  --color-hairline: rgba(241, 229, 199, 0.2);
+  --color-scrim: rgba(6, 25, 18, 0.86);
+  --color-card-edge: rgba(23, 36, 29, 0.2);
+  --color-slot-dash: rgba(241, 229, 199, 0.36);
+  --color-joinable: rgba(208, 166, 77, 0.78);
+  --color-surface: #234b3a;
+  --color-surface-solid: #214536;
+  --color-coral-soft: rgba(180, 60, 50, 0.16);
+  --color-teal-soft: rgba(241, 229, 199, 0.1);
+
+  --font-display: Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --tracking-label: 0.08em;
+  --tracking-button: 0.035em;
+  --tracking-code: 0.18em;
+  --tracking-micro: 0.035em;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+
+  --radius-card: calc(var(--card-w) * 0.11);
+  --radius-well: 10px;
+  --radius-button: 8px;
+  --radius-sheet: 14px 14px 0 0;
+
+  --card-ratio: 5 / 7;
+  --card-w: clamp(62px, 20.5vw, 94px);
+  --card-mini-scale: 0.52;
+  --card-rank-size: max(13px, calc(var(--card-w) * 0.22));
+
+  --shadow-card-rest: 3px 4px 0 rgba(6, 25, 18, 0.38), 0 1px 2px rgba(6, 25, 18, 0.3);
+  --shadow-card-raised: 4px 6px 0 rgba(6, 25, 18, 0.46), 0 2px 4px rgba(6, 25, 18, 0.26);
+  --shadow-card-selected: 5px 7px 0 rgba(6, 25, 18, 0.5);
+  --shadow-card-in-pile: 4px 5px 0 rgba(6, 25, 18, 0.42);
+  --shadow-surface: 4px 5px 0 rgba(6, 25, 18, 0.42);
+  --ring-playable: 0 0 0 2px var(--color-cream);
+  --ring-selected: 0 0 0 3px var(--color-gold);
+  --ring-joinable: 0 0 0 2px var(--color-joinable);
+  --ring-invalid: 0 0 0 2px var(--color-danger-bright);
+  --ring-focus: 0 0 0 2px var(--color-felt-deep), 0 0 0 5px var(--color-cream);
+  --card-lift-playable: translateY(-3px);
+  --card-lift-selected: translateY(-11px) scale(1.025);
+
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 260ms;
+  --dur-4: 400ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-settle: cubic-bezier(0.2, 0.9, 0.25, 1.12);
+
+  --z-table: 0;
+  --z-pile: 10;
+  --z-hand: 20;
+  --z-selected: 30;
+  --z-sheet: 60;
+  --z-scrim: 90;
+  --z-overlay: 100;
+  --target-min: 44px;
+  --actionbar-h: 52px;
+}
+
+@media (orientation: landscape), (min-width: 768px) {
+  :root { --card-w: clamp(58px, 16vh, 104px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 1ms;
+    --dur-2: 1ms;
+    --dur-3: 1ms;
+    --dur-4: 1ms;
+    --card-lift-playable: none;
+    --card-lift-selected: none;
+  }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

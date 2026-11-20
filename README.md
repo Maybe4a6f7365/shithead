@@ -511,6 +511,10 @@ At bootstrap, a complete saved online credential resumes directly into its room.
 | `cardStates`, `selection` | Pure rules: how each of the viewer's cards looks and reads, and how a tap changes the selection |
 | `useTransient` | One-shot timers and the passing feed line |
 
+### Stylesheets
+
+`app/src/styles/index.css` is only an ordered list of imports, and that order is the cascade: at equal specificity a later file wins. Tailwind's reset, the app's base rules and Tailwind's utilities come first, unlayered (see the comment in `index.css` for why). Then `tokens.css`, the screens and components in the order they were first designed (`reactions`, `actions`, `landing`, `forms`, `table`), and the design layers that restyle them: `last-call.css` (the shared game language), `quiet-table.css` (the gameplay chrome), `reaction-cascade.css` (the reaction sheet's final say), then `celebrations.css` and `performance.css`. A component can have rules in several of these files, so search the whole folder for its class before changing it. Vitest's CSS contract tests read the stylesheet in this order through `components/__tests__/stylesheet.ts`.
+
 ### Card interaction
 
 - Tapping a card selects it; it never commits immediately.
@@ -839,7 +843,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   │   │   ├── RoomClient.ts          # WebSocket transport and reconnect queue
 │   │   │   └── useMultiplayerRoom.ts  # React lifecycle/session/sequence controller
 │   │   ├── sp/SPSinglePlayer.ts       # Zustand offline controller
-│   │   ├── styles/index.css           # Last Call tokens and responsive layout
+│   │   ├── styles/                    # index.css imports the rest in cascade order: tokens, then design layers
 │   │   ├── worker/                     # HTTP edge, room Durable Object (room/), migration and action helpers
 │   │   ├── App.tsx                     # Mode coordinator and refresh boot routing
 │   │   └── main.tsx                    # React/PWA/Visual Viewport bootstrap

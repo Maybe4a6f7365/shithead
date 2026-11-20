@@ -16,6 +16,7 @@ import { LobbySystemFeedback } from '../MultiplayerGameTable'
 import { BROADCAST_OPTIONS, REACTION_OPTIONS } from '../reactionCatalog'
 import { TableScreen } from '../TableScreen'
 import { canSendReaction, isMatchingSelfBroadcastEcho } from '../table/useTableReactions'
+import { readStylesheet } from './stylesheet'
 
 declare const process: { cwd: () => string }
 
@@ -648,7 +649,7 @@ describe('reaction assets and responsive cascade', () => {
   })
 
   it('keeps the bounded five-column visual-viewport rules last in the cascade', () => {
-    const css = readFileSync(`${process.cwd()}/src/styles/index.css`, 'utf8')
+    const css = readStylesheet()
     const quietLayer = css.indexOf('QUIET TABLE — premium gameplay chrome')
     const legacyPicker = css.indexOf('.game-screen .emote-picker {', quietLayer)
     const finalContract = css.lastIndexOf('Final reaction cascade contract')

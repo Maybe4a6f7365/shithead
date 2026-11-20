@@ -1,8 +1,9 @@
 // @ts-ignore Vitest executes this source contract in Node.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readStylesheet } from './stylesheet'
 
-const css = readFileSync(new URL('../../styles/index.css', import.meta.url), 'utf8')
+const css = readStylesheet()
 const tailwind = readFileSync(new URL('../../../tailwind.config.js', import.meta.url), 'utf8')
 const html = readFileSync(new URL('../../../index.html', import.meta.url), 'utf8')
 const vite = readFileSync(new URL('../../../vite.config.ts', import.meta.url), 'utf8')

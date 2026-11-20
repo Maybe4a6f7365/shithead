@@ -1,5 +1,5 @@
 // ============================================================================
-// Tailwind mirror of the “Last Call” card-table palette in styles/index.css.
+// Tailwind mirror of the “Last Call” card-table palette in styles/tokens.css.
 // ============================================================================
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],

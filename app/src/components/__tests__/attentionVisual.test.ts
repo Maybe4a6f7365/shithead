@@ -1,9 +1,7 @@
-// @ts-ignore Vitest executes this CSS contract test in Node; the browser-only
-// app tsconfig intentionally does not include the full Node type surface.
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { readStylesheet } from './stylesheet'
 
-const css = readFileSync(new URL('../../styles/index.css', import.meta.url), 'utf8')
+const css = readStylesheet()
 const cueStart = css.indexOf('/* ADHD turn cue:')
 const cueEnd = css.indexOf('@media (max-width: 340px)', cueStart)
 const cueCss = css.slice(cueStart, cueEnd)
