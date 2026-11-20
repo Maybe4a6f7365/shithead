@@ -684,7 +684,7 @@ input.modern-input { font-size: 16px; }
   font-size: 12px;
   line-height: 1.2;
   font-weight: 800;
-  letter-spacing: var(--tracking-label);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .game-over-stats-note,
@@ -810,7 +810,7 @@ input.modern-input { font-size: 16px; }
   background: transparent;
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: var(--tracking-button);
+  letter-spacing: 0.035em;
   text-transform: uppercase;
 }
 .game-over-vote-button[data-selected="true"] {
