@@ -1,49 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { RulesSheet } from './RulesSheet'
 import { LegalSheet, type LegalSheetKind } from './LegalSheet'
+import { useModalFocus } from './useModalFocus'
 
 export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: () => void; onPassAndPlay: () => void }) {
   const [rulesOpen, setRulesOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [legalOpen, setLegalOpen] = useState<LegalSheetKind | null>(null)
   const aboutDialogRef = useRef<HTMLDivElement>(null)
-  const aboutCloseRef = useRef<HTMLButtonElement>(null)
   const aboutTriggerRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    if (!aboutOpen) return
-
-    aboutCloseRef.current?.focus()
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setAboutOpen(false)
-        return
-      }
-
-      if (event.key !== 'Tab') return
-      const controls = aboutDialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      )
-      if (!controls?.length) return
-
-      const first = controls[0]
-      const last = controls[controls.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      aboutTriggerRef.current?.focus()
-    }
-  }, [aboutOpen])
+  // Safari does not focus a button on click, so name the trigger outright.
+  useModalFocus(aboutDialogRef, {
+    open: aboutOpen,
+    returnFocus: aboutTriggerRef,
+    onEscape: () => setAboutOpen(false),
+  })
 
   return (
     <div className="app-viewport landing-screen flex flex-col">
@@ -128,7 +99,6 @@ export function LandingScreen({ onPlayOnline, onPassAndPlay }: { onPlayOnline: (
               computer, or play online in a room of up to five.
             </p>
             <button
-              ref={aboutCloseRef}
               type="button"
               onClick={() => setAboutOpen(false)}
               className="landing-about-close"

@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { useBackDismiss } from '../backStack'
+import { useModalFocus } from './useModalFocus'
 
 export type LegalSheetKind = 'privacy' | 'imprint'
 
@@ -10,48 +11,9 @@ export interface LegalSheetProps {
 }
 
 export function LegalSheet({ kind, open, onClose }: LegalSheetProps) {
-  const closeButton = useRef<HTMLButtonElement>(null)
   const dialog = useRef<HTMLElement>(null)
   useBackDismiss(open, onClose)
-  const returnFocus = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    returnFocus.current = document.activeElement as HTMLElement | null
-    closeButton.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      const focusable = Array.from(dialog.current?.querySelectorAll<HTMLElement>('*') ?? [])
-        .filter(element => (
-          element.matches('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')
-          && !element.hasAttribute('hidden')
-        ))
-      if (focusable.length === 0) return
-
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      returnFocus.current?.focus()
-    }
-    // The sheet lifetime is keyed only by `open`; callers commonly pass an
-    // inline close callback, which must not restart focus management.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  useModalFocus(dialog, { open, onEscape: onClose })
 
   if (!open) return null
 
@@ -73,7 +35,6 @@ export function LegalSheet({ kind, open, onClose }: LegalSheetProps) {
             <h2 id={`legal-${kind}-title`} className="sheet-title font-display text-title font-semibold mt-s1">{title}</h2>
           </div>
           <button
-            ref={closeButton}
             type="button"
             onClick={onClose}
             className="sheet-close legal-close"

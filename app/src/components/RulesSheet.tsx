@@ -3,10 +3,11 @@
 // one scrolling body column (§7.5). In-game it covers up to 70dvh and is
 // non-blocking in MP.
 // ============================================================================
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useBackDismiss } from '../backStack'
 import { EASE_SLIDE } from './motion'
+import { useModalFocus } from './useModalFocus'
 
 const SECTIONS: Array<{ title: string; lines: string[] }> = [
   {
@@ -60,45 +61,8 @@ const SECTIONS: Array<{ title: string; lines: string[] }> = [
 export function RulesSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const reduceMotion = useReducedMotion()
   const dialog = useRef<HTMLElement>(null)
-  const closeButton = useRef<HTMLButtonElement>(null)
-  const returnFocus = useRef<HTMLElement | null>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
   useBackDismiss(open, onClose)
-
-  useEffect(() => {
-    if (!open) return
-    returnFocus.current = document.activeElement as HTMLElement | null
-    closeButton.current?.focus()
-
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onCloseRef.current()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>(
-        'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-      ) ?? []).filter(element => !element.hasAttribute('hidden'))
-      if (controls.length === 0) return
-
-      const first = controls[0]
-      const last = controls[controls.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      returnFocus.current?.focus()
-    }
-  }, [open])
+  useModalFocus(dialog, { open, onEscape: onClose })
 
   if (!open) return null
   return (
@@ -127,7 +91,6 @@ export function RulesSheet({ open, onClose }: { open: boolean; onClose: () => vo
             <h2 id="rules-sheet-title" className="sheet-title font-display text-title font-semibold">Rules</h2>
           </div>
           <button
-            ref={closeButton}
             type="button"
             onClick={onClose}
             aria-label="Close"

@@ -28,15 +28,7 @@ import {
 } from './turnAlerts'
 import { gameOverResults } from './gameOverResults'
 import { useWakeLock } from '../useWakeLock'
-
-const focusableSelector = [
-  'button:not([disabled])',
-  'a[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
+import { useModalFocus } from './useModalFocus'
 
 export function LobbySystemFeedback({ event }: { event: SystemEvent | null }) {
   if (event?.kind !== 'player-left') return null
@@ -526,38 +518,7 @@ export function StatePanel({ title, copy, actions }: { title: string; copy: stri
   const titleId = useId()
   const copyId = useId()
 
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
-
-    ;(focusables()[0] ?? dialog).focus()
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return
-      const items = focusables()
-      if (items.length === 0) {
-        event.preventDefault()
-        dialog.focus()
-        return
-      }
-      const first = items[0]
-      const last = items[items.length - 1]
-      const active = document.activeElement
-      if (event.shiftKey && (active === first || !dialog.contains(active))) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', trapFocus)
-    return () => {
-      document.removeEventListener('keydown', trapFocus)
-      if (previouslyFocused?.isConnected) previouslyFocused.focus()
-    }
-  }, [])
+  useModalFocus(dialogRef)
 
   return (
     <div

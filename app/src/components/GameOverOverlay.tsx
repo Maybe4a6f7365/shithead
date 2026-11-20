@@ -4,22 +4,14 @@
 // preserving the compact legacy card. A win gets one short suit burst; nothing
 // loops.
 // ============================================================================
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { SuitBurst } from './WinMoment'
 import { motion, useReducedMotion } from 'framer-motion'
 import type { GameRules } from '../engine'
 import { RoundRulesControl } from './RoundRulesControl'
 import { revealStandings } from './standingsReveal'
 import { EASE_SETTLE, EASE_SLIDE } from './motion'
-
-const focusableSelector = [
-  'button:not([disabled])',
-  'a[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
+import { useModalFocus } from './useModalFocus'
 
 export interface GameOverLeaderboardRow {
   playerId: string
@@ -198,39 +190,7 @@ export function GameOverOverlay({
     }
   }, [hasRows, reduceMotion])
 
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
-    const preferred = dialog.querySelector<HTMLElement>('.game-over-card__actions button:not([disabled])')
-
-    ;(preferred ?? focusables()[0] ?? dialog).focus()
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return
-      const items = focusables()
-      if (items.length === 0) {
-        event.preventDefault()
-        dialog.focus()
-        return
-      }
-      const first = items[0]
-      const last = items[items.length - 1]
-      const active = document.activeElement
-      if (event.shiftKey && (active === first || !dialog.contains(active))) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', trapFocus)
-    return () => {
-      document.removeEventListener('keydown', trapFocus)
-      if (previouslyFocused?.isConnected) previouslyFocused.focus()
-    }
-  }, [])
+  useModalFocus(dialogRef, { initialFocus: '.game-over-card__actions button:not(:disabled)' })
 
   return (
     <div
