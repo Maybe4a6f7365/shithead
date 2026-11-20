@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Vite and Vitest are found through their configs. The Worker entry lives in
+  // ../wrangler.toml, outside this package, so it is named here.
+  "entry": ["src/worker/index.ts", "scripts/*.mjs"],
+  "project": ["src/**/*.{ts,tsx,css}", "scripts/**/*.mjs"],
+  // The browser suite imports app modules in the page, by dev-server URL.
+  "ignoreUnresolved": ["^/src/"]
+}

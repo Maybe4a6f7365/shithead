@@ -30,11 +30,9 @@ export default tseslint.config(
     },
   },
   {
-    // Tests reach for Node built-ins the browser tsconfig does not type, and
-    // feed the code deliberately malformed values.
+    // Tests feed the code deliberately malformed values.
     files: ['src/**/*.test.{ts,tsx}', 'src/**/__tests__/**'],
     rules: {
-      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-ignore': 'allow-with-description' }],
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },

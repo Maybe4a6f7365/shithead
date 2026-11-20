@@ -13,5 +13,6 @@
     "allowImportingTsExtensions": false,
     "resolveJsonModule": true
   },
-  "include": ["src/worker/**/*", "src/engine/**/*"]
+  "include": ["src/worker/**/*", "src/engine/**/*"],
+  "exclude": ["src/**/*.test.ts", "src/**/__tests__"]
 }

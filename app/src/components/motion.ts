@@ -21,7 +21,10 @@ export const EASE_SLIDE_CSS = css(EASE_SLIDE)
 export const EASE_SETTLE: Bezier = [0.34, 1.3, 0.4, 1]
 export const EASE_SETTLE_CSS = css(EASE_SETTLE)
 
-/** Departures: slow start, accelerating away (pile sweep, quartet slam). */
+/**
+ * Departures: slow start, accelerating away (pile sweep, quartet slam).
+ * @public Only the CSS form is in use, but every curve ships in both forms.
+ */
 export const EASE_LEAVE: Bezier = [0.5, 0, 0.9, 0.4]
 export const EASE_LEAVE_CSS = css(EASE_LEAVE)
 

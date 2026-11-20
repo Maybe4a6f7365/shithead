@@ -257,7 +257,7 @@ export function vibrate(pattern: VibratePattern): void {
  * rerendering, changing phase, or receiving another actor's quick follow-up
  * cannot pass the turn-count/actor gate. A first live refresh stays quiet.
  */
-export function shouldStartTurnAlert(
+function shouldStartTurnAlert(
   previous: TurnSnapshot | null,
   next: TurnSnapshot,
   repeatTurnAlertsEnabled = false,

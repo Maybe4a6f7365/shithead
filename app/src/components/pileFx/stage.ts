@@ -162,17 +162,15 @@ export class PileFxStage {
 // ---- Small shared drawing helpers -----------------------------------------
 
 export const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
-export const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount
 export const rand = (min: number, max: number) => min + Math.random() * (max - min)
 export const easeOutCubic = (p: number) => 1 - Math.pow(1 - p, 3)
 export const easeOutQuad = (p: number) => 1 - (1 - p) * (1 - p)
-export const easeInQuad = (p: number) => p * p
 
 /** Progress of `t` through the window [start, end], clamped to 0..1. */
 export const span = (t: number, start: number, end: number) => clamp01((t - start) / (end - start))
 
 /** Trace a rounded rectangle (not every engine in the wild has ctx.roundRect). */
-export function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   const radius = Math.max(0, Math.min(r, w / 2, h / 2))
   ctx.moveTo(x + radius, y)
   ctx.arcTo(x + w, y, x + w, y + h, radius)

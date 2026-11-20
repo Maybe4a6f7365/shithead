@@ -8,8 +8,8 @@ import type { GameState } from '../engine'
 import { EASE_SLIDE_CSS } from './motion'
 
 /** Gap (ms) between one seat being passed and the next. */
-export const SEAT_PASS_STAGGER_MS = 110
-export const SEAT_PASS_MS = 640
+const SEAT_PASS_STAGGER_MS = 110
+const SEAT_PASS_MS = 640
 
 /**
  * The seats an 8 just skipped, in play order. Read off the state the action

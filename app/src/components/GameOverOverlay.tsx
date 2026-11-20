@@ -34,7 +34,7 @@ export interface GameOverLeaderboardRow {
   largestPickup: number
 }
 
-export type RematchVoteChoice = 'yes' | 'no' | 'pending'
+type RematchVoteChoice = 'yes' | 'no' | 'pending'
 
 export interface GameOverRematchVoteRow {
   playerId: string

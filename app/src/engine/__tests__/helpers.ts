@@ -21,7 +21,7 @@ export function c(rank: Rank, suit: Suit | null = '♠', id?: string): Card {
   return { id: id ?? `t-${rank}-${suit ?? 'X'}-${n++}`, suit, rank }
 }
 
-export interface MkPlayer {
+interface MkPlayer {
   id: string
   name?: string
   isAI?: boolean

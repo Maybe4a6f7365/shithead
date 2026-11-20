@@ -1,5 +1,3 @@
-// @ts-ignore Vitest executes this contract test in Node; the browser-only app
-// tsconfig intentionally does not include the full Node type surface.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { readStylesheet } from './stylesheet'

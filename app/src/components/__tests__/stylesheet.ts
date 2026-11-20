@@ -1,7 +1,4 @@
-// @ts-ignore Vitest runs this in Node; the browser-only app tsconfig does not include Node's types.
 import { readFileSync } from 'node:fs'
-
-declare const process: { cwd: () => string }
 
 /**
  * The app's stylesheet as one text, in cascade order: styles/index.css with
@@ -11,6 +8,6 @@ declare const process: { cwd: () => string }
  * import.meta.url is not a file URL.
  */
 export function readStylesheet(file = 'index.css'): string {
-  const css: string = readFileSync(`${process.cwd()}/src/styles/${file}`, 'utf8')
+  const css = readFileSync(`${process.cwd()}/src/styles/${file}`, 'utf8')
   return css.replace(/@import "\.\/([a-z0-9-]+\.css)";/g, (_match: string, name: string) => readStylesheet(name))
 }

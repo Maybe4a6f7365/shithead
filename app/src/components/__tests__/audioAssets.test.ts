@@ -1,7 +1,4 @@
-// @ts-ignore Vitest executes this asset contract in Node; the browser-only
-// tsconfig intentionally does not include the full Node type surface.
 import { createHash } from 'node:crypto'
-// @ts-ignore See note above.
 import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
@@ -17,7 +14,7 @@ function audioBytes(file: string) {
 
 describe('turn alert audio assets', () => {
   it('ships the expected gabber and metadata-stripped chime recordings', () => {
-    expect(readdirSync(audioRoot).filter((file: string) => file.endsWith('.mp3')).sort()).toEqual([
+    expect(readdirSync(audioRoot).filter(file => file.endsWith('.mp3')).sort()).toEqual([
       'adhd-beat.mp3',
       'turn-notification.mp3',
     ])

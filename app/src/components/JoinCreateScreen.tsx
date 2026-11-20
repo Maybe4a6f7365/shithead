@@ -4,7 +4,7 @@
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
 import { createRoom } from '../net/useMultiplayerRoom'
-import { loadSavedName, saveName } from './NameField'
+import { loadSavedName, saveName } from './savedName'
 import { androidIntentUrl, canHandOffToAndroidApp } from './openInApp'
 import { inviteUrl } from './WaitingRoom'
 

@@ -4,10 +4,9 @@ import {
   CUSTOM_MESSAGE_BURST_LIMIT,
   CUSTOM_MESSAGE_BURST_WINDOW_MS,
   ONDRA_MESSAGE_IDS,
-} from '../protocol'
+} from '../../engine/protocol'
 import {
   acceptedReactionAt,
-  createSeededRandom,
   isOndraLikeName,
   normalizeStoredPendingOndraEvent,
   normalizeTableName,
@@ -16,7 +15,7 @@ import {
   resolvePendingOndraEvent,
   scheduleOndraEventForPlayTransition,
   selectOndraMessageId,
-} from '../../worker/tableMessages'
+} from '../tableMessages'
 
 describe('table message easter eggs', () => {
   it('normalizes accents, case, punctuation, and the narrow leet mapping', () => {
@@ -53,12 +52,6 @@ describe('table message easter eggs', () => {
     expect(selectOndraMessageId(() => 0)).toBe(ONDRA_MESSAGE_IDS[0])
     expect(selectOndraMessageId(() => 0.999999)).toBe(ONDRA_MESSAGE_IDS.at(-1))
     expect(selectOndraMessageId(() => Number.NaN)).toBe(ONDRA_MESSAGE_IDS[0])
-  })
-
-  it('provides reproducible seeded selection', () => {
-    const first = createSeededRandom(42)
-    const second = createSeededRandom(42)
-    expect(Array.from({ length: 12 }, first)).toEqual(Array.from({ length: 12 }, second))
   })
 
   it('does not roll when no Ondra-like player exists', () => {

@@ -8,7 +8,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import { useSPGame } from '../sp/SPSinglePlayer'
 import { DEFAULT_GAME_RULES, type GameRules } from '../engine'
-import { loadSavedName, saveName } from './NameField'
+import { loadSavedName, saveName } from './savedName'
 import { RoundRulesControl } from './RoundRulesControl'
 
 interface PlayerConfig {

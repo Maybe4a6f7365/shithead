@@ -194,7 +194,7 @@ export type OndraMessageId = typeof ONDRA_MESSAGE_IDS[number]
  * constructed client-side, where the roster is already at hand. Clients never
  * send them — the `hasOnlyKeys` allowlists in `isClientMsg` reject any attempt.
  */
-export interface SpeakerAttribution {
+interface SpeakerAttribution {
   playerName?: string
   role?: ViewerRole
 }
@@ -324,12 +324,12 @@ export interface SpectatorIdentity {
   disconnectedAt?: number
 }
 
-export interface RematchVoteSummary {
+interface RematchVoteSummary {
   playerId: string
   vote: 'yes' | 'no' | 'pending'
 }
 
-export type ErrorCode =
+type ErrorCode =
   | 'INVALID_CODE'
   | 'ROOM_FULL'
   | 'SESSION_EXPIRED'
@@ -365,7 +365,7 @@ const isRulesPatch = (value: unknown): value is Partial<GameRules> => {
   })
 }
 
-export const isEmoteId = (value: unknown): value is EmoteId =>
+const isEmoteId = (value: unknown): value is EmoteId =>
   typeof value === 'string' && (EMOTE_IDS as readonly string[]).includes(value)
 
 export const isBroadcastId = (value: unknown): value is BroadcastId =>

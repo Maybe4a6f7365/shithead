@@ -86,10 +86,3 @@ export function useBackDismiss(open: boolean, onDismiss: () => void, rearmKey: u
     return pushBackHandler(() => latest.current())
   }, [open, rearmKey])
 }
-
-/** Test seam: forget every registration without touching history. */
-export function resetBackStackForTests() {
-  handlers.length = 0
-  sentinelArmed = false
-  disarming = false
-}

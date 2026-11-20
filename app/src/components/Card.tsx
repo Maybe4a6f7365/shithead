@@ -37,7 +37,7 @@ export function pileTilt(id: string): number {
   return (normalized / 100) * 5 - 2.5
 }
 
-export function cardAriaLabel(card: CardT | undefined, faceDown: boolean | undefined, hint?: string): string {
+function cardAriaLabel(card: CardT | undefined, faceDown: boolean | undefined, hint?: string): string {
   if (faceDown || !card) return hint ? `Face-down card, ${hint}` : 'Face-down card'
   const base = card.rank === 'JOKER'
     ? 'Joker'

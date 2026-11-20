@@ -39,7 +39,7 @@ export interface BlindTimeline {
 }
 
 /** Length (ms) of the reveal, including the hand-off beat before onDone. */
-export const BLIND_DONE_PAD_MS = 40
+const BLIND_DONE_PAD_MS = 40
 export function blindRevealMs(success: boolean): number {
   return (success ? 900 : 1280) + BLIND_DONE_PAD_MS
 }

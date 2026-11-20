@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @ts-ignore Vitest exposes Node built-ins for this source/asset contract.
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -17,8 +16,6 @@ import { BROADCAST_OPTIONS, REACTION_OPTIONS } from '../reactionCatalog'
 import { TableScreen } from '../TableScreen'
 import { canSendReaction, isMatchingSelfBroadcastEcho } from '../table/useTableReactions'
 import { readStylesheet } from './stylesheet'
-
-declare const process: { cwd: () => string }
 
 beforeAll(() => {
   class ResizeObserverMock {
@@ -639,7 +636,7 @@ describe('reaction assets and responsive cascade', () => {
     const reactionsDir = `${process.cwd()}/public/reactions`
     const files = readdirSync(reactionsDir)
     expect(REACTION_OPTIONS).toHaveLength(28)
-    expect(files.filter((file: string) => file.endsWith('.svg'))).toHaveLength(28)
+    expect(files.filter(file => file.endsWith('.svg'))).toHaveLength(28)
     for (const option of REACTION_OPTIONS) {
       expect(existsSync(`${process.cwd()}/public${option.asset}`)).toBe(true)
     }

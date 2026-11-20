@@ -139,7 +139,7 @@ export function emitSoundDebounced(name: SoundName) {
 }
 
 /** Map one GameEvent to its sound (§8 table). */
-export function soundForEvent(ev: GameEvent): SoundName | null {
+function soundForEvent(ev: GameEvent): SoundName | null {
   switch (ev.type) {
     case 'PLAY_CARDS': return ev.cards.length > 1 ? 'play_multi' : 'play'
     case 'PICK_UP_PILE': return 'pickup'

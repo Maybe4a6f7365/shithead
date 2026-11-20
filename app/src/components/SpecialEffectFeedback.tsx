@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import type { GameEvent, Rank } from '../engine'
 import { EASE_LAND } from './motion'
 
-export type SpecialEffectKind = 'burn' | 'reset' | 'mirror' | 'low' | 'skip'
+type SpecialEffectKind = 'burn' | 'reset' | 'mirror' | 'low' | 'skip'
 
 export interface SpecialEffect {
   key: number

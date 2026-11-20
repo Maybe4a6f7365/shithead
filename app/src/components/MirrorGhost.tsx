@@ -10,8 +10,8 @@ import type { Card as CardT } from '../engine'
 import { Card } from './Card'
 
 /** Timeline (ms): wait for the 3 to land, ghost in, hold, fade. */
-export const MIRROR_DELAY_MS = 240
-export const MIRROR_DURATION_MS = 950
+const MIRROR_DELAY_MS = 240
+const MIRROR_DURATION_MS = 950
 
 export function MirrorGhost({ source }: { source: CardT }) {
   const ref = useRef<HTMLDivElement>(null)

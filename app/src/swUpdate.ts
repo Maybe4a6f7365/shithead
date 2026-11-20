@@ -7,7 +7,7 @@
 // ============================================================================
 
 export const AUTO_RELOAD_COOLDOWN_MS = 60_000
-export const AUTO_RELOAD_STORAGE_KEY = 'shithead:sw-auto-reload-at'
+const AUTO_RELOAD_STORAGE_KEY = 'shithead:sw-auto-reload-at'
 const UPDATE_CHECK_MS = 60 * 60 * 1000
 
 /**

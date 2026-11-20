@@ -23,7 +23,7 @@ import { RoomClient, buildRoomWSUrl, getDefaultServerURL } from './RoomClient'
 export type RoomStatus =
   | 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'restored' | 'offline'
 
-export type RoomErrorKind =
+type RoomErrorKind =
   | 'invalid-room' | 'room-full' | 'server-error' | 'session-expired' | 'host-unavailable' | 'game-in-progress'
 
 export interface RoomError { kind: RoomErrorKind; message: string }

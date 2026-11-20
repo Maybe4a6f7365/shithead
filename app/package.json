@@ -14,13 +14,15 @@
     "test:coverage": "vitest run --coverage",
     "generate:build-meta": "node scripts/write-build-meta.mjs",
     "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "typecheck:node": "tsc -p tsconfig.node.json",
     "deploy:build": "npm run generate:build-meta && npm run typecheck:worker && npm run build",
     "worker:dev": "wrangler dev --local --config ../wrangler.toml",
     "test:worker:adversarial": "node scripts/test-worker-adversarial.mjs",
     "worker:deploy": "npm run deploy:build && wrangler deploy --config ../wrangler.toml",
     "worker:tail": "wrangler tail --config ../wrangler.toml",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "deadcode": "knip",
+    "typecheck": "tsc --noEmit && npm run typecheck:worker && npm run typecheck:node"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -35,6 +37,7 @@
     "@tailwindcss/postcss": "^4.3.5",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
@@ -44,6 +47,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.14.0",
     "jsdom": "^31.0.1",
+    "knip": "^6.46.1",
     "playwright": "1.63.0",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.5",
@@ -52,7 +56,8 @@
     "vite": "^8.3.8",
     "vite-plugin-pwa": "^2.0.0",
     "vitest": "^5.1.0",
-    "wrangler": "^4.163.0"
+    "wrangler": "^4.163.0",
+    "ws": "^8.23.0"
   },
   "engines": {
     "node": ">=22.12"

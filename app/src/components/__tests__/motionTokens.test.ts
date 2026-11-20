@@ -1,4 +1,3 @@
-// @ts-ignore Vitest executes this source contract in Node.
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import * as motionTokens from '../motion'
@@ -19,9 +18,9 @@ describe('shared motion curves', () => {
   it('has no hand-written easing curve left in any component', () => {
     const dir = new URL('../', import.meta.url)
     const offenders: string[] = []
-    for (const file of readdirSync(dir) as string[]) {
+    for (const file of readdirSync(dir)) {
       if (!/\.tsx?$/.test(file) || file === 'motion.ts') continue
-      ;(readFileSync(new URL(file, dir), 'utf8') as string).split('\n').forEach((line, index) => {
+      readFileSync(new URL(file, dir), 'utf8').split('\n').forEach((line, index) => {
         const code = line.replace(/\/\/.*$/, '')
         if (/cubic-bezier\(/.test(code) || /ease:\s*\[\s*[\d.]/.test(code)) offenders.push(`${file}:${index + 1}`)
       })

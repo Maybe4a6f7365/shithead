@@ -1,4 +1,3 @@
-// @ts-ignore Vitest executes this source contract in Node.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { readStylesheet } from './stylesheet'

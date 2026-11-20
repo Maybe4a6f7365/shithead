@@ -13,13 +13,13 @@ export interface FeedContext {
 
 const SUIT_NAME: Record<string, string> = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
 
-export function cardName(c: Card): string {
+function cardName(c: Card): string {
   if (c.rank === 'JOKER') return 'the Joker'
   const rank = { A: 'Ace', J: 'Jack', Q: 'Queen', K: 'King' }[c.rank as string] ?? c.rank
   return `the ${rank} of ${c.suit ? SUIT_NAME[c.suit] : 'unknown suit'}`
 }
 
-export function actorName(ctx: FeedContext, playerId: string): string {
+function actorName(ctx: FeedContext, playerId: string): string {
   if (playerId === ctx.meId) return 'You'
   return ctx.players.find(p => p.id === playerId)?.name ?? 'Someone'
 }
@@ -133,10 +133,4 @@ export function feedLine(state: GameState, ctx: FeedContext): { text: string; ke
     default:
       return null
   }
-}
-
-/** Assertive-channel text for an event that needs it, else null. */
-export function announceEvent(state: GameState, ctx: FeedContext): string | null {
-  const line = feedLine(state, ctx)
-  return line ? line.text : null
 }

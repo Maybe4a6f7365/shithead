@@ -59,18 +59,6 @@ export function isOndraLikeName(name: string): boolean {
   return ONDRA_NAMES.some(candidate => isOneEditAway(normalized, candidate))
 }
 
-/** Deterministic pseudo-random source for unit tests and reproducible previews. */
-export function createSeededRandom(seed: number): RandomSource {
-  let state = seed >>> 0
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0
-    let value = state
-    value = Math.imul(value ^ (value >>> 15), value | 1)
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
-    return ((value ^ (value >>> 14)) >>> 0) / 0x1_0000_0000
-  }
-}
-
 export function selectOndraMessageId(random: RandomSource = Math.random): OndraMessageId {
   const draw = random()
   const index = Number.isFinite(draw)
@@ -120,7 +108,7 @@ export function scheduleOndraEventForPlayTransition(
   }
 }
 
-export type OndraSystemFrame = Extract<ServerMsg, { type: 'SYSTEM_EVENT' }>
+type OndraSystemFrame = Extract<ServerMsg, { type: 'SYSTEM_EVENT' }>
 
 export interface PendingOndraResolution {
   pending: PendingOndraEvent | null

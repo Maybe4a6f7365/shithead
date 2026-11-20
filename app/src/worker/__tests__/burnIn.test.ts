@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { applyInterruptBurnRequest, canonicalCards } from '../../worker/gameActions'
-import { c, mkState } from './helpers'
+import { applyInterruptBurnRequest, canonicalCards } from '../gameActions'
+import { c, mkState } from '../../engine/__tests__/helpers'
 
 describe('worker BURN_IN boundary', () => {
   it('resolves an opaque blind alias to the authoritative face-down card', () => {

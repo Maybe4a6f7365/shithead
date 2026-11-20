@@ -184,8 +184,8 @@ export type GameEvent =
 
 // ---------- Constants ----------
 
-export const SUITS: Suit[] = ['♠', '♥', '♦', '♣']
-export const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
+const SUITS: Suit[] = ['♠', '♥', '♦', '♣']
+const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
 
 export const DEFAULT_GAME_RULES: Readonly<GameRules> = Object.freeze({
   includeJokers: true,
@@ -267,10 +267,6 @@ function makeStandardDeck(includeJokers: boolean, rng: () => number, used: Set<s
   return cards
 }
 
-export function makeDeck(includeJokers = true, rng: () => number = Math.random): Card[] {
-  return makeStandardDeck(includeJokers, rng, new Set<string>())
-}
-
 /** Build 1-3 complete decks while keeping opaque card IDs unique globally. */
 export function makeDecks(
   includeJokers = true,
@@ -313,7 +309,7 @@ export function canPlay(card: Card, topRank: Rank | null): boolean {
   return RANK_ORDER[card.rank] >= RANK_ORDER[topRank]
 }
 
-export function isClearCard(card: Card): boolean {
+function isClearCard(card: Card): boolean {
   return card.rank === '10' || card.rank === 'JOKER'
 }
 
@@ -1293,10 +1289,6 @@ export function pickAIMove(
 }
 
 // ---------- Helpers ----------
-
-export function getCurrentPlayer(state: GameState): Player | null {
-  return state.players[state.currentPlayerIdx] ?? null
-}
 
 /** Physical visible top card of the pile (skips legacy cleared entries). */
 export function getTopCard(state: GameState): Card | null {

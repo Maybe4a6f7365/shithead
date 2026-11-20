@@ -33,11 +33,10 @@ jobs:
         run: npm install --global npm@11.19.0 --no-audit --no-fund
       - run: npm ci
       - run: npm run lint
+      - run: npm run deadcode
       - run: npm test
       - run: npm run typecheck:worker
       - run: npm run build
-      - name: Install WebSocket adversarial-test client
-        run: npm install --no-save --no-package-lock ws@8
       - name: Exercise the local Worker adversarially
         timeout-minutes: 20
         shell: bash
@@ -110,8 +109,6 @@ jobs:
       - name: Use current npm
         run: npm install --global npm@11.19.0 --no-audit --no-fund
       - run: npm ci
-      - name: Install WebSocket smoke-test client
-        run: npm install --no-save --no-package-lock ws@8
       - name: Exercise production multiplayer end to end
         run: node scripts/smoke-multiplayer.mjs
         env:

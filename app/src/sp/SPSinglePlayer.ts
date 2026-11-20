@@ -105,7 +105,7 @@ export function needsPassGate(
 }
 
 /** Special cards are the strongest public endgame cards for the simple AI. */
-export function finalCardScore(card: Card): number {
+function finalCardScore(card: Card): number {
   if (card.rank === 'JOKER') return 100
   if (card.rank === '10') return 90
   if (card.rank === '2') return 80

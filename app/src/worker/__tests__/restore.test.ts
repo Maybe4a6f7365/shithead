@@ -1,9 +1,9 @@
 // What a room looks like after its Durable Object is recreated from storage.
 // The live Worker suites never see this: a room is not evicted mid-test.
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_GAME_RULES, initGame, seededRng, startPlay, type GameState, type Player } from '../index'
-import { restoreRoomData, type StoredRoomData } from '../../worker/room/roomData'
-import type { PendingOndraEvent } from '../../worker/tableMessages'
+import { DEFAULT_GAME_RULES, initGame, seededRng, startPlay, type GameState, type Player } from '../../engine'
+import { restoreRoomData, type StoredRoomData } from '../room/roomData'
+import type { PendingOndraEvent } from '../tableMessages'
 
 const seat = (id: string, name: string): Player =>
   ({ id, name, isAI: false, hand: [], faceUp: [], faceDown: [], isOut: false })

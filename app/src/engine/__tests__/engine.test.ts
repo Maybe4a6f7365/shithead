@@ -3,28 +3,28 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest'
 import {
-  makeDeck, makeDecks, shuffle, seededRng, canPlay, isQuartet, playClearsPile,
+  makeDecks, shuffle, seededRng, canPlay, isQuartet, playClearsPile,
   initGame, rearrange, startPlay, playCards, pickUpPile,
-  RANK_ORDER, getCurrentPlayer, getTopCard, getTopRank, pileSize, MAX_LOG_ENTRIES,
+  RANK_ORDER, getTopCard, getTopRank, pileSize, MAX_LOG_ENTRIES,
 } from '../index'
 import type { Card } from '../index'
 import { c, mkState } from './helpers'
 
-describe('makeDeck', () => {
+describe('makeDecks', () => {
   it('creates 52 cards without jokers', () => {
-    expect(makeDeck(false).length).toBe(52)
+    expect(makeDecks(false).length).toBe(52)
   })
   it('creates 54 cards with jokers', () => {
-    expect(makeDeck(true).length).toBe(54)
+    expect(makeDecks(true).length).toBe(54)
   })
   it('has 13 cards per suit', () => {
-    const deck = makeDeck(false)
+    const deck = makeDecks(false)
     for (const suit of ['♠','♥','♦','♣'] as const) {
       expect(deck.filter(cd => cd.suit === suit).length).toBe(13)
     }
   })
   it('generates unique, opaque ids that never encode suit or rank', () => {
-    const deck = makeDeck(true, seededRng(7))
+    const deck = makeDecks(true, 1, seededRng(7))
     const ids = deck.map(cd => cd.id)
     expect(new Set(ids).size).toBe(deck.length)
     for (const cd of deck) {
@@ -36,7 +36,7 @@ describe('makeDeck', () => {
     }
   })
   it('is deterministic with a seeded rng', () => {
-    expect(makeDeck(true, seededRng(42))).toEqual(makeDeck(true, seededRng(42)))
+    expect(makeDecks(true, 1, seededRng(42))).toEqual(makeDecks(true, 1, seededRng(42)))
   })
   it('builds 1-3 complete decks with globally unique opaque ids', () => {
     const two = makeDecks(false, 2, seededRng(42))
@@ -295,10 +295,6 @@ describe('pickUpPile basics', () => {
 })
 
 describe('helpers', () => {
-  it('getCurrentPlayer returns the current player', () => {
-    const state = mkState({ players: [{ id: 'a' }, { id: 'b' }], currentPlayerIdx: 1 })
-    expect(getCurrentPlayer(state)!.id).toBe('b')
-  })
   it('getTopCard skips cleared entries and pileSize counts live cards', () => {
     const state = mkState({ players: [{ id: 'a' }, { id: 'b' }], pile: [[c('5')], [c('9')]] })
     state.pile[1].cleared = true // legacy shape tolerance

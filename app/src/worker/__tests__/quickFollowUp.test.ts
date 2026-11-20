@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { applyQuickFollowUpRequest } from '../../worker/gameActions'
-import { c, mkState } from './helpers'
+import { applyQuickFollowUpRequest } from '../gameActions'
+import { c, mkState } from '../../engine/__tests__/helpers'
 
 function pendingState() {
   const eligible = c('6', '♥', 'fresh-drawn-six')

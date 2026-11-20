@@ -80,7 +80,7 @@ export function pileEntryChoreography(kind: PileEntryKind, skipCount: number, re
   }
 }
 
-export function StockPile({ count }: { count: number }) {
+function StockPile({ count }: { count: number }) {
   return (
     <div
       className="pile-column pile-column--stock stock-pile flex flex-col items-center gap-s1"
@@ -109,7 +109,7 @@ export function StockPile({ count }: { count: number }) {
   )
 }
 
-export interface WastepileProps {
+interface WastepileProps {
   top?: CardT | null
   underCount: number
   /** Effective rule rank when the physical top is a copying 3. */
@@ -138,7 +138,7 @@ export interface WastepileProps {
   suppressEntryId?: string | null
 }
 
-export function Wastepile({
+function Wastepile({
   top,
   underCount,
   effectiveRank,

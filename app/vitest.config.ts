@@ -1,9 +1,9 @@
 // ============================================================================
-// Vitest config — engine, protocol, client and component tests (node pool;
-// component tests opt into jsdom per file).
-// src/worker is not unit-tested here: its extracted helpers are covered from
-// engine/__tests__, and the Worker itself by scripts/test-worker-adversarial.mjs
-// against a local wrangler dev.
+// Vitest config — engine, protocol, client, component and Worker-helper tests
+// (node pool; component tests opt into jsdom per file).
+// The Worker's pure modules are unit-tested in src/worker/__tests__; the
+// running Worker is exercised by scripts/test-worker-adversarial.mjs against a
+// local wrangler dev.
 // ============================================================================
 import { defineConfig } from 'vitest/config'
 
@@ -12,7 +12,6 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     include: ['src/**/*.test.{ts,tsx}'],
-    exclude: ['src/worker/**', 'node_modules/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],

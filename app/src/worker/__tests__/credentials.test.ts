@@ -5,7 +5,7 @@ import {
   generateRoomCode,
   hashResumeToken,
   makePlayer,
-} from '../../worker/credentials'
+} from '../credentials'
 
 describe('room credentials', () => {
   it('issues 256-bit resume tokens as unpadded base64url', () => {

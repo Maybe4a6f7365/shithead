@@ -8,7 +8,7 @@ import {
   type Card,
   type GameEvent,
   type GameState,
-} from '../index'
+} from '../../engine'
 import {
   deriveLegacyWinnerId,
   normalizeEasterEggEnabled,
@@ -18,8 +18,8 @@ import {
   normalizeRematchVotes,
   normalizeRoundStats,
   normalizeSpectators,
-} from '../../worker/migrateState'
-import { applyPlayerForfeit } from '../../worker/forfeit'
+} from '../migrateState'
+import { applyPlayerForfeit } from '../forfeit'
 
 function stateWithOutPlayers(outIds: string[], log: GameEvent[] = []): GameState {
   const state = initGame({

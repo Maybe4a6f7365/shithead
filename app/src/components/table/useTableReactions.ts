@@ -62,7 +62,7 @@ export function isMatchingSelfBroadcastEcho(
   )
 }
 
-export const REACTION_CLIENT_COOLDOWN_MS = 800
+const REACTION_CLIENT_COOLDOWN_MS = 800
 
 export function canSendReaction(lastSentAt: number | null, now = Date.now()): boolean {
   return lastSentAt === null || now - lastSentAt >= REACTION_CLIENT_COOLDOWN_MS

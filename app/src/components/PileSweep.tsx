@@ -26,7 +26,7 @@ export function sweepLayers(count: number): number {
   return Math.min(3, 1 + Math.ceil((count - 1) / 3))
 }
 
-export const SWEEP_SECONDS = 0.42
+const SWEEP_SECONDS = 0.42
 
 export function PileSweep({ data, onDone }: { data: PileSweepData; onDone: (key: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)

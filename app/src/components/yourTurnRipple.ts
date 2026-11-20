@@ -9,8 +9,8 @@ import { useLayoutEffect, useRef, type RefObject } from 'react'
 
 export const RIPPLE_STEP_MS = 30
 export const RIPPLE_MAX_DELAY_MS = 300
-export const RIPPLE_HOP_PX = 9
-export const RIPPLE_MS = 340
+const RIPPLE_HOP_PX = 9
+const RIPPLE_MS = 340
 
 /** Delay (ms) for the nth playable card; capped so a huge hand never drags. */
 export function rippleDelay(index: number): number {
@@ -18,7 +18,7 @@ export function rippleDelay(index: number): number {
 }
 
 /** Cards within this many px of vertical distance belong to the same row. */
-export const RIPPLE_ROW_TOLERANCE_PX = 40
+const RIPPLE_ROW_TOLERANCE_PX = 40
 
 /**
  * Cards the ripple should visit: playable/joinable ones, one wave per row

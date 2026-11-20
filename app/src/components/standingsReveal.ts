@@ -9,9 +9,9 @@
 import { EASE_LAND_CSS, EASE_SETTLE_CSS } from './motion'
 
 export const REVEAL_START_MS = 450
-export const REVEAL_ROW_MS = 260
+const REVEAL_ROW_MS = 260
 export const REVEAL_MAX_STEP_MS = 170
-export const REVEAL_BUDGET_MS = 850
+const REVEAL_BUDGET_MS = 850
 
 /** Gap between rows; squeezed for big tables so the whole count-down stays ~<=1.3s. */
 export function standingsStep(count: number): number {
