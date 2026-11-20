@@ -9,7 +9,7 @@ A mobile-first implementation of the Shithead shedding card game, built as an in
 - **Persistent room schema:** `7`
 - **Runtime:** Node.js `>=22`, modern evergreen browsers, Cloudflare Workers
 
-This document is the technical source of truth for the shipped game. Rule behavior is defined by the pure engine in [`app/src/engine/index.ts`](app/src/engine/index.ts); multiplayer trust boundaries and wire validation are defined by [`app/src/engine/protocol.ts`](app/src/engine/protocol.ts) and [`app/src/worker/index.ts`](app/src/worker/index.ts).
+This document is the technical source of truth for the shipped game. Rule behavior is defined by the pure engine in [`app/src/engine/index.ts`](app/src/engine/index.ts); multiplayer trust boundaries and wire validation are defined by [`app/src/engine/protocol.ts`](app/src/engine/protocol.ts) and the Worker in [`app/src/worker/`](app/src/worker/).
 
 ## Product capabilities
 
@@ -81,6 +81,24 @@ flowchart TB
 6. Each client ignores stale or replayed state sequences.
 
 There is no generic action request ID, ACK, or client-side optimistic state mutation. Replay resistance comes from authoritative ownership/turn validation, serialized room operations, and monotonic state sequencing.
+
+### Worker layout
+
+| File | Responsibility |
+|---|---|
+| `worker/index.ts` | Entry named in `wrangler.toml`: exports the HTTP handler and the `Room` class |
+| `worker/http.ts` | Every HTTP request: routing, security headers, CORS, room-code allocation and its per-IP limits |
+| `worker/env.ts`, `worker/credentials.ts` | Bindings and origin policy; resume tokens, their hashes, room codes and new identities |
+| `worker/room/Room.ts` | The Durable Object: restore on creation, socket lifecycle, the one serialized operation queue, message validation and dispatch, the spectator allowlist |
+| `worker/room/context.ts` | One room's state shared by every handler: persistence, sockets and roles, summaries, per-viewer game views, delivery |
+| `worker/room/roomData.ts` | The persisted snapshot type and its restore from any earlier version |
+| `worker/room/membership.ts` | Code claims, create, join, resume, leave, and what a dropped socket means for its seat |
+| `worker/room/lobby.ts` | Deal and rematch, votes, removing an offline seat, rules, the easter egg switch |
+| `worker/room/gameplay.ts` | Rearrange, ready, tribute and every turn action, and the private table event |
+| `worker/room/reactions.ts` | Custom messages, emotes, preset broadcasts and their limits |
+| `worker/migrateState.ts`, `gameActions.ts`, `tableMessages.ts`, `forfeit.ts` | Pure helpers the handlers share; unit-tested from `engine/__tests__/worker*.test.ts` |
+
+A handler never touches a socket or storage directly: it acts on a `RoomContext`, and the Durable Object runs it inside the queue.
 
 ## Game rules
 
@@ -691,11 +709,11 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **619 tests across 62 Vitest files**:
+At this revision, the default suite contains **629 tests across 64 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
-| Engine | 12 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, round counters, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling |
+| Engine | 14 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, round counters, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling, Worker credentials and room restore |
 | Components/UI | 44 | Setup, waiting, spectator masking/indicator, offline-host controls, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
 | Network | 1 | Session validation, auth ordering, sequence guard, terminal release, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
@@ -720,7 +738,7 @@ cd app
 BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial
 ```
 
-The current script reports 45 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay).
+The current script reports 45 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay). It deliberately exhausts the per-IP room-creation limit, so run the production smoke test against a freshly started Worker, not after it.
 
 ### Browser animation suite
 
@@ -822,7 +840,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   │   │   └── useMultiplayerRoom.ts  # React lifecycle/session/sequence controller
 │   │   ├── sp/SPSinglePlayer.ts       # Zustand offline controller
 │   │   ├── styles/index.css           # Last Call tokens and responsive layout
-│   │   ├── worker/                     # Worker, room DO, migration and action boundary
+│   │   ├── worker/                     # HTTP edge, room Durable Object (room/), migration and action helpers
 │   │   ├── App.tsx                     # Mode coordinator and refresh boot routing
 │   │   └── main.tsx                    # React/PWA/Visual Viewport bootstrap
 │   ├── vite.config.ts                  # Vite, manifest and Workbox policy
