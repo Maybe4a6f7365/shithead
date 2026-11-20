@@ -74,23 +74,16 @@ const waiting: TurnAlertControllerOptions = {
 }
 
 function PreferenceHarness() {
-  const {
-    preferences,
-    toggleSound,
-    toggleTurnAlerts,
-    toggleRepeatTurnAlerts,
-    toggleAdhdMode,
-    selectAdhdSound,
-  } = useTurnAlertPreferences()
+  const { preferences, settings } = useTurnAlertPreferences()
   return (
     <>
-      <button type="button" onClick={toggleSound}>Sound {preferences.soundOn ? 'on' : 'off'}</button>
-      <button type="button" onClick={toggleTurnAlerts}>Alerts {preferences.turnAlertsEnabled ? 'on' : 'off'}</button>
-      <button type="button" onClick={toggleRepeatTurnAlerts}>
+      <button type="button" onClick={settings.onToggleSound}>Sound {preferences.soundOn ? 'on' : 'off'}</button>
+      <button type="button" onClick={settings.onToggleTurnAlerts}>Alerts {preferences.turnAlertsEnabled ? 'on' : 'off'}</button>
+      <button type="button" onClick={settings.onToggleRepeatTurnAlerts}>
         Repeat alerts {preferences.repeatTurnAlertsEnabled ? 'on' : 'off'}
       </button>
-      <button type="button" onClick={toggleAdhdMode}>ADHD {preferences.adhdMode ? 'on' : 'off'}</button>
-      <button type="button" onClick={() => selectAdhdSound(preferences.adhdSound === 'beat' ? 'chime' : 'beat')}>
+      <button type="button" onClick={settings.onToggleAdhdMode}>ADHD {preferences.adhdMode ? 'on' : 'off'}</button>
+      <button type="button" onClick={() => settings.onSelectAdhdSound?.(preferences.adhdSound === 'beat' ? 'chime' : 'beat')}>
         ADHD sound {preferences.adhdSound}
       </button>
     </>
@@ -102,14 +95,7 @@ function IntegratedAlertMenuHarness({
   currentPlayerId,
   localHumanTurn,
 }: Pick<TurnAlertControllerOptions, 'phase' | 'currentPlayerId' | 'localHumanTurn'>) {
-  const {
-    preferences,
-    toggleSound,
-    toggleTurnAlerts,
-    toggleRepeatTurnAlerts,
-    toggleAdhdMode,
-    selectAdhdSound,
-  } = useTurnAlertPreferences()
+  const { preferences, settings } = useTurnAlertPreferences()
   const active = useTurnAlertController({
     phase,
     currentPlayerId,
@@ -124,16 +110,7 @@ function IntegratedAlertMenuHarness({
       <TurnAttentionBeacon active={active} />
       <QuietMenu
         onOpenRules={vi.fn()}
-        soundOn={preferences.soundOn}
-        onToggleSound={toggleSound}
-        turnAlertsEnabled={preferences.turnAlertsEnabled}
-        onToggleTurnAlerts={toggleTurnAlerts}
-        repeatTurnAlertsEnabled={preferences.repeatTurnAlertsEnabled}
-        onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
-        adhdMode={preferences.adhdMode}
-        onToggleAdhdMode={toggleAdhdMode}
-        adhdSound={preferences.adhdSound}
-        onSelectAdhdSound={selectAdhdSound}
+        {...settings}
         onLeave={vi.fn()}
         matchRunning
       />

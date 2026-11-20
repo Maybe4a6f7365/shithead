@@ -30,7 +30,7 @@ import { ActionBar } from './ActionBar'
 import { QuietMenu } from './QuietMenu'
 import { Announcer, useAnnouncer } from './Announcer'
 import { feedLine } from './feedText'
-import { useSoundFromLog, emitSoundDebounced, type AdhdAlertSound, type SoundName } from './soundManager'
+import { useSoundFromLog, emitSoundDebounced, type SoundName } from './soundManager'
 import {
   BroadcastFeedback,
   ChatFeedback,
@@ -47,7 +47,7 @@ import type {
   SystemEvent,
 } from '../engine/protocol'
 import { SpecialEffectFeedback } from './SpecialEffectFeedback'
-import { TurnAttentionBeacon, vibrate } from './turnAlerts'
+import { TurnAttentionBeacon, vibrate, type AlertSettings } from './turnAlerts'
 import { OutMoment } from './WinMoment'
 import { SpectatorIndicator } from './SpectatorIndicator'
 import { activeZoneOf, nextRankSelection, type Zone } from './table/selection'
@@ -58,7 +58,7 @@ import { usePileSequence } from './table/usePileSequence'
 import { useActionFeedback } from './table/useActionFeedback'
 import { speakerNameForEvent, useTableReactions } from './table/useTableReactions'
 
-export interface TableScreenProps {
+export interface TableScreenProps extends AlertSettings {
   state: GameState
   /** Whose cards Z3/Z4 render (pinned to the local player; hot-seat gate may
       deliberately switch after a privacy reveal — never per-turn). */
@@ -91,16 +91,6 @@ export interface TableScreenProps {
   onPickUp: () => void | boolean
   onLeave: () => void
   onOpenRules: () => void
-  soundOn: boolean
-  onToggleSound: () => void
-  turnAlertsEnabled?: boolean
-  onToggleTurnAlerts?: () => void
-  repeatTurnAlertsEnabled?: boolean
-  onToggleRepeatTurnAlerts?: () => void
-  adhdMode?: boolean
-  onToggleAdhdMode?: () => void
-  adhdSound?: AdhdAlertSound
-  onSelectAdhdSound?: (sound: AdhdAlertSound) => void
   attentionAlertActive?: boolean
   /** Authoritative multiplayer room option; only the host gets a callback. */
   easterEggEnabled?: boolean

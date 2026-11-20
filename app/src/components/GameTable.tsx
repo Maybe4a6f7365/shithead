@@ -63,14 +63,7 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
   const [recentCustomMessagesByViewer, setRecentCustomMessagesByViewer] = useState(
     () => new Map<string, string[]>(),
   )
-  const {
-    preferences,
-    toggleSound,
-    toggleTurnAlerts,
-    toggleRepeatTurnAlerts,
-    toggleAdhdMode,
-    selectAdhdSound,
-  } = useTurnAlertPreferences()
+  const { preferences, settings: alertSettings } = useTurnAlertPreferences()
 
   const {
     playCards, quickFollowUp, interruptBurn, pickUpPile, endRearrange, rearrange, tickAI, revealFor,
@@ -183,16 +176,7 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
           onPickUp={() => pickUpPile(viewer.id)}
           onLeave={leave}
           onOpenRules={() => setRulesOpen(true)}
-          soundOn={preferences.soundOn}
-          onToggleSound={toggleSound}
-          turnAlertsEnabled={preferences.turnAlertsEnabled}
-          onToggleTurnAlerts={toggleTurnAlerts}
-          repeatTurnAlertsEnabled={preferences.repeatTurnAlertsEnabled}
-          onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
-          adhdMode={preferences.adhdMode}
-          onToggleAdhdMode={toggleAdhdMode}
-          adhdSound={preferences.adhdSound}
-          onSelectAdhdSound={selectAdhdSound}
+          {...alertSettings}
           attentionAlertActive={attentionAlertActive}
           recentCustomMessages={recentCustomMessagesByViewer.get(viewer.id) ?? []}
           onLocalChatAccepted={text => {

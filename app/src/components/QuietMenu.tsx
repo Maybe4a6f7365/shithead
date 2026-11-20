@@ -4,7 +4,7 @@
 // Leave asks once when a match is running (§6.3).
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
-import type { AdhdAlertSound } from './soundManager'
+import type { AlertSettings } from './turnAlerts'
 
 function MenuIcon({ name }: { name: 'rules' | 'sound' | 'bell' | 'attention' | 'egg' | 'leave' }) {
   if (name === 'rules') {
@@ -53,18 +53,8 @@ function MenuIcon({ name }: { name: 'rules' | 'sound' | 'bell' | 'attention' | '
   )
 }
 
-export interface QuietMenuProps {
+export interface QuietMenuProps extends AlertSettings {
   onOpenRules: () => void
-  soundOn: boolean
-  onToggleSound: () => void
-  turnAlertsEnabled?: boolean
-  onToggleTurnAlerts?: () => void
-  repeatTurnAlertsEnabled?: boolean
-  onToggleRepeatTurnAlerts?: () => void
-  adhdMode?: boolean
-  onToggleAdhdMode?: () => void
-  adhdSound?: AdhdAlertSound
-  onSelectAdhdSound?: (sound: AdhdAlertSound) => void
   easterEggEnabled?: boolean
   onToggleEasterEgg?: () => void
   onLeave: () => void

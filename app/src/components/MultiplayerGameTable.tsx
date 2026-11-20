@@ -63,14 +63,7 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
   const rematchVoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const phase = gameState?.phase
   const viewerRematchVote = room?.rematchVotes?.find(vote => vote.playerId === playerId)?.vote ?? 'pending'
-  const {
-    preferences,
-    toggleSound,
-    toggleTurnAlerts,
-    toggleRepeatTurnAlerts,
-    toggleAdhdMode,
-    selectAdhdSound,
-  } = useTurnAlertPreferences()
+  const { preferences, settings: alertSettings } = useTurnAlertPreferences()
   const currentPlayerId = gameState?.players[gameState.currentPlayerIdx]?.id ?? null
   const reduceMotion = useReducedMotion()
   const gameOverReady = useGameOverReady(gameState ?? null, reduceMotion)
@@ -268,6 +261,26 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
     )
   }
 
+  // What the table is given whether the viewer plays or watches.
+  const tableProps = {
+    state: gameState,
+    viewerId: playerId,
+    error: notice,
+    onLeave: quit,
+    onOpenRules: () => setRulesOpen(true),
+    ...alertSettings,
+    connectionBadge: badge,
+    seatOffline: (id: string) => offlineSeats.has(id),
+    latestEmote,
+    onSendEmote: sendEmote,
+    latestBroadcast,
+    onSendBroadcast: sendBroadcast,
+    latestChat,
+    onSendChat: sendChat,
+    recentCustomMessages,
+    latestSystemEvent,
+  }
+
   // ---- Authenticated watcher: public table only, queued for a future deal ----
   if (isSpectator) {
     const resultsView = gameOverResults(gameState)
@@ -298,38 +311,14 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
     return (
       <>
         <TableScreen
-          state={gameState}
-          viewerId={playerId}
+          {...tableProps}
           viewerActive={false}
           spectating
           actionsEnabled={false}
           reactionsEnabled={canSendRoomAction}
           viewerName={playerName}
-          error={notice}
           onPlay={() => false}
           onPickUp={() => false}
-          onLeave={quit}
-          onOpenRules={() => setRulesOpen(true)}
-          soundOn={preferences.soundOn}
-          onToggleSound={toggleSound}
-          turnAlertsEnabled={preferences.turnAlertsEnabled}
-          onToggleTurnAlerts={toggleTurnAlerts}
-          repeatTurnAlertsEnabled={preferences.repeatTurnAlertsEnabled}
-          onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
-          adhdMode={preferences.adhdMode}
-          onToggleAdhdMode={toggleAdhdMode}
-          adhdSound={preferences.adhdSound}
-          onSelectAdhdSound={selectAdhdSound}
-          connectionBadge={badge}
-          seatOffline={id => offlineSeats.has(id)}
-          latestEmote={latestEmote}
-          onSendEmote={sendEmote}
-          latestBroadcast={latestBroadcast}
-          onSendBroadcast={sendBroadcast}
-          latestChat={latestChat}
-          onSendChat={sendChat}
-          recentCustomMessages={recentCustomMessages}
-          latestSystemEvent={latestSystemEvent}
         />
         {spectatorGameOver}
         <RulesSheet open={rulesOpen} onClose={() => setRulesOpen(false)} />
@@ -463,43 +452,19 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
   return (
     <>
       <TableScreen
-        state={gameState}
-        viewerId={playerId}
+        {...tableProps}
         viewerActive={gameState.players[gameState.currentPlayerIdx]?.id === playerId && gameState.phase !== 'gameOver'}
         spectatorCount={room.spectatorCount}
         actionsEnabled={status === 'connected' || status === 'restored'}
-        error={notice}
         onPlay={cards => send({ type: 'PLAY', cards })}
         onQuickFollowUp={card => quickFollowUp(card.id)}
         onBurnIn={cards => send({ type: 'BURN_IN', cards })}
         onPickUp={() => send({ type: 'PICK_UP' })}
-        onLeave={quit}
-        onOpenRules={() => setRulesOpen(true)}
-        soundOn={preferences.soundOn}
-        onToggleSound={toggleSound}
-        turnAlertsEnabled={preferences.turnAlertsEnabled}
-        onToggleTurnAlerts={toggleTurnAlerts}
-        repeatTurnAlertsEnabled={preferences.repeatTurnAlertsEnabled}
-        onToggleRepeatTurnAlerts={toggleRepeatTurnAlerts}
-        adhdMode={preferences.adhdMode}
-        onToggleAdhdMode={toggleAdhdMode}
-        adhdSound={preferences.adhdSound}
-        onSelectAdhdSound={selectAdhdSound}
         attentionAlertActive={attentionAlertActive}
         easterEggEnabled={room.easterEggEnabled}
         onToggleEasterEgg={isHost
           ? () => send({ type: 'SET_EASTER_EGG', enabled: !room.easterEggEnabled })
           : undefined}
-        connectionBadge={badge}
-        seatOffline={id => offlineSeats.has(id)}
-        latestEmote={latestEmote}
-        onSendEmote={sendEmote}
-        latestBroadcast={latestBroadcast}
-        onSendBroadcast={sendBroadcast}
-        latestChat={latestChat}
-        onSendChat={sendChat}
-        recentCustomMessages={recentCustomMessages}
-        latestSystemEvent={latestSystemEvent}
       />
 
       {gameOverOverlay}

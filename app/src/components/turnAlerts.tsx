@@ -26,6 +26,23 @@ export interface TurnAlertPreferences {
   adhdSound: AdhdAlertSound
 }
 
+/**
+ * The sound and alert switches as the table and its menu take them: each
+ * preference with the handler that changes it. Only sound is always shown.
+ */
+export interface AlertSettings {
+  soundOn: boolean
+  onToggleSound: () => void
+  turnAlertsEnabled?: boolean
+  onToggleTurnAlerts?: () => void
+  repeatTurnAlertsEnabled?: boolean
+  onToggleRepeatTurnAlerts?: () => void
+  adhdMode?: boolean
+  onToggleAdhdMode?: () => void
+  adhdSound?: AdhdAlertSound
+  onSelectAdhdSound?: (sound: AdhdAlertSound) => void
+}
+
 const DEFAULT_PREFERENCES: TurnAlertPreferences = {
   soundOn: false,
   turnAlertsEnabled: true,
@@ -203,14 +220,19 @@ export function useTurnAlertPreferences() {
     }
   }, [preferences.soundOn])
 
-  return {
-    preferences,
-    toggleSound,
-    toggleTurnAlerts,
-    toggleRepeatTurnAlerts,
-    toggleAdhdMode,
-    selectAdhdSound,
+  const settings: AlertSettings = {
+    soundOn: preferences.soundOn,
+    onToggleSound: toggleSound,
+    turnAlertsEnabled: preferences.turnAlertsEnabled,
+    onToggleTurnAlerts: toggleTurnAlerts,
+    repeatTurnAlertsEnabled: preferences.repeatTurnAlertsEnabled,
+    onToggleRepeatTurnAlerts: toggleRepeatTurnAlerts,
+    adhdMode: preferences.adhdMode,
+    onToggleAdhdMode: toggleAdhdMode,
+    adhdSound: preferences.adhdSound,
+    onSelectAdhdSound: selectAdhdSound,
   }
+  return { preferences, settings }
 }
 
 interface TurnSnapshot {
