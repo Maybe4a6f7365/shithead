@@ -3,8 +3,9 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest'
 import {
-  initGame, startPlay, playCards, pickUpPile, pickAIMove, seededRng, MAX_GAME_TURNS,
+  initGame, startPlay, playCards, pickUpPile, seededRng, MAX_GAME_TURNS,
 } from '../index'
+import { pickAIMove } from '../ai'
 import type { Card, GameState } from '../index'
 import { c, mkState } from './helpers'
 

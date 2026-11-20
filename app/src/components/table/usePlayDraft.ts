@@ -4,8 +4,8 @@
 // dropped as a whole the moment it stops being a complete legal play.
 // ============================================================================
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
-import type { Card as CardT, GameState, Rank } from '../../engine'
-import { reconcilePlayableSelection, sameSelection, type Zone } from './selection'
+import type { Card as CardT, CardZone, GameState, Rank } from '../../engine'
+import { reconcilePlayableSelection, sameSelection } from './selection'
 
 const NO_SELECTION: string[] = []
 
@@ -15,7 +15,7 @@ export interface PlayDraftArgs {
   actionSeq: number
   viewerId: string
   viewerActive: boolean
-  zone: Zone | null
+  zone: CardZone | null
   zoneCards: CardT[]
   topRank: Rank | null
   /** Explain in the feed and to assistive tech why a draft was dropped. */

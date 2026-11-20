@@ -17,7 +17,6 @@ import {
   getQuickFollowUpCards,
   interruptBurn,
   initGame,
-  pickAIMove,
   pickUpPile,
   playCards,
   quickFollowUp as applyQuickFollowUp,
@@ -25,6 +24,7 @@ import {
   skipTribute,
   startPlay,
 } from '../engine'
+import { pickAIMove } from '../engine/ai'
 
 export interface InitPlayer {
   id?: string

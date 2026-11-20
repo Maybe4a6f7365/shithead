@@ -17,8 +17,8 @@
 // ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LayoutGroup, useReducedMotion } from 'framer-motion'
-import type { Card as CardT, GameState } from '../engine'
-import { canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
+import type { Card as CardT, CardZone, GameState } from '../engine'
+import { activeZone, canPlay, getInterruptBurnCards, getPhysicalTopRun, getQuickFollowUpCards, getTopCard, getTopRank, pileSize } from '../engine'
 import { CardDefs } from './Card'
 import { useYourTurnRipple } from './yourTurnRipple'
 import { OpponentStrip, orderSeats, SpatialTurnMarker, type Seat } from './OpponentStrip'
@@ -50,7 +50,7 @@ import { SpecialEffectFeedback } from './SpecialEffectFeedback'
 import { TurnAttentionBeacon, vibrate, type AlertSettings } from './turnAlerts'
 import { OutMoment } from './WinMoment'
 import { SpectatorIndicator } from './SpectatorIndicator'
-import { activeZoneOf, nextRankSelection, type Zone } from './table/selection'
+import { nextRankSelection } from './table/selection'
 import { viewerCardStates } from './table/cardStates'
 import { useTransient } from './table/useTransient'
 import { usePlayDraft } from './table/usePlayDraft'
@@ -185,7 +185,7 @@ export function TableScreen({
   })
 
   // ---- The viewer's cards ----
-  const zone: Zone | null = viewer ? activeZoneOf(viewer) : null
+  const zone: CardZone | null = viewer ? activeZone(viewer) : null
   const zoneCards = viewer ? viewer[zone ?? 'hand'] : NO_CARDS
   const playableNow = useCallback((c: CardT) => canPlay(c, topRank), [topRank])
   const anyPlayable = viewerActive && zone !== 'faceDown' && zoneCards.some(playableNow)
@@ -311,7 +311,7 @@ export function TableScreen({
     setPickupArmed(false)
   }
 
-  const tapCard = (card: CardT, cardZone: Zone) => {
+  const tapCard = (card: CardT, cardZone: CardZone) => {
     if (blindActive) return
     const preparingNextTurn = !viewerActive && canPreselect && cardZone === zone
     if (!viewerActive && !preparingNextTurn) return

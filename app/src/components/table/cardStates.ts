@@ -5,13 +5,12 @@
 // offered quick follow-up or burn-in outranks a selection, a selection outranks
 // a remembered invalid tap, and only then does plain playability decide.
 // ============================================================================
-import type { Card as CardT, Player } from '../../engine'
+import type { Card as CardT, CardZone, Player } from '../../engine'
 import type { CardVisualState } from '../Card'
-import type { Zone } from './selection'
 
 export interface CardStatesInput {
   viewer: Pick<Player, 'hand' | 'faceUp' | 'faceDown'>
-  zone: Zone | null
+  zone: CardZone | null
   zoneCards: CardT[]
   viewerActive: boolean
   selection: string[]

@@ -5,15 +5,6 @@
 import type { Card as CardT, Rank } from '../../engine'
 import { canPlay } from '../../engine'
 
-/** The one row of the viewer's cards that is in play right now (D6). */
-export type Zone = 'hand' | 'faceUp' | 'faceDown'
-
-export function activeZoneOf(p: { hand: CardT[]; faceUp: CardT[]; faceDown: CardT[] }): Zone {
-  if (p.hand.length > 0) return 'hand'
-  if (p.faceUp.length > 0) return 'faceUp'
-  return 'faceDown'
-}
-
 /**
  * Same-rank cards form a multi-play. Choosing another playable rank replaces
  * the whole set in one tap, so the interface never traps the user behind a

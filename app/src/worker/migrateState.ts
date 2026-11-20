@@ -3,6 +3,7 @@ import {
   MAX_GAME_TURNS,
   MAX_LOG_ENTRIES,
   MAX_PLAYERS,
+  activeVisibleCards,
   createRoundStats,
   getPhysicalTopRun,
   type GameEvent,
@@ -223,14 +224,9 @@ export function normalizePersistedGameState(
   const quickActor = quick && state.players.find(player => player.id === quick.playerId)
   const eligibleIds = quick && Array.isArray(quick.eligibleCardIds) ? quick.eligibleCardIds : []
   const uniqueEligible = new Set(eligibleIds)
-  const activeVisibleCards = quickActor
-    ? quickActor.hand.length > 0
-      ? quickActor.hand
-      : quickActor.faceUp.length > 0
-        ? quickActor.faceUp
-        : []
-    : []
-  const activeVisibleById = new Map(activeVisibleCards.map(card => [card.id, card] as const))
+  const activeVisibleById = new Map(
+    (quickActor ? activeVisibleCards(quickActor) : []).map(card => [card.id, card] as const),
+  )
   const topRun = getPhysicalTopRun(state as GameState)
   const pendingQuickFollowUp = quick &&
     (state.phase === 'play' || state.phase === 'endgame') &&
