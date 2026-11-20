@@ -20,7 +20,7 @@ export interface RearrangeScreenProps {
 
 export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: RearrangeScreenProps) {
   const [selectedHand, setSelectedHand] = useState<number | null>(null)
-  const announcer = useAnnouncer()
+  const { polite, assertive, sayPolite } = useAnnouncer()
 
   // Opening deal: cards fly in from the dealer, once per set of dealt cards.
   // Pass 1 decides and pauses the hand FLIP; pass 2 (after the hand has
@@ -28,16 +28,19 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
   const screenRef = useRef<HTMLDivElement>(null)
   const dealing = useRef(false)
   const [dealReady, setDealReady] = useState(false)
+  // The cards this screen opened with: later swaps are not a new deal.
+  const [dealKey] = useState(() => {
+    const cards = [...player.hand, ...player.faceUp, ...player.faceDown].map(card => card.id).sort().join('|')
+    return `${player.id}:${cards}`
+  })
   useLayoutEffect(() => {
     const reduceMotion = typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const key = [...player.hand, ...player.faceUp, ...player.faceDown].map(card => card.id).sort().join('|')
     // Sticky: StrictMode re-runs this effect, and the second claim would fail.
-    dealing.current = dealing.current || (!reduceMotion && claimDeal(`${player.id}:${key}`))
+    dealing.current = dealing.current || (!reduceMotion && claimDeal(dealKey))
     if (dealing.current) holdFlips(900)
     setDealReady(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [dealKey])
   useLayoutEffect(() => {
     const screen = screenRef.current
     if (!dealReady || !screen || !dealing.current) return
@@ -79,11 +82,10 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
     const idx = player.hand.findIndex(c => c.id === id)
     if (idx === -1) return
     const next = selectedRef.current === idx ? null : idx
-    announcer.sayPolite(next === null ? 'Card unmarked' : `${player.hand[next].rank} marked — tap a face-up card to swap`)
+    sayPolite(next === null ? 'Card unmarked' : `${player.hand[next].rank} marked — tap a face-up card to swap`)
     selectedRef.current = next
     setSelectedHand(next)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player.hand])
+  }, [player.hand, sayPolite])
 
   const onFaceUpId = useCallback((id: string) => {
     const upIdx = player.faceUp.findIndex(c => c.id === id)
@@ -91,12 +93,11 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
     const selected = selectedRef.current
     if (selected !== null) {
       onSwapRef.current(selected, upIdx)
-      announcer.sayPolite('Cards swapped')
+      sayPolite('Cards swapped')
     }
     selectedRef.current = null
     setSelectedHand(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player.faceUp])
+  }, [player.faceUp, sayPolite])
 
   return (
     <div
@@ -106,7 +107,7 @@ export function RearrangeScreen({ player, onSwap, onReady, waitingForOthers }: R
       data-selection={selectedHand === null ? 'none' : 'hand'}
     >
       <CardDefs />
-      <Announcer polite={announcer.polite} assertive={announcer.assertive} />
+      <Announcer polite={polite} assertive={assertive} />
 
       <header className="phase-header rearrange-header px-s4 pt-s2 text-center">
         <div className="phase-header__kicker text-label font-bold tracking-label uppercase text-cream-dim">Final row · {player.name}</div>

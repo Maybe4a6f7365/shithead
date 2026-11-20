@@ -5,7 +5,7 @@
 // vertical position, and spacing never change at a card-count threshold.
 // Roving tabindex + ←/→ keyboard navigation (§6.5).
 // ============================================================================
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { HAND_DISPLAY_ORDER, type Card as CardT } from '../engine'
 import { Card, type CardVisualState } from './Card'
 import { flipHand, onAnyScroll, onViewportChange, recordCardRects, type HandEntrySource } from './cardFlight'
@@ -158,7 +158,7 @@ export function HandFan({
   // A pickup or draw re-sorts the hand and can push the cards that matter
   // off-screen. Bring the first selected (else first playable) card back into
   // view — only when the hand grew, so manual scrolling is never fought.
-  useEffect(() => {
+  const keepKeyCardInView = useEffectEvent(() => {
     const grew = n > previousCount.current
     previousCount.current = n
     const container = containerRef.current
@@ -179,8 +179,8 @@ export function HandFan({
       left: Math.max(0, left - (container.clientWidth - node.offsetWidth) / 2),
       behavior: reduceMotion ? 'auto' : 'smooth',
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [n])
+  })
+  useEffect(() => keepKeyCardInView(), [n])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return

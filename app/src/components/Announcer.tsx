@@ -4,7 +4,7 @@
 // Rapid AI turns collapse: max 1 polite announcement per second; interim
 // events queue and merge.
 // ============================================================================
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export function useAnnouncer() {
   const [polite, setPolite] = useState('')
@@ -13,7 +13,9 @@ export function useAnnouncer() {
   const queued = useRef<string[]>([])
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const sayPolite = (text: string) => {
+  // Both speakers keep their identity, so an effect or callback that names
+  // one as a dependency does not re-run every time something is announced.
+  const sayPolite = useCallback((text: string) => {
     const now = Date.now()
     if (now - lastPoliteAt.current >= 1000) {
       lastPoliteAt.current = now
@@ -30,9 +32,9 @@ export function useAnnouncer() {
         setPolite(merged)
       }
     }, 1000 - (now - lastPoliteAt.current))
-  }
+  }, [])
 
-  const sayAssertive = (text: string) => setAssertive(text)
+  const sayAssertive = useCallback((text: string) => setAssertive(text), [])
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
 

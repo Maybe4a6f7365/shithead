@@ -25,8 +25,10 @@ export default tseslint.config(
     rules: {
       // The two classic hook rules. The plugin's compiler-era rules are left
       // off: this code writes refs during render on purpose (see TableScreen).
+      // An effect that must run on one trigger and read everything else as it
+      // stands then says so with useEffectEvent, not with a disabled rule.
       'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/exhaustive-deps': 'error',
     },
   },
   {

@@ -17,7 +17,7 @@
 // that has moved on. An action already in the log when the table mounts
 // (reconnect, late join) is history and is not replayed.
 // ============================================================================
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import type { Card as CardT, GameState, Rank } from '../../engine'
 import { getMirroredCard } from '../../engine'
 import type { BlindRevealData } from '../BlindReveal'
@@ -27,6 +27,7 @@ import { peekCardRect, peekSeatRect, type FlightRect } from '../cardFlight'
 import { latestAnimatedEvents } from '../feedText'
 import { playArrivalMs } from '../actionTiming'
 import type { PileAreaProps } from '../PileArea'
+import { useHeld } from '../useHeld'
 
 /** The cards of the same rank lying on top of the pile, newest first. */
 export function topRunCards(state: Pick<GameState, 'pile'>): CardT[] {
@@ -118,7 +119,8 @@ export function usePileSequence({
         : previousPlayers.current.find(player => player.id === blindEvent.playerId)?.hand ?? null,
     }
   }
-  const blind = useMemo<BlindRevealData | null>(() => {
+  // Measured once, when a reveal starts: the rects must not follow re-renders.
+  const blind = useHeld<BlindRevealData | null>(`${blindEvent?.key ?? ''}|${blindActive}`, () => {
     if (!blindEvent || !blindActive) return null
     const mine = blindEvent.playerId === viewerId
     const handRect = handFanRect()
@@ -129,9 +131,7 @@ export function usePileSequence({
       from: mine ? blindOrigin.current : peekSeatRect(blindEvent.playerId),
       toward: blindEvent.success ? null : mine ? handRect : peekSeatRect(blindEvent.playerId),
     }
-    // Measured once, when a reveal starts: the rects must not follow re-renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blindEvent?.key, blindActive])
+  })
   const onBlindDone = useCallback((key: string) => setDismissedBlind(key), [])
   const held = blindActive ? blindHold.current : null
   /** The hand a player is still shown holding while their failed flip plays. */
@@ -180,13 +180,14 @@ export function usePileSequence({
   }, [burnKey, burnNeedsArrival, burnArriveMs])
   const burningKey = burning ? burnKey : null
   const burnReason = burn?.reason
-  useEffect(() => {
-    if (!burningKey) return
+  // One timer per burn: it must not restart when anything else changes.
+  const startBurn = useEffectEvent((key: string) => {
     onBurn()
-    const timer = setTimeout(() => setBurnDoneKey(burningKey), burnCleanupDelay(reduceMotion, burnReason))
+    const timer = setTimeout(() => setBurnDoneKey(key), burnCleanupDelay(reduceMotion, burnReason))
     return () => clearTimeout(timer)
-    // One timer per burn: it must not restart when anything else changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })
+  useEffect(() => {
+    if (burningKey) return startBurn(burningKey)
   }, [burningKey])
 
   // ---- Pick-up ----
@@ -203,7 +204,8 @@ export function usePileSequence({
     pickupHold.current = { key: pickupEvent.key, top: previousPile.current.top, pileCount: previousPile.current.pileCount }
   }
   const sweepActive = Boolean(pickupEvent) && !reduceMotion && pickupEvent?.key !== dismissedPickup
-  const sweep = useMemo<PileSweepData | null>(() => {
+  // Measured once, when a sweep starts.
+  const sweep = useHeld<PileSweepData | null>(`${pickupEvent?.key ?? ''}|${sweepActive}`, () => {
     const hold = pickupHold.current
     if (!pickupEvent || !sweepActive || !hold?.top) return null
     const handRect = handFanRect()
@@ -214,9 +216,7 @@ export function usePileSequence({
       takerId: pickupEvent.playerId,
       toward: pickupEvent.playerId === viewerId ? handRect : peekSeatRect(pickupEvent.playerId),
     }
-    // Measured once, when a sweep starts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickupEvent?.key, sweepActive])
+  })
   const onSweepDone = useCallback((key: string) => setDismissedPickup(key), [])
 
   // ---- Flights ----

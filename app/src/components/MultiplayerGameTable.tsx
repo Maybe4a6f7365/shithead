@@ -5,7 +5,7 @@
 // TableScreen as single-player (§9 convergence): face-down endgame cards,
 // masked stock (count only), BLIND_REVEAL via the log, seq-guarded states.
 // ============================================================================
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import { useGameOverReady } from './actionTiming'
 import { useMultiplayerRoom } from '../net/useMultiplayerRoom'
@@ -120,12 +120,12 @@ export function MultiplayerGameTable({ roomId, playerName, intent, onLeave, leav
   }
 
   const handledLeaveRequest = useRef(leaveRequest)
-  useEffect(() => {
+  const quitOnRequest = useEffectEvent(() => {
     if (leaveRequest === handledLeaveRequest.current) return
     handledLeaveRequest.current = leaveRequest
     quit()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leaveRequest])
+  })
+  useEffect(() => quitOnRequest(), [leaveRequest])
 
   const requestRematch = () => {
     if (rematchPending) return

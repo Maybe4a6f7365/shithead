@@ -73,12 +73,13 @@ export const OUT_MOMENT_MS = 2400
 export function OutMoment({ event }: { event: OutMomentEvent | null }) {
   const [visibleKey, setVisibleKey] = useState<string | null>(null)
 
+  const eventKey = event?.key ?? null
   useEffect(() => {
-    if (!event) return
-    setVisibleKey(event.key)
+    if (eventKey === null) return
+    setVisibleKey(eventKey)
     const timeout = window.setTimeout(() => setVisibleKey(null), OUT_MOMENT_MS)
     return () => window.clearTimeout(timeout)
-  }, [event?.key]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [eventKey])
 
   if (!event || visibleKey !== event.key) return null
   const copy = outMomentCopy(event.place)

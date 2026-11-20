@@ -9,7 +9,7 @@
 // when the stack has left the table. The stack carries the matching base
 // motion (see burnStackMotion). Not rendered under reduced motion.
 // ============================================================================
-import { useLayoutEffect, useRef } from 'react'
+import { useEffectEvent, useLayoutEffect, useRef } from 'react'
 import type { Card as CardT } from '../engine'
 import { Card, pileTilt } from './Card'
 import { EASE_LAND_CSS, EASE_LEAVE_CSS, EASE_SETTLE_CSS } from './motion'
@@ -74,7 +74,9 @@ export interface BurnFxProps {
 export function BurnFx({ reason, card, fan, stage }: BurnFxProps) {
   const root = useRef<HTMLDivElement>(null)
 
-  useLayoutEffect(() => {
+  // One burn per mount (the pile keys this component by burn): the card and
+  // the canvas are read as they stand when it starts.
+  const burn = useEffectEvent(() => {
     const el = root.current
     if (!el) return
     const tilt = card ? pileTilt(card.id) : 0
@@ -108,8 +110,8 @@ export function BurnFx({ reason, card, fan, stage }: BurnFxProps) {
       ], { duration: 260, delay: QUARTET_IMPACT_MS + 20, easing: EASE_SETTLE_CSS })
     }
     return () => handle?.release()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reason])
+  })
+  useLayoutEffect(() => burn(), [reason])
 
   const set = reason === 'quartet' && card
     ? Array.from({ length: 4 }, (_, index) => fan?.[index] ?? card).reverse()

@@ -16,21 +16,20 @@ export interface OfflinePlayerControlsProps {
  */
 export function OfflinePlayerControls({ players, isHost, onKick, inline = false }: OfflinePlayerControlsProps) {
   const [now, setNow] = useState(() => Date.now())
-  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  // The absence being confirmed, not just the player: someone who comes back
+  // and drops again has to be confirmed again.
+  const [confirmingKey, setConfirmingKey] = useState<string | null>(null)
   const offline = players.filter(player => !player.connected && Number.isFinite(player.offlineSince))
-  const offlineKey = offline.map(player => `${player.id}:${player.offlineSince}`).join('|')
+  const absenceKey = (player: PlayerSummary) => `${player.id}:${player.offlineSince}`
+  const offlineKey = offline.map(absenceKey).join('|')
 
+  // Tick while anyone is offline, and at once when that set changes.
   useEffect(() => {
-    if (!isHost || offline.length === 0) return
+    if (!isHost || offlineKey === '') return
     setNow(Date.now())
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [isHost, offlineKey])
-
-  useEffect(() => {
-    if (!confirmingId) return
-    if (!offline.some(player => player.id === confirmingId)) setConfirmingId(null)
-  }, [confirmingId, offlineKey])
 
   if (!isHost) return null
   const eligible = offline.filter(player => now - Number(player.offlineSince) >= OFFLINE_KICK_DELAY_MS)
@@ -42,7 +41,7 @@ export function OfflinePlayerControls({ players, isHost, onKick, inline = false 
       aria-label="Offline player controls"
     >
       {eligible.map(player => {
-        const confirming = confirmingId === player.id
+        const confirming = confirmingKey === absenceKey(player)
         return (
           <button
             key={player.id}
@@ -51,10 +50,10 @@ export function OfflinePlayerControls({ players, isHost, onKick, inline = false 
             data-confirming={confirming || undefined}
             onClick={() => {
               if (!confirming) {
-                setConfirmingId(player.id)
+                setConfirmingKey(absenceKey(player))
                 return
               }
-              setConfirmingId(null)
+              setConfirmingKey(null)
               onKick(player.id)
             }}
             aria-label={confirming ? `Confirm remove ${player.name}` : `Remove offline player ${player.name}`}

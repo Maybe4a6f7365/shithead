@@ -4,7 +4,7 @@
 // turns danger-bright at ≤5 (§4.4). Burn animation is owned by Wastepile.
 // NOTE: only stock.length is meaningful — stock cards arrive masked.
 // ============================================================================
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import clsx from 'clsx'
 import type { Card as CardT, Rank } from '../engine'
@@ -19,6 +19,7 @@ import {
   peekSeatRect, registerSeat, staggerDelay, type FlightOffset,
 } from './cardFlight'
 import { EASE_LAND, EASE_EXIT } from './motion'
+import { useHeld } from './useHeld'
 import { landingFx } from './pileFx/landings'
 import { PileFxStage, canvasFxSupported } from './pileFx/stage'
 
@@ -179,7 +180,7 @@ function Wastepile({
   const entryKind = pileEntryKind(top?.rank)
   // Where the new top card came from: its own hand/tableau slot when we saw
   // it, else the playing opponent's seat. Computed once per top card.
-  const flight = useMemo<FlightOffset | null>(() => {
+  const flight = useHeld<FlightOffset | null>(top?.id, () => {
     if (reduceMotion || !top) return null
     const to = pileRef.current?.getBoundingClientRect()
     if (!to || to.width <= 0 || to.height <= 0) return null
@@ -187,10 +188,9 @@ function Wastepile({
     if (!from) return null
     const offset = flightOffset(from, to)
     return isTrivialFlight(offset) ? null : offset
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [top?.id])
+  })
   // The rest of a multi-card play lands one after another, top card last.
-  const ghosts = useMemo(() => {
+  const ghosts = useHeld(top?.id, () => {
     if (!flight || !top || !group || group.length < 2) return []
     if (group[0].id !== top.id || suppressEntryId === top.id) return []
     const to = pileRef.current?.getBoundingClientRect()
@@ -199,20 +199,21 @@ function Wastepile({
       const from = peekCardRect(card.id) ?? peekSeatRect(playedBy)
       return from ? [{ card, index, offset: flightOffset(from, to) }] : []
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [top?.id])
+  })
   const topDelay = ghosts.length > 0 ? staggerDelay(ghosts.length) : 0
-  useEffect(() => {
+  // Each of the effects below runs once per new top card and reads the rest of
+  // the pile as it stands at that moment.
+  const forgetOrigins = useEffectEvent(() => {
     forgetCardRect(top?.id)
     group?.forEach(card => forgetCardRect(card.id))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [top?.id])
+  })
+  useEffect(() => forgetOrigins(), [top?.id])
   // The card the new top landed on stays visible beneath it until it arrives;
   // otherwise the pile is bare felt for the length of the flight.
   const lastTop = useRef<CardT | null>(top ?? null)
   const [under, setUnder] = useState<{ card: CardT; forId: string } | null>(null)
   const landMs = Math.round((topDelay + (flight ? flightDuration(flight) : 0.36)) * 1000) + 30
-  useLayoutEffect(() => {
+  const holdPreviousTop = useEffectEvent(() => {
     const previous = lastTop.current
     lastTop.current = burning ? null : top ?? null
     if (burning || !top || !previous || previous.id === top.id || suppressEntryId === top.id || reduceMotion) {
@@ -222,15 +223,15 @@ function Wastepile({
     setUnder({ card: previous, forId: top.id })
     const timer = window.setTimeout(() => setUnder(null), landMs)
     return () => window.clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [top?.id, burning])
+  })
+  useLayoutEffect(() => holdPreviousTop(), [top?.id, burning])
   // A rule card marks the felt the moment it lands. A card that is about to
   // burn the pile does not: the burn is its mark.
   const landingKind = entryKind === 'standard' ? null : entryKind
   // The skip count is derived a render after the card arrives; read it when the mark is drawn.
   const skipCountRef = useRef(skipCount)
   skipCountRef.current = skipCount
-  useEffect(() => {
+  const markLanding = useEffectEvent(() => {
     if (reduceMotion || !top || !landingKind || burning || burnReason) return
     if (top.id === mountTopId.current) return
     const play = () => fxStageRef.current?.play(box =>
@@ -242,8 +243,8 @@ function Wastepile({
     }
     const timer = window.setTimeout(play, Math.max(0, landMs - 110))
     return () => window.clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [top?.id])
+  })
+  useEffect(() => markLanding(), [top?.id])
   // Fire leaves the felt scorched for a moment after the stack is gone. The
   // mark outlives the burn, so it removes itself when its own fade has ended.
   const [scorchKey, setScorchKey] = useState<string | null>(null)

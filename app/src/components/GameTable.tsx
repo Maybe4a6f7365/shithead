@@ -20,7 +20,7 @@ import {
 import { addRecentCustomMessage } from '../customMessageHistory'
 import { gameOverResults } from './gameOverResults'
 import { useWakeLock } from '../useWakeLock'
-import type { GameEvent } from '../engine'
+import type { GameEvent, GameState } from '../engine'
 import { latestActionEvents } from './feedText'
 import { actionSettleMs, useGameOverReady } from './actionTiming'
 
@@ -36,6 +36,18 @@ export function aiTickDelay(log: GameEvent[], reduceMotion: boolean | null): num
   const events = latestActionEvents(log)
   const slow = events.some(event => event.type === 'BLIND_REVEAL' || event.type === 'CLEAR_PILE')
   return slow ? Math.max(AI_TICK_MS, actionSettleMs(log, reduceMotion) + 160) : AI_TICK_MS
+}
+
+/** Whether the table is waiting on a computer player. */
+function aiIsDue(state: GameState): boolean {
+  const { players, phase } = state
+  if (phase === 'tribute') {
+    return Boolean(players.find(player => player.id === state.pendingTribute?.winnerId)?.isAI)
+  }
+  if (players.find(player => player.id === state.pendingQuickFollowUp?.playerId)?.isAI) return true
+  const current = players[state.currentPlayerIdx]
+  if (!current || current.isOut || state.loserId || !current.isAI) return false
+  return phase === 'play' || phase === 'endgame'
 }
 
 export function GameTable({ onLeave }: { onLeave: () => void }) {
@@ -90,25 +102,13 @@ export function GameTable({ onLeave }: { onLeave: () => void }) {
     if (!state.pendingQuickFollowUp) setDeclinedQuickSourceSeq(null)
   }, [state.pendingQuickFollowUp])
 
-  // Auto-tick AI turns.
+  // Auto-tick AI turns. Every accepted action replaces the state, so the
+  // timer restarts once per action.
   useEffect(() => {
-    const delay = aiTickDelay(state.log, reduceMotion)
-    if (phase === 'tribute') {
-      const tributeWinner = players.find(player => player.id === state.pendingTribute?.winnerId)
-      if (!tributeWinner?.isAI) return
-      const t = setTimeout(() => tickAI(), delay)
-      return () => clearTimeout(t)
-    }
-    const quickPlayer = players.find(player => player.id === state.pendingQuickFollowUp?.playerId)
-    if (quickPlayer?.isAI) {
-      const t = setTimeout(() => tickAI(), delay)
-      return () => clearTimeout(t)
-    }
-    if (!current || current.isOut || loserId || !current.isAI) return
-    if (phase !== 'play' && phase !== 'endgame') return
-    const t = setTimeout(() => tickAI(), delay)
-    return () => clearTimeout(t)
-  }, [current?.id, current?.isAI, current?.isOut, phase, turnCount, loserId, state.pendingTribute?.winnerId, state.pendingQuickFollowUp?.playerId, state.pendingQuickFollowUp?.sourceSeq, players, tickAI, state.seq, reduceMotion])
+    if (!aiIsDue(state)) return
+    const timer = setTimeout(() => tickAI(), aiTickDelay(state.log, reduceMotion))
+    return () => clearTimeout(timer)
+  }, [state, tickAI, reduceMotion])
 
   // AI players never rearrange — auto-ready any stragglers.
   useEffect(() => {

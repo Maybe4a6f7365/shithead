@@ -5,7 +5,7 @@
 // arrival). Rendered inside the pile card slot; transform/opacity only; not
 // rendered under reduced motion.
 // ============================================================================
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Card as CardT } from '../engine'
 import { Card } from './Card'
 import { flightOffset, groupTilt, type FlightRect } from './cardFlight'
@@ -32,7 +32,9 @@ export function PileSweep({ data, onDone }: { data: PileSweepData; onDone: (key:
   const ref = useRef<HTMLDivElement>(null)
   const [offset, setOffset] = useState<{ x: number; y: number; scale: number } | null>(null)
 
-  useLayoutEffect(() => {
+  // One sweep per pickup: the route is measured once and must not follow a
+  // later re-render.
+  const measureRoute = useEffectEvent(() => {
     const rect = ref.current?.getBoundingClientRect()
     if (!rect || rect.width <= 0) {
       onDone(data.key)
@@ -41,14 +43,13 @@ export function PileSweep({ data, onDone }: { data: PileSweepData; onDone: (key:
     const to = { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
     const target = data.toward ? flightOffset(data.toward, to) : { x: 0, y: 160, scale: 0.5 }
     setOffset({ x: target.x, y: target.y, scale: Math.min(target.scale, 0.6) })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.key])
+  })
+  useLayoutEffect(() => measureRoute(), [data.key])
 
   const layers = useMemo(() => sweepLayers(data.count), [data.count])
   const layerRefs = useRef<Array<HTMLDivElement | null>>([])
 
-  useLayoutEffect(() => {
-    if (!offset) return
+  const sweepTo = useEffectEvent((offset: { x: number; y: number; scale: number }) => {
     // Web Animations API: fill 'forwards' holds the faded end state, so there
     // is no flash on the frame the animation completes.
     layerRefs.current.forEach((el, index) => {
@@ -77,7 +78,9 @@ export function PileSweep({ data, onDone }: { data: PileSweepData; onDone: (key:
     }, SWEEP_SECONDS * 1000 * 0.75)
     const done = window.setTimeout(() => onDone(data.key), SWEEP_SECONDS * 1000 + 120)
     return () => { window.clearTimeout(recoil); window.clearTimeout(done) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })
+  useLayoutEffect(() => {
+    if (offset) return sweepTo(offset)
   }, [offset])
 
   return (

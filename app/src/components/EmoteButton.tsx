@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useRef,
   useState,
@@ -82,12 +83,15 @@ export function EmoteButton({
     return () => document.removeEventListener('pointerdown', closeOutside)
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
+  // On opening only: changing tab afterwards must not reset the focus.
+  const focusCurrentTab = useEffectEvent(() => {
     setEmojiFocus(0)
     setTextFocus(0)
     ;(tab === 'emoji' ? emojiTab.current : textTab.current)?.focus()
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  })
+  useEffect(() => {
+    if (open) focusCurrentTab()
+  }, [open])
 
   useEffect(() => {
     if (open && composingChat) chatInput.current?.focus()

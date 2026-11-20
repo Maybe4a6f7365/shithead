@@ -4,7 +4,7 @@
 // waits for this, so it never lands on top of an animation that is still
 // explaining the previous play.
 // ============================================================================
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { GameEvent, GameState } from '../engine'
 import { blindRevealMs } from './BlindReveal'
 import { burnCleanupMs } from './BurnFx'
@@ -41,7 +41,8 @@ export function useGameOverReady(state: Pick<GameState, 'phase' | 'log'> | null,
   const over = state?.phase === 'gameOver'
   const [ready, setReady] = useState(over)
   const mountedOver = useRef(over)
-  const log = state?.log
+  // How long the deciding action still needs, read as the round ends.
+  const settleWait = useEffectEvent(() => actionSettleMs(state?.log ?? [], reduceMotion))
   useEffect(() => {
     if (!over) {
       mountedOver.current = false
@@ -49,14 +50,13 @@ export function useGameOverReady(state: Pick<GameState, 'phase' | 'log'> | null,
       return
     }
     if (mountedOver.current) return
-    const wait = actionSettleMs(log ?? [], reduceMotion)
+    const wait = settleWait()
     if (wait <= 0) {
       setReady(true)
       return
     }
     const timer = setTimeout(() => setReady(true), wait + 200)
     return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [over])
   return over && ready
 }

@@ -20,7 +20,7 @@
     "test:worker:adversarial": "node scripts/test-worker-adversarial.mjs",
     "worker:deploy": "npm run deploy:build && wrangler deploy --config ../wrangler.toml",
     "worker:tail": "wrangler tail --config ../wrangler.toml",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "deadcode": "knip",
     "typecheck": "tsc --noEmit && npm run typecheck:worker && npm run typecheck:node"
   },

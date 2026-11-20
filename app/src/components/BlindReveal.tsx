@@ -6,7 +6,7 @@
 // Rendered inside the pile card slot, so it inherits the pile card's size.
 // Transform and opacity only. Not rendered at all under reduced motion.
 // ============================================================================
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { Card as CardT } from '../engine'
 import { Card } from './Card'
@@ -96,7 +96,9 @@ export function BlindReveal({ data, onDone }: { data: BlindRevealData; onDone: (
   const ref = useRef<HTMLDivElement>(null)
   const [geo, setGeo] = useState<Geo | null>(null)
 
-  useLayoutEffect(() => {
+  // One reveal per flip: the route is measured once and must not follow a
+  // later re-render.
+  const measureRoute = useEffectEvent(() => {
     const el = ref.current
     const rect = el?.getBoundingClientRect()
     if (!rect || rect.width <= 0) {
@@ -107,19 +109,19 @@ export function BlindReveal({ data, onDone }: { data: BlindRevealData; onDone: (
     const start = data.from ? flightOffset(data.from, to) : { x: 0, y: 70, scale: 0.8 }
     const sweep = data.toward ? flightOffset(data.toward, to) : null
     setGeo({ start, sweep: sweep ? { x: sweep.x, y: sweep.y } : null })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.key])
+  })
+  useLayoutEffect(() => measureRoute(), [data.key])
 
   const timeline = useMemo(
     () => (geo ? blindTimeline(data.success, geo.start, geo.sweep) : null),
     [geo, data.success],
   )
 
+  const finish = useEffectEvent(() => onDone(data.key))
   useLayoutEffect(() => {
     if (!timeline) return
-    const timer = window.setTimeout(() => onDone(data.key), timeline.total + BLIND_DONE_PAD_MS)
+    const timer = window.setTimeout(finish, timeline.total + BLIND_DONE_PAD_MS)
     return () => window.clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeline])
 
   const seconds = timeline ? timeline.total / 1000 : 0

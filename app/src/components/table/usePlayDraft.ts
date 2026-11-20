@@ -3,7 +3,7 @@
 // and the armed pick-up guard. A draft survives harmless table updates and is
 // dropped as a whole the moment it stops being a complete legal play.
 // ============================================================================
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import type { Card as CardT, GameState, Rank } from '../../engine'
 import { reconcilePlayableSelection, sameSelection, type Zone } from './selection'
 
@@ -81,17 +81,16 @@ export function usePlayDraft({
   // explains why its highlight disappeared, once per draft and action.
   const dropped = owned.length > 0 && selection.length === 0 && zone !== 'faceDown' && inPlay
   const droppedNoticeKey = useRef('')
-  useEffect(() => {
-    if (!dropped) {
-      droppedNoticeKey.current = ''
-      return
-    }
+  // Runs when a draft is dropped, not when the draft or the callback changes.
+  const noticeDroppedDraft = useEffectEvent(() => {
     const key = `${viewerId}:${actionSeq}:${owned.join(',')}`
     if (droppedNoticeKey.current === key) return
     droppedNoticeKey.current = key
     onDraftDropped('Prepared cards no longer fit the pile — choose again')
-    // Runs when a draft is dropped, not when the draft or the callback changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })
+  useEffect(() => {
+    if (dropped) noticeDroppedDraft()
+    else droppedNoticeKey.current = ''
   }, [dropped, actionSeq, viewerId])
 
   return { selection, selectedCards, setSelection, pickupArmed, setPickupArmed }

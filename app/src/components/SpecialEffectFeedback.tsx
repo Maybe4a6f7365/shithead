@@ -76,14 +76,15 @@ export function SpecialEffectFeedback({ effect }: { effect: SpecialEffect | null
   const [visible, setVisible] = useState(false)
   const reduceMotion = useReducedMotion()
 
+  const effectKey = effect?.key ?? null
   useEffect(() => {
-    if (!effect) return
+    if (effectKey === null) return
     setVisible(true)
     // This is a secondary receipt for the pile animation, not a blink-and-miss
     // toast. Keep it long enough to scan during a fast AI or multiplayer turn.
     const timeout = window.setTimeout(() => setVisible(false), 1800)
     return () => window.clearTimeout(timeout)
-  }, [effect?.key])
+  }, [effectKey])
 
   return (
     <AnimatePresence>
