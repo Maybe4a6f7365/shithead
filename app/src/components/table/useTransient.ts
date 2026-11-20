@@ -2,7 +2,8 @@
 // Short-lived table feedback: one-shot timers that die with the table, and
 // the feed line that briefly replaces the latest table event.
 // ============================================================================
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import { useExpiring } from '../../useExpiring'
 
 export function useTransient() {
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([])
@@ -15,12 +16,8 @@ export function useTransient() {
     timers.current.push(setTimeout(fn, ms))
   }, [])
 
-  const [flash, setFlash] = useState<string | null>(null)
-  /** Show `text` in the feed for `ms`. A newer flash is never cleared early. */
-  const showFlash = useCallback((text: string, ms: number) => {
-    setFlash(text)
-    later(ms, () => setFlash(current => (current === text ? null : current)))
-  }, [later])
+  /** `showFlash(text, ms)` puts `text` in the feed; a newer flash is never cleared early. */
+  const [flash, { show: showFlash }] = useExpiring<string>()
 
   return { flash, showFlash, later }
 }
