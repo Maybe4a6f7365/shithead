@@ -34,8 +34,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run deadcode
+      - run: npm run typecheck
       - run: npm test
-      - run: npm run typecheck:worker
       - run: npm run build
       - name: Exercise the local Worker adversarially
         timeout-minutes: 20

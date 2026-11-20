@@ -96,7 +96,7 @@ There is no generic action request ID, ACK, or client-side optimistic state muta
 | `worker/room/lobby.ts` | Deal and rematch, votes, removing an offline seat, rules, the easter egg switch |
 | `worker/room/gameplay.ts` | Rearrange, ready, tribute and every turn action, and the private table event |
 | `worker/room/reactions.ts` | Custom messages, emotes, preset broadcasts and their limits |
-| `worker/migrateState.ts`, `gameActions.ts`, `tableMessages.ts`, `forfeit.ts` | Pure helpers the handlers share; unit-tested from `engine/__tests__/worker*.test.ts` |
+| `worker/migrateState.ts`, `gameActions.ts`, `tableMessages.ts`, `forfeit.ts` | Pure helpers the handlers share; unit-tested in `worker/__tests__/` |
 
 A handler never touches a socket or storage directly: it acts on a `RoomContext`, and the Durable Object runs it inside the queue.
 
@@ -511,9 +511,19 @@ At bootstrap, a complete saved online credential resumes directly into its room.
 | `cardStates`, `selection` | Pure rules: how each of the viewer's cards looks and reads, and how a tap changes the selection |
 | `useTransient` | One-shot timers and the passing feed line |
 
+Three small hooks are shared by every screen:
+
+| Hook | Responsibility |
+|---|---|
+| `components/useModalFocus` | Keyboard focus for every modal layer (pass gate, round-over dialog, table notice, rules and legal sheets, About): focus moves in, Tab stays inside, Escape dismisses a layer that can be dismissed, focus returns on close. Layers can overlap; only the newest open one traps Tab |
+| `components/useHeld` | A value computed when its key changes and held until it changes again, for a measurement taken as an animation starts |
+| `useExpiring` | A value shown for a time and then dropped; a newer one replaces it and restarts the clock. Used for table notices and reaction bubbles |
+
 ### Stylesheets
 
 `app/src/styles/index.css` is only an ordered list of imports, and that order is the cascade: at equal specificity a later file wins. Tailwind's reset, the app's base rules and Tailwind's utilities come first, unlayered (see the comment in `index.css` for why). Then `tokens.css`, the screens and components in the order they were first designed (`reactions`, `actions`, `landing`, `forms`, `table`), and the design layers that restyle them: `last-call.css` (the shared game language), `quiet-table.css` (the gameplay chrome), `reaction-cascade.css` (the reaction sheet's final say), then `celebrations.css` and `performance.css`. A component can have rules in several of these files, so search the whole folder for its class before changing it. Vitest's CSS contract tests read the stylesheet in this order through `components/__tests__/stylesheet.ts`.
+
+`tokens.css` is where a design value is defined. `tailwind.config.js` gives the colours, spacing, radii, z-index and display font their utility-class names and has to repeat the values to do so; `lastCallTheme.test.ts` compares the two key by key and fails if they drift apart.
 
 ### Card interaction
 
@@ -696,11 +706,12 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Run the complete Vitest suite once |
+| `npm test` | Run the complete Vitest suite once, with the engine coverage thresholds enforced |
 | `npm run test:watch` | Run Vitest in watch mode |
-| `npm run test:coverage` | Generate V8 text/HTML/JSON engine coverage |
-| `npm run typecheck` | Type-check frontend, shared engine, and client code |
-| `npm run typecheck:worker` | Type-check the Worker configuration |
+| `npm run typecheck` | Type-check all three TypeScript projects (below) |
+| `npm run typecheck:worker`, `npm run typecheck:node` | Type-check one project |
+| `npm run lint` | ESLint; any warning fails |
+| `npm run deadcode` | knip: unused files, exports and dependencies fail |
 | `npm run build` | Frontend type-check plus production Vite/PWA build |
 | `npm run preview` | Preview the built frontend |
 | `npm run generate:build-meta` | Stamp commit metadata into Worker source and HTML |
@@ -709,29 +720,41 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 | `npm run worker:deploy` | Build and deploy manually with Wrangler |
 | `npm run worker:tail` | Stream remote Worker logs |
 
-`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules). It currently reports no errors and five `react-hooks/exhaustive-deps` warnings in older components, where an effect is deliberately keyed on a derived string. The CI verify job runs it, so an error (a broken rule of hooks, an unused binding) fails the build; warnings do not. Both the frontend and the Worker TypeScript configs compile in `strict` mode with unused locals and parameters reported as errors.
+TypeScript is split into three projects, one per place the code runs, each in `strict` mode with unused locals and parameters reported as errors:
+
+| Project | Covers | Types available |
+|---|---|---|
+| `tsconfig.json` | The app: everything in `src` except the Worker and the tests | Browser (DOM) |
+| `tsconfig.worker.json` | `src/worker` and the engine it shares with the app | Cloudflare Workers |
+| `tsconfig.node.json` | The tests and the Vite, Vitest and Tailwind configs | Browser plus Node |
+
+Because the tests are not part of the app project, browser code cannot reach for a Node global by accident, and the tests read fixtures from disk without type suppressions.
+
+`npm run lint` runs ESLint 10 with the flat config in `app/eslint.config.js` (typescript-eslint's recommended set plus the two classic React hook rules) and `--max-warnings 0`. The hook-dependency rule is an error and is not switched off anywhere: an effect that must run on one trigger and read everything else as it stands at that moment puts that part in a React effect event (`useEffectEvent`), and a measurement held for the length of an animation uses `useHeld`. One suppression remains in the codebase, for a regular expression that matches control characters on purpose.
+
+`npm run deadcode` runs knip with `app/knip.jsonc`. An export that only its own file uses is reported too, so the compiler's unused-locals check then catches it when it falls out of use.
 
 ## Test strategy
 
-At this revision, the default suite contains **630 tests across 64 Vitest files**:
+At this revision, the default suite contains **643 tests across 66 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
-| Engine | 14 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, round counters, tribute, masking, migrations, forfeit boundaries, delayed table-event scheduling, Worker credentials and room restore |
-| Components/UI | 44 | Setup, waiting, spectator masking/indicator, offline-host controls, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
+| Engine | 8 | Core rules, AI, decks, cumulative/interrupt burns, exact matching-card follow-ups, round counters, tribute, masking |
+| Worker helpers | 6 | Stored-state migrations, forfeit boundaries, server-side burn-in and follow-up validation, delayed table-event scheduling, credentials, room restore |
+| Components/UI | 45 | Setup, waiting, spectator masking/indicator, offline-host controls, legal sheets, focus isolation, cards, large hands, viewport, theme, modern table hierarchy/motion, session message history, game-over results/voting, reaction accessibility/assets, gameplay feedback, tribute, persisted/repeat-turn alerts |
 | Network | 1 | Session validation, auth ordering, sequence guard, terminal release, reconnect and queue semantics |
 | Offline controller | 2 | Viewer pinning/pass gate, AI setup, rematch carry-over, tribute, burn-in |
-| Root | 3 | Invite-link and hard-refresh resume routing, service-worker update guard, custom-message history |
+| Root | 4 | Invite-link and hard-refresh resume routing, service-worker update guard, custom-message history, timed notices |
 
-Configured V8 thresholds apply to engine source: 80% lines/functions/statements and 75% branches. The project deliberately does not claim 100% coverage.
+`npm test` measures V8 coverage of the engine source and fails below 95% lines and functions, 90% statements and 85% branches; the engine currently measures about 98% of lines. The project deliberately does not claim 100% coverage.
 
 ### Live local-Worker adversarial suite
 
-The default Vitest config excludes the Worker entrypoint. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, player and spectator state masking, token rotation/hijack rejection, spectator authorization (every gameplay message rejected, the three table-talk channels relayed with a server-stamped speaker name and role under the same limits as a seated player), queue promotion, offline-kick timing, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, authoritative round results, throttled rematch votes and secure subset deals, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
+Vitest covers the Worker's pure helper modules, not the running Worker. A separate script starts against a real local Wrangler Worker and exercises protocol/auth boundaries, player and spectator state masking, token rotation/hijack rejection, spectator authorization (every gameplay message rejected, the three table-talk channels relayed with a server-stamped speaker name and role under the same limits as a seated player), queue promotion, offline-kick timing, rules and host-only easter-egg control, quick-follow-up forgery/sequence rejection, burn-in forgery/replay, authoritative round results, throttled rematch votes and secure subset deals, tribute, leave/forfeit/host rollover, origin policy, socket/rate/message limits, security headers, SPA routing, and room claims.
 
 ```bash
 cd app
-npm install --no-save --no-package-lock ws@8
 npm run worker:dev -- --port 8787
 ```
 
@@ -752,7 +775,6 @@ jsdom has no layout and runs no animations, so sequencing faults in the table (a
 
 ```bash
 cd app
-npm install --no-save --no-package-lock ws@8
 BASE_URL=https://shead.online \
 EXPECTED_COMMIT=<full-git-sha> \
 DEPLOYMENT_TIMEOUT_MS=600000 \
@@ -771,10 +793,11 @@ The **verify** job uses Node 22 and npm 11.19, then executes:
 
 1. `npm ci`
 2. `npm run lint`
-3. `npm test`
-4. `npm run typecheck:worker`
-5. `npm run build`
-6. local Wrangler plus the adversarial Worker script
+3. `npm run deadcode`
+4. `npm run typecheck`
+5. `npm test`
+6. `npm run build`
+7. local Wrangler plus the adversarial Worker script
 
 The **browser** job runs alongside it: `npm ci`, the headless Chromium build matching the pinned Playwright, then `npm run test:browser`.
 
@@ -836,15 +859,16 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 │   │   ├── components/                # Screens and shared game UI
 │   │   │   └── table/                 # TableScreen's hooks and pure rules
 │   │   ├── engine/
-│   │   │   ├── index.ts               # Pure rules, reducers, deck and AI policy
+│   │   │   ├── index.ts               # Pure rules, reducers and deck
+│   │   │   ├── ai.ts                  # The computer player's policy (offline rounds only)
 │   │   │   ├── protocol.ts            # Protocol-v8 types, roles, validation and masking
-│   │   │   └── __tests__/             # Engine/protocol/Worker-boundary tests
+│   │   │   └── __tests__/             # Engine and protocol tests
 │   │   ├── net/
 │   │   │   ├── RoomClient.ts          # WebSocket transport and reconnect queue
 │   │   │   └── useMultiplayerRoom.ts  # React lifecycle/session/sequence controller
 │   │   ├── sp/SPSinglePlayer.ts       # Zustand offline controller
 │   │   ├── styles/                    # index.css imports the rest in cascade order: tokens, then design layers
-│   │   ├── worker/                     # HTTP edge, room Durable Object (room/), migration and action helpers
+│   │   ├── worker/                     # HTTP edge, room Durable Object (room/), migration and action helpers, their tests
 │   │   ├── App.tsx                     # Mode coordinator and refresh boot routing
 │   │   └── main.tsx                    # React/PWA/Visual Viewport bootstrap
 │   ├── vite.config.ts                  # Vite, manifest and Workbox policy
