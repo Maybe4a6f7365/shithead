@@ -129,7 +129,8 @@ export class RoomContext {
   }
 
   summary(): RoomSummary {
-    const data = this.data!
+    const { data } = this
+    if (!data) throw new Error('No room to summarise')
     return {
       code: data.code,
       phase: data.state?.phase ?? 'waiting',
@@ -157,10 +158,13 @@ export class RoomContext {
   welcomeAndState(session: Session, resumeToken: string): void {
     // resumeToken is per-player secret: it goes ONLY to this socket, never
     // into ROOM_STATE/GAME_STATE broadcasts.
+    const { playerId } = session
+    const role = this.roleOf(playerId)
+    if (!playerId || !role) throw new Error('WELCOME for a socket that has no identity in this room')
     this.send(session, {
       type: 'WELCOME',
-      playerId: session.playerId!,
-      role: this.roleOf(session.playerId)!,
+      playerId,
+      role,
       room: this.summary(),
       version: PROTOCOL_VERSION,
       resumeToken,

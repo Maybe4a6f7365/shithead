@@ -161,7 +161,7 @@ function makeRound(
     id: config.id ?? crypto.randomUUID(),
   }))
   const players = configs.map(config => ({
-    id: config.id!,
+    id: config.id,
     name: config.name,
     isAI: config.isAI,
     aiDifficulty: config.difficulty,

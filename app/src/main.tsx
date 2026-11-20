@@ -33,7 +33,10 @@ installBrowserAudioBackend()
 // single, bounded reload after an update live in swUpdate.ts.
 if (import.meta.env.PROD) registerServiceWorker()
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const root = document.getElementById('root')
+if (!root) throw new Error('index.html has no #root element')
+
+ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>

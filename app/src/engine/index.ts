@@ -767,14 +767,10 @@ function applyAcceptedPlay(
   const drawnCards: Card[] = []
   nextPlayers = nextPlayers.map(player => {
     if (player.id !== playerId) return player
-    const hand = [...player.hand]
-    while (hand.length < 3 && stock.length > 0) {
-      const drawn = stock.shift()!
-      hand.push(drawn)
-      drawnCards.push(drawn)
-      drawCount++
-    }
-    return { ...player, hand }
+    const drawn = stock.splice(0, Math.max(0, 3 - player.hand.length))
+    drawnCards.push(...drawn)
+    drawCount += drawn.length
+    return { ...player, hand: [...player.hand, ...drawn] }
   })
 
   // Preserve a historical unknown first winner in migrated snapshots.

@@ -40,6 +40,12 @@ export interface StoredSession {
   role?: ViewerRole
 }
 
+/** A stored seat the server can resume: it carries the secret token. */
+type ResumableSession = StoredSession & { resumeToken: string }
+
+const isResumable = (session: StoredSession | null): session is ResumableSession =>
+  Boolean(session?.resumeToken)
+
 const SESSION_KEY = 'shithead:session'
 
 export function loadSession(): StoredSession | null {
@@ -120,6 +126,16 @@ export function resolveViewerRole(
 
 // ---------- The hook ----------
 
+/** What a client says first: resume its seat if it holds one, otherwise join or create. */
+function openingMessage(
+  session: ResumableSession | null, intent: UseMultiplayerRoomArgs['intent'], roomId: string, playerName: string,
+): ClientMsg {
+  if (session) {
+    return { type: 'RESUME_ROOM', playerId: session.playerId, roomCode: session.roomCode, resumeToken: session.resumeToken }
+  }
+  return intent === 'join' ? { type: 'JOIN_ROOM', code: roomId, playerName } : { type: 'CREATE_ROOM', playerName }
+}
+
 export interface UseMultiplayerRoomArgs {
   roomId: string | null
   playerName: string
@@ -143,7 +159,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   const [recentCustomMessages, setRecentCustomMessages] = useState<string[]>([])
   const clientRef = useRef<RoomClient | null>(null)
   const lastSeqRef = useRef<number | null>(null)
-  const sessionRef = useRef<StoredSession | null>(null)
+  const sessionRef = useRef<ResumableSession | null>(null)
   const authoritativeStateRef = useRef<GameState | null>(null)
   const reconnectingRef = useRef(false)
   const restoredTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -169,7 +185,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
 
     // Prefer stored credentials for this room (refresh / auto-reconnect).
     const stored = loadSession()
-    sessionRef.current = stored && stored.roomCode === roomId && stored.resumeToken ? stored : null
+    sessionRef.current = isResumable(stored) && stored.roomCode === roomId ? stored : null
     if (stored && stored.roomCode === roomId && !stored.resumeToken) clearSession()
 
     // Fresh authoritative state makes an earlier rejection stale.
@@ -182,19 +198,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
     }
 
     const sendJoinIntent = () => {
-      if (sessionRef.current) {
-        const s = sessionRef.current
-        clientRef.current?.send({
-          type: 'RESUME_ROOM',
-          playerId: s.playerId,
-          roomCode: s.roomCode,
-          resumeToken: s.resumeToken!,
-        })
-      } else if (intent === 'join') {
-        clientRef.current?.send({ type: 'JOIN_ROOM', code: roomId, playerName })
-      } else {
-        clientRef.current?.send({ type: 'CREATE_ROOM', playerName })
-      }
+      clientRef.current?.send(openingMessage(sessionRef.current, intent, roomId, playerName))
     }
 
     const client = new RoomClient({
@@ -235,7 +239,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
             setRoom(message.room)
             setError(null)
             // Persist (and rotate) credentials.
-            const session: StoredSession = {
+            const session: ResumableSession = {
               roomCode: message.room.code,
               playerId: message.playerId,
               resumeToken: message.resumeToken,
@@ -441,16 +445,7 @@ export function useMultiplayerRoom({ roomId, playerName, intent }: UseMultiplaye
   /** "TRY AGAIN" on invalid-room: re-send the join intent. */
   const tryAgain = useCallback(() => {
     setError(null)
-    if (sessionRef.current) {
-      const s = sessionRef.current
-      clientRef.current?.send({
-        type: 'RESUME_ROOM', playerId: s.playerId, roomCode: s.roomCode, resumeToken: s.resumeToken!,
-      })
-    } else if (roomId) {
-      send(intent === 'join'
-        ? { type: 'JOIN_ROOM', code: roomId, playerName }
-        : { type: 'CREATE_ROOM', playerName })
-    }
+    if (roomId) send(openingMessage(sessionRef.current, intent, roomId, playerName))
   }, [intent, playerName, roomId, send])
 
   /**

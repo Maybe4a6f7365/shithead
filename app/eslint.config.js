@@ -16,6 +16,9 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       // `interface A extends B {}` names a concept; it is not an empty type.
       '@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
+      // `value!` tells the compiler to stop checking. Say it with a type or a
+      // check that fails loudly instead.
+      '@typescript-eslint/no-non-null-assertion': 'error',
     },
   },
   {
@@ -32,10 +35,12 @@ export default tseslint.config(
     },
   },
   {
-    // Tests feed the code deliberately malformed values.
+    // Tests feed the code deliberately malformed values, and assert on what
+    // they have just put there.
     files: ['src/**/*.test.{ts,tsx}', 'src/**/__tests__/**'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
   {
