@@ -17,11 +17,13 @@ export default defineConfig({
       reporter: ['text', 'html', 'json-summary'],
       include: ['src/engine/**'],
       exclude: ['**/__tests__/**'],
+      // The engine is the rulebook for client and server alike. `npm test`
+      // fails below these; they sit a few points under the measured figures.
       thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 75,
-        statements: 80,
+        lines: 95,
+        functions: 95,
+        branches: 85,
+        statements: 90,
       },
     },
   },

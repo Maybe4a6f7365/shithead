@@ -10,4 +10,5 @@ dist/
 app/node_modules/
 app/dist/
 app/.cache/
+app/coverage/
 .wrangler/
