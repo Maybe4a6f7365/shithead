@@ -7,7 +7,7 @@ A mobile-first implementation of the Shithead shedding card game, built as an in
 - **Application version:** `0.2.0`
 - **Wire protocol:** `8`
 - **Persistent room schema:** `7`
-- **Runtime:** Node.js `>=22`, modern evergreen browsers, Cloudflare Workers
+- **Runtime:** Node.js `>=22.12`, modern evergreen browsers, Cloudflare Workers
 
 This document is the technical source of truth for the shipped game. Rule behavior is defined by the pure engine in [`app/src/engine/index.ts`](app/src/engine/index.ts); multiplayer trust boundaries and wire validation are defined by [`app/src/engine/protocol.ts`](app/src/engine/protocol.ts) and the Worker in [`app/src/worker/`](app/src/worker/).
 
@@ -103,7 +103,7 @@ There is no generic action request ID, ACK, or client-side optimistic state muta
 | `worker/room/reactions.ts` | Custom messages, emotes, preset broadcasts and their limits |
 | `worker/migrateState.ts`, `gameActions.ts`, `tableMessages.ts`, `forfeit.ts` | Pure helpers the handlers share; unit-tested in `worker/__tests__/` |
 
-A handler never touches a socket or storage directly: it acts on a `RoomContext`, and the Durable Object runs it inside the queue.
+A handler never touches a socket directly, and it persists the room through `RoomContext.save()`: it acts on a `RoomContext`, and the Durable Object runs it inside the queue. The one exception is the room-code claim, which reads and writes its own `claim` key in a storage transaction and is run for `/internal/claim` outside the queue.
 
 ## Game rules
 
@@ -323,12 +323,12 @@ Every current client frame is centrally stamped with `version: 8`. A present but
 | `SET_EASTER_EGG` | Host-only strict Boolean toggle for the room easter egg; accepted during or between rounds |
 | `TRIBUTE_SWAP` | Winner and loser face-up card identifiers |
 | `TRIBUTE_SKIP` | Decline the optional exchange |
-| `CHAT` | Ephemeral custom table message during `play`/`endgame`, up to 200 UTF-16 code units before and after normalization |
+| `CHAT` | Ephemeral custom table message from any room member, seated or queued, in any phase; up to 200 UTF-16 code units before and after normalization |
 | `EMOTE` | One of the finite `EMOTE_IDS` catalog (28 locally rendered reactions) |
 | `BROADCAST` | One of nine fixed text-reaction identifiers |
+| `PING` | Liveness probe. The client sends one when the page returns to the foreground or the network comes back and reconnects if nothing arrives within four seconds; the smoke test sends one too |
 
 `CHAT`, `EMOTE`, and `BROADCAST` — together with `PING` and `LEAVE_ROOM` — are the complete set a queued spectator may send. Every other message above is rejected for a watcher at one dispatcher boundary, so a new gameplay message can never become reachable for them by default.
-| `PING` | Manual/smoke-test liveness request |
 
 The 12-card action limit is the maximum number of ordinary same-rank copies across three decks. Protocol validation also enforces unique IDs, nonblank names up to 32 characters, room-code shape, rule keys, deck range, chat length, and the exact reaction/broadcast catalogs. The shipped name fields deliberately limit visible names to 12 characters.
 
@@ -341,14 +341,13 @@ The 12-card action limit is the maximum number of ordinary same-rank copies acro
 | `ROOM_STATE` | Lobby-safe player roster, presence/offline timestamps, host, rules, phase, card counts, public rematch votes, connected spectator count, and total queue size |
 | `GAME_STATE` | Authoritative state serialized specifically for one viewer |
 | `ERROR` | Stable error code and contextual message |
-| `PLAYER_LEFT` | Explicit leave notification |
 | `CHAT` | Ephemeral canonical custom-message relay with member ID, server-stamped speaker name and role, and timestamp |
 | `EMOTE` | Ephemeral reaction with member ID, server-stamped speaker name and role, and timestamp |
 | `BROADCAST` | Ephemeral fixed-text reaction with member ID, server-stamped speaker name and role, and timestamp |
-| `SYSTEM_EVENT` | Typed, server-originated event for an explicit leave or a server-only round easter egg |
+| `SYSTEM_EVENT` | Typed, server-originated event for an explicit leave, a host removing an offline seat, or a server-only round easter egg |
 | `PONG` | Liveness response |
 
-`PLAYER_JOINED` and the legacy `PLAYER_LEFT` delta are reserved in the TypeScript union but are not emitted; roster changes synchronize via `ROOM_STATE`, while player-facing leave copy uses `SYSTEM_EVENT`. The current React hook handles authoritative room/game state, errors, resume, custom messages, emotes, preset broadcasts, and typed system events. PONG remains a transport/smoke capability rather than player-facing UI.
+There are no join or leave deltas: roster changes synchronize via `ROOM_STATE`, while player-facing leave copy uses `SYSTEM_EVENT`. The current React hook handles authoritative room/game state, errors, resume, custom messages, emotes, preset broadcasts, and typed system events. PONG remains a transport/smoke capability rather than player-facing UI.
 
 ### Per-viewer masking
 
@@ -370,7 +369,7 @@ On each socket connection the client sends `CREATE_ROOM`, `JOIN_ROOM`, or `RESUM
 
 Clients accept only increasing `GAME_STATE.seq` values. The explicit rematch reset—`seq=0`, `turnCount=0`, `phase=rearrange`—is the one allowed sequence restart. Legacy states without a sequence remain accepted.
 
-The client makes five reconnect attempts with linear delays of 1, 2, 3, 4, and 5 seconds, then exposes a manual Retry control. A successful recovery shows `restored` briefly before returning to `connected`.
+The client makes five reconnect attempts with linear delays of 1, 2, 3, 4, and 5 seconds, then exposes a manual Retry control; a client that has given up also retries by itself when the page returns to the foreground or the network comes back. A successful recovery shows `restored` briefly before returning to `connected`.
 
 ## Room service and Durable Object lifecycle
 
@@ -470,7 +469,7 @@ The token and server-assigned viewer role are stored in browser `localStorage`, 
 
 Room-allocation rate tracking is in-memory per Worker isolate, not a globally distributed hard limit. A Cloudflare rate-limiting rule would be required for strict global enforcement.
 
-For every play, the Worker canonicalizes IDs against authoritative ownership, ignores client-provided suit/rank, rejects duplicates or stale ownership, and delegates turn/zone validation to the engine. Custom messages are capped at 200 UTF-16 code units both before and after NFC normalization, trimmed, required to contain a visible character, and stripped of control, bidirectional-formatting, zero-width-space, word-joiner, and Unicode tag characters while preserving meaningful joiners in languages/emoji, punctuation, and markup-like text as literal React-rendered copy. Their exact wire shape and active-game/player membership are validated before the Worker atomically applies the shared reaction cooldown and a room-level per-player limit of three accepted custom messages in any rolling 10-second window; the fourth gets a `RATE_LIMITED` error and is not relayed or allowed to consume the emote/preset cooldown. Both gates follow the stable player ID across an ordinary socket resume. Emotes and preset broadcasts carry catalog IDs rather than arbitrary display content. Custom messages, delivered reactions/broadcasts, and emitted system-event history are not persisted. The only related stored value is the private one-shot Ondra schedule described above, which is deleted before relay or when it becomes ineligible.
+For every play, the Worker canonicalizes IDs against authoritative ownership, ignores client-provided suit/rank, rejects duplicates or stale ownership, and delegates turn/zone validation to the engine. Custom messages are capped at 200 UTF-16 code units both before and after NFC normalization, trimmed, required to contain a visible character, and stripped of control, bidirectional-formatting, zero-width-space, word-joiner, and Unicode tag characters while preserving meaningful joiners in languages/emoji, punctuation, and markup-like text as literal React-rendered copy. Their exact wire shape and room membership (seated or queued) are validated before the Worker atomically applies the shared reaction cooldown and a room-level per-player limit of three accepted custom messages in any rolling 10-second window; the fourth gets a `RATE_LIMITED` error and is not relayed or allowed to consume the emote/preset cooldown. Both gates follow the stable player ID across an ordinary socket resume. Emotes and preset broadcasts carry catalog IDs rather than arbitrary display content. Custom messages, delivered reactions/broadcasts, and emitted system-event history are not persisted. The only related stored value is the private one-shot Ondra schedule described above, which is deleted before relay or when it becomes ineligible.
 
 ### Origin and HTTP policy
 
@@ -565,7 +564,6 @@ The interface uses a physical after-hours card-table direction across the landin
 |---|---|
 | Felt | `#173d2f` |
 | Deep felt | `#0c2b21` |
-| Raised felt | `#234b3a` |
 | Paper / cream | `#f1e5c7` |
 | Ink | `#17241d` |
 | Suit red / burgundy | `#b43c32` |
@@ -615,7 +613,7 @@ The reaction sheet has two modes:
 
 Preset buttons send only a stable catalog ID; custom messages send canonical text. The Worker validates each exact message shape, applies the normal socket limit, one combined custom/emoji/preset reaction slot every 700 ms, and the custom-message three-per-10-second burst limit, then relays the message with player ID and server timestamp. The UI applies a shared 800 ms gate. Emoji and presets reconcile optimistic feedback with the server echo, while multiplayer custom text waits for that authoritative echo so a dropped or rejected message never appears as delivered. Recent-message buttons reuse this same validated and rate-limited send path; they cannot bypass either gate. Multiplayer history records only this player's authoritative echoes, never peers or failed attempts, and survives an ordinary socket reconnect within the mounted room session. Offline pass-and-play keeps a separate in-memory list per local viewer. The three event forms are ephemeral, dropped while offline or unauthenticated, never replayed after reconnect, and never written to room storage. Recent-message lists also stay in memory only and disappear when their game or mounted room session ends.
 
-An explicit leave emits a typed table event for the playful departure line. Separately, when a round makes its single authoritative transition into `play`, the Worker checks for a narrowly normalized Ondra/Ondřej-like player. An eligible round privately schedules one of six server-only easter-egg lines for a random target three to seven accepted gameplay actions later; it is not shown at the start of the round. Once due, the line uses the same speech-bubble treatment as that player's normal preset broadcasts. The schedule is stored with the room, consumed once before relay, cleared if the round ends or the player leaves, and is not re-rolled by reconnect, resume, repeated state broadcasts, or later actions. The line is not client-selectable and never appears in the lobby.
+An explicit leave, and a host removing an offline seat, emit a typed table event for the playful departure line. Separately, when a round makes its single authoritative transition into `play`, the Worker checks for a narrowly normalized Ondra/Ondřej-like player. An eligible round privately schedules one of six server-only easter-egg lines for a random target three to seven accepted gameplay actions later; it is not shown at the start of the round. Once due, the line uses the same speech-bubble treatment as that player's normal preset broadcasts. The schedule is stored with the room, consumed once before relay, cleared if the round ends or the player leaves, and is not re-rolled by reconnect, resume, repeated state broadcasts, or later actions. The line is not client-selectable and never appears in the lobby.
 
 The easter egg is enabled by default. Its current status appears in every player's menu, but only the host can change it. Turning it off at any time immediately cancels a not-yet-fired private schedule. Turning it back on during the same round does not roll a replacement mid-round; the next eligible transition into `play` schedules one normally.
 
@@ -649,7 +647,7 @@ The manifest configures standalone display, theme `#173d2f`, background `#0c2b21
 
 The JavaScript is split by how often it changes, not by screen: `react-*.js` (React, React DOM, scheduler), `motion-*.js` (Framer Motion and its engine), `vendor-*.js` (every other library), a tiny `rolldown-runtime-*.js`, and `index-*.js`, the app itself. All of them load up front through `modulepreload`; nothing is fetched on demand, so a deploy can never leave a running page asking for a chunk that no longer exists. An app-only change re-hashes `index-*.js` alone, and the service worker downloads only that file (about 68 kB gzipped of 184 kB). `index-*.js` must stay the entry the HTML references by `src`, and it carries the multiplayer client, which the production smoke test checks for.
 
-Workbox precaches generated JavaScript, CSS, HTML, SVG, PNG, WebP, and MP3 assets; `fonts/**` are excluded. A new service worker uses `skipWaiting`, `clientsClaim`, and old-cache cleanup. `main.tsx` registers it immediately and checks for updates at startup, hourly, and whenever the document becomes visible.
+Workbox precaches generated JavaScript, CSS, HTML, SVG, PNG, WebP, and MP3 assets; `fonts/**` are excluded. A new service worker uses `skipWaiting`, `clientsClaim`, and old-cache cleanup. `src/swUpdate.ts` registers it in production builds and checks for updates at startup, hourly, and whenever the document becomes visible; when a new version takes control it reloads the page, at most once a minute.
 
 Build metadata is generated from `WORKERS_CI_COMMIT_SHA`, then `GITHUB_SHA`, falling back to `local`. The value is written into `src/worker/build-meta.ts` for `/api/version` and into `<meta name="build-commit">` in `index.html`. It is used by deployment smoke tests rather than displayed as normal player UI.
 
@@ -711,7 +709,7 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Run the complete Vitest suite once, with the engine coverage thresholds enforced |
+| `npm test` | Run the complete Vitest suite once, with the engine coverage thresholds enforced, then the animation performance contracts (`scripts/animationPerformance.test.mjs`) |
 | `npm run test:watch` | Run Vitest in watch mode |
 | `npm run typecheck` | Type-check all three TypeScript projects (below) |
 | `npm run typecheck:worker`, `npm run typecheck:node` | Type-check one project |
@@ -834,7 +832,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 ## Operational characteristics and known boundaries
 
 - Online rooms support human seats only; AI is local.
-- Offline matches are not persisted.
+- An offline round is saved only in this browser's Local Storage; it does not sync between devices.
 - No accounts or global identity system exist.
 - Room creation rate limits are per isolate and best effort, not globally strict.
 - The Worker does not use Durable Object WebSocket hibernation.
@@ -856,6 +854,7 @@ The fallback reaches the same Worker deployment and Durable Objects; it is not a
 ├── app/
 │   ├── public/                        # Manifest icons and static assets
 │   ├── scripts/
+│   │   ├── animationPerformance.test.mjs # Source contracts that keep table motion on the compositor
 │   │   ├── smoke-multiplayer.mjs      # Production end-to-end smoke
 │   │   ├── test-animations-browser.mjs # Table animation checks in Chromium
 │   │   ├── test-worker-adversarial.mjs # Live local-Worker security/rules suite

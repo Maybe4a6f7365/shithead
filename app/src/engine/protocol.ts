@@ -33,7 +33,6 @@
 //    ROOM_STATE {room}                       lobby state broadcast
 //    GAME_STATE {state, version?}            per-viewer game state broadcast
 //    ERROR {code, message}                   action rejected
-//    PLAYER_JOINED / PLAYER_LEFT             lobby deltas
 //    CHAT {playerId, text, ts, playerName?, role?}       ephemeral custom-message relay
 //    EMOTE {playerId, emote, ts, playerName?, role?}      ephemeral reaction relay
 //    BROADCAST {playerId, broadcast, ts, playerName?, role?} ephemeral preset text relay
@@ -276,8 +275,6 @@ export type ServerMsg =
   | { type: 'ROOM_STATE'; room: RoomSummary; version?: number }
   | { type: 'GAME_STATE'; state: GameState; version?: number }
   | { type: 'ERROR'; code: ErrorCode; message: string }
-  | { type: 'PLAYER_JOINED'; player: PlayerSummary }
-  | { type: 'PLAYER_LEFT'; playerId: string }
   | ({ type: 'CHAT' } & ChatEvent)
   | ({ type: 'EMOTE' } & EmoteEvent)
   | ({ type: 'BROADCAST' } & BroadcastEvent)
