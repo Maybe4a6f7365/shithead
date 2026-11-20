@@ -505,21 +505,10 @@
 .reaction-feedback__system-label { color: #e5a1b4; }
 .reaction-feedback--system .reaction-feedback__message { font-size: 13px; line-height: 18px; }
 
+/* Where the picker sits on a phone is set in reaction-cascade.css, after the
+   table layers that would otherwise move it. */
 @media (max-width: 540px) {
-  .game-screen .reaction-picker {
-    top: max(58px, calc(env(safe-area-inset-top) + 48px));
-    right: 8px;
-    bottom: auto;
-    left: 8px;
-    width: auto;
-    max-height: min(
-      480px,
-      calc(
-        var(--app-viewport-height, 100dvh) - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom)
-      )
-    );
-    border-radius: 20px;
-  }
+  .game-screen .reaction-picker { border-radius: 20px; }
 }
 
 @media (max-width: 340px) {
