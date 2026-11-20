@@ -17,13 +17,13 @@ import type {
 } from '../engine/protocol'
 import { DEFAULT_GAME_RULES, type GameRules } from '../engine'
 import { RoundRulesControl } from './RoundRulesControl'
+import { EmoteButton } from './EmoteButton'
 import {
   BroadcastFeedback,
   ChatFeedback,
-  EmoteButton,
   EmoteFeedback,
   SystemEventFeedback,
-} from './EmoteButton'
+} from './ReactionFeedback'
 
 /**
  * Resolve a display name for a reaction event from authoritative roster state,

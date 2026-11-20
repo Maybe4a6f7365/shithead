@@ -4,13 +4,13 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { GameState, Player } from '../../engine'
 import { MAX_CHAT_MESSAGE_LENGTH, type SystemEvent } from '../../engine/protocol'
+import { EmoteButton } from '../EmoteButton'
 import {
   BroadcastFeedback,
   ChatFeedback,
-  EmoteButton,
   EmoteFeedback,
   SystemEventFeedback,
-} from '../EmoteButton'
+} from '../ReactionFeedback'
 import { LobbySystemFeedback } from '../MultiplayerGameTable'
 import { BROADCAST_OPTIONS, REACTION_OPTIONS } from '../reactionCatalog'
 import { TableScreen } from '../TableScreen'

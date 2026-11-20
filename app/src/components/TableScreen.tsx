@@ -34,10 +34,10 @@ import { useSoundFromLog, emitSoundDebounced, type SoundName } from './soundMana
 import {
   BroadcastFeedback,
   ChatFeedback,
-  EmoteButton,
   EmoteFeedback,
   SystemEventFeedback,
-} from './EmoteButton'
+} from './ReactionFeedback'
+import { EmoteButton } from './EmoteButton'
 import type {
   BroadcastEvent,
   BroadcastId,
