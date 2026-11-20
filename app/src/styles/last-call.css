@@ -475,8 +475,7 @@ input.modern-input { font-size: 16px; }
   background: var(--color-burgundy);
 }
 .final-mini-card--up { background: #fff8e8; }
-.final-mini-card--empty.final-mini-card--down,
-.final-mini-card--empty.final-mini-card--up {
+.final-mini-card--slot {
   border: 1px dashed rgba(241, 229, 199, 0.18);
   background: transparent;
   box-shadow: none;
