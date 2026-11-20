@@ -227,8 +227,23 @@ async function run() {
   assert.equal(health.status, 200)
   assert.equal(await health.text(), 'OK')
 
-  const createResponse = await request('/api/room/new', { method: 'POST' })
-  assert.equal(createResponse.status, 200)
+  // Room allocation is limited per address (10 a minute). A 429 here is that
+  // limit doing its job, for instance on a Worker that has just been through
+  // the adversarial suite; it says nothing about the deployment. Wait as the
+  // response asks and try once more before calling it a failure.
+  let createResponse = await request('/api/room/new', { method: 'POST' })
+  if (createResponse.status === 429) {
+    const retryAfter = Math.min(Math.max(Number(createResponse.headers.get('Retry-After')) || 60, 1), 120)
+    log(`room allocation is rate limited for this address; trying again in ${retryAfter}s`)
+    await sleep((retryAfter + 2) * 1000)
+    createResponse = await request('/api/room/new', { method: 'POST' })
+  }
+  assert.equal(
+    createResponse.status,
+    200,
+    `POST /api/room/new returned ${createResponse.status}` +
+      (createResponse.status === 429 ? ' again: this address has used up its room allowance' : ''),
+  )
   const { roomId } = await createResponse.json()
   assert.match(roomId, /^[A-Z0-9]{6}$/)
   log(`allocated room ${roomId}`)

@@ -713,7 +713,7 @@ The development transport maps frontend port `5173` to `http://localhost:8787`. 
 
 ## Test strategy
 
-At this revision, the default suite contains **629 tests across 64 Vitest files**:
+At this revision, the default suite contains **630 tests across 64 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
@@ -742,7 +742,7 @@ cd app
 BASE_URL=http://127.0.0.1:8787 npm run test:worker:adversarial
 ```
 
-The current script reports 45 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay). It deliberately exhausts the per-IP room-creation limit, so run the production smoke test against a freshly started Worker, not after it.
+The current script reports 45 adversarial checks in a normal run (one of the terminal-round assertions follows the winner/tribute or stalemate branch reached by autoplay). It deliberately exhausts the per-IP room-creation limit; a smoke test started against the same Worker within the next minute waits for the limit to clear, as described below, instead of failing.
 
 ### Browser animation suite
 
@@ -759,7 +759,7 @@ DEPLOYMENT_TIMEOUT_MS=600000 \
 node scripts/smoke-multiplayer.mjs
 ```
 
-The smoke test polls `/api/version`, validates the commit-stamped HTML/bundle, service-worker MIME type and manifest icons, then performs a real create/join/disconnect/resume/rule/start/masking/ready/custom-message/preset/ping/play flow.
+The smoke test polls `/api/version`, validates the commit-stamped HTML/bundle, service-worker MIME type and manifest icons, then performs a real create/join/disconnect/resume/rule/start/masking/ready/custom-message/preset/ping/play flow. If room allocation answers 429, the per-address limit is at work rather than the deployment being broken: the test waits for the `Retry-After` period once and tries again, and only a second refusal fails it.
 
 The command above sets `BASE_URL` explicitly so it exercises the canonical hostname. The checked-in script default and GitHub Actions workflow currently use `https://shithead.not4a6f7365.workers.dev` as a routing-stable control. Rerunning the same command against that endpoint can distinguish a Custom Domain/DNS/certificate failure from a Worker deployment failure; both origins should report the same `EXPECTED_COMMIT` because they serve the same deployment.
 
