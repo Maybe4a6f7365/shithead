@@ -27,7 +27,7 @@ This document is the technical source of truth for the shipped game. Rule behavi
 | Responsive table | Portrait and landscape layouts, safe-area support, Visual Viewport correction, count-invariant horizontally scrolling hand |
 | Observability | Structured Worker logs and Cloudflare observability; no product analytics or advertising SDK |
 
-Online rooms do not currently contain AI seats. Offline games live in Zustand memory and restart on refresh; secure refresh recovery applies to online rooms only.
+Online rooms do not currently contain AI seats. An offline round is saved on the device and continues after a reload; an online seat is resumed from the server with its secret token.
 
 ## Technology stack
 
@@ -42,6 +42,11 @@ Online rooms do not currently contain AI seats. Offline games live in Zustand me
 | Edge runtime | Cloudflare Workers, Wrangler 4 |
 | Room authority | One SQLite-backed Durable Object per room code |
 | Tests | Vitest 5, Testing Library, jsdom 31, a headless-Chromium animation suite, a live local-Worker adversarial script, and a production WebSocket smoke test |
+
+Two dependency decisions are deliberate and worth revisiting when their cause goes away:
+
+- TypeScript stays on `~6.0` until typescript-eslint supports a later version.
+- `app/package.json` overrides `glob` for `workbox-build` only. Workbox 7.4 asks for `glob` 11, which carries two published advisories (in `glob` and its `minimatch`); the fixed line is `glob` 14. With the override `npm audit` reports nothing and the build output, service worker included, is byte-identical. Remove the override once `workbox-build` asks for a fixed `glob` itself.
 
 ## System architecture
 
@@ -515,7 +520,7 @@ Three small hooks are shared by every screen:
 
 | Hook | Responsibility |
 |---|---|
-| `components/useModalFocus` | Keyboard focus for every modal layer (pass gate, round-over dialog, table notice, rules and legal sheets, About): focus moves in, Tab stays inside, Escape dismisses a layer that can be dismissed, focus returns on close. Layers can overlap; only the newest open one traps Tab |
+| `components/useModalFocus` | Keyboard focus for every modal layer (pass gate, round-over dialog, table notice, rules and legal sheets, About, reaction picker): focus moves in, Tab stays inside and visits only what Tab can reach, Escape dismisses a layer that can be dismissed, focus returns on close. Layers can overlap; only the newest open one traps Tab |
 | `components/useHeld` | A value computed when its key changes and held until it changes again, for a measurement taken as an animation starts |
 | `useExpiring` | A value shown for a time and then dropped; a newer one replaces it and restarts the clock. Used for table notices and reaction bubbles |
 
@@ -630,7 +635,7 @@ The two bundled recordings are shared between the normal and ADHD cues. **Beat**
 | Local Storage: `shithead:adhd-sound` | Attention-mode sound (`Beat` or `Chime`) | Reused on this browser origin; `Beat` by default |
 | `shithead:session` | Room code, member ID, resume token, player name, server-assigned viewer role | Replaced on `WELCOME` or spectator promotion; cleared after explicit leave is sent on an open socket, expiry, or rejected resume |
 | Workbox Cache Storage | Versioned static app-shell files | Managed and cleaned by the generated service worker |
-| Offline match | Zustand memory only | Lost on refresh |
+| Local Storage: `shithead:local-round` | The offline round in progress: cards, turn, rules and seat setup | Saved after every action and restored on reload when it is a snapshot the current table can render; anything else is dropped. Leaving the round replaces it with the empty lobby. Whose hand was revealed is never saved, so the pass gate returns after a reload |
 
 After a successful prior load/install, the static shell and pass-and-play game can operate without the room service. Online play still requires the Worker and WebSocket connection.
 
@@ -736,7 +741,7 @@ Because the tests are not part of the app project, browser code cannot reach for
 
 ## Test strategy
 
-At this revision, the default suite contains **643 tests across 66 Vitest files**:
+At this revision, the default suite contains **645 tests across 66 Vitest files**:
 
 | Area | Files | Coverage focus |
 |---|---:|---|
