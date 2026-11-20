@@ -1613,14 +1613,6 @@ input, textarea {
 }
 .legal-copy address { color: var(--color-ink); font-style: normal; }
 .legal-copy a { color: #087568; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
-.demo-notice {
-  padding: 14px;
-  border: 1px solid rgba(211, 54, 86, 0.2);
-  border-radius: 14px;
-  color: var(--color-ink);
-  background: rgba(211, 54, 86, 0.07);
-}
-.demo-notice p { margin-top: 4px; color: var(--color-ink-soft); }
 
 .screen-content { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.3) transparent; }
 .form-panel,
@@ -2120,22 +2112,12 @@ input, textarea {
   font-size: 25px;
 }
 .emote-picker__item:active { background: var(--color-teal-soft); transform: scale(0.96); }
-.emote-feedback-layer {
-  position: fixed;
-  z-index: var(--z-overlay);
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding-bottom: 16vh;
-  pointer-events: none;
-}
 .emote-feedback {
   display: flex;
   flex-direction: column;
   align-items: center;
   filter: drop-shadow(0 12px 22px rgba(2, 6, 23, 0.48));
 }
-.emote-feedback__glyph { font-size: clamp(62px, 20vw, 96px); line-height: 1; }
 .emote-feedback__name {
   margin-top: 6px;
   padding: 5px 10px;
@@ -2878,11 +2860,6 @@ input.modern-input { font-size: 16px; }
 .legal-sheet { border-radius: 10px !important; }
 .legal-copy h3 { font-family: var(--font-display); font-size: 19px; letter-spacing: 0.025em; text-transform: uppercase; }
 .legal-copy a { color: #245f4b; }
-.demo-notice {
-  border: 2px solid rgba(180, 60, 50, 0.35);
-  border-radius: 7px;
-  background: rgba(180, 60, 50, 0.08);
-}
 
 .game-over-card { border-radius: 10px; }
 .game-over-card__mark {
@@ -3624,12 +3601,6 @@ input.modern-input { font-size: 16px; }
   justify-content: center;
   gap: 7px;
 }
-.game-screen .emote-control__label {
-  color: currentColor;
-  font-size: 11px;
-  line-height: 14px;
-  font-weight: 650;
-}
 
 /* Seats use whitespace and one quiet active surface instead of card panels. */
 .game-screen .opponent-strip {
@@ -3675,8 +3646,6 @@ input.modern-input { font-size: 16px; }
   font-weight: 650;
   letter-spacing: -0.01em;
 }
-.game-screen .opponent-seat__meta,
-.game-screen .opponent-seat__hand-label,
 .game-screen .opponent-seat__status {
   color: var(--table-copy-muted);
   font-family: var(--font-ui);
@@ -3694,15 +3663,6 @@ input.modern-input { font-size: 16px; }
   flex-direction: column;
   align-items: center;
   gap: 2px;
-}
-.game-screen .opponent-seat__tableau-label {
-  color: var(--table-copy-muted);
-  font-family: var(--font-ui);
-  font-size: 8px;
-  line-height: 10px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .game-screen .opponent-hand-count {
   width: 17px;
@@ -4057,8 +4017,7 @@ input.modern-input { font-size: 16px; }
   letter-spacing: -0.005em;
   text-transform: none;
 }
-.game-screen .action-button__content,
-.game-screen .action-bar__content {
+.game-screen .action-button__content {
   min-width: 0;
   display: grid;
   justify-items: center;
@@ -4082,24 +4041,13 @@ input.modern-input { font-size: 16px; }
   line-height: 1;
   font-weight: 750;
 }
-.game-screen .action-button__eyebrow,
-.game-screen .action-bar__eyebrow {
-  color: var(--table-copy-muted);
-  font-size: 9px;
-  line-height: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-.game-screen .action-button__label,
-.game-screen .action-bar__label {
+.game-screen .action-button__label {
   color: inherit;
   font-size: 14px;
   line-height: 17px;
   font-weight: 700;
 }
-.game-screen .action-button__meta,
-.game-screen .action-bar__meta {
+.game-screen .action-button__meta {
   color: var(--table-copy-muted);
   font-size: 10px;
   line-height: 13px;
@@ -4195,34 +4143,10 @@ input.modern-input { font-size: 16px; }
   height: 21px;
   flex: 0 0 auto;
 }
-.game-screen .quiet-menu__header,
-.game-screen .emote-picker__header {
-  color: var(--table-copy-muted);
-  font-size: 9px;
-  line-height: 12px;
-  font-weight: 700;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-}
-.game-screen .quiet-menu__header { padding: 11px 16px 7px; }
 .game-screen .emote-picker {
   width: 232px;
   display: block;
   padding: 10px;
-}
-.game-screen .emote-picker__header {
-  padding: 2px 4px 9px;
-  display: grid;
-  gap: 1px;
-}
-.game-screen .emote-picker__eyebrow { color: var(--table-copy-muted); }
-.game-screen .emote-picker__title {
-  color: var(--table-copy);
-  font-size: 13px;
-  line-height: 17px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  text-transform: none;
 }
 .game-screen .emote-picker__grid {
   display: grid;
@@ -4469,7 +4393,6 @@ input.modern-input { font-size: 16px; }
   .game-screen .table-topbar { grid-template-columns: minmax(54px, 1fr) auto minmax(78px, 1fr); gap: 3px; }
   .game-screen .connection-badge { gap: 5px; }
   .game-screen .table-turn-label { max-width: 108px; padding-inline: 3px; column-gap: 6px; }
-  .game-screen .emote-control__label { display: none; }
   .game-screen .opponent-strip { gap: 2px; }
   .game-screen .opponent-seat { padding-inline: 3px; }
   .game-screen .pile-area,
@@ -4482,8 +4405,6 @@ input.modern-input { font-size: 16px; }
   .game-screen .table-topbar { min-height: 44px; }
   .game-screen .opponent-strip { min-height: 56px; padding-block: 1px 3px; }
   .game-screen .opponent-seat { min-height: 52px; padding-top: 2px; }
-  .game-screen .opponent-seat__hand-label,
-  .game-screen .opponent-seat__tableau-label { display: none; }
   .game-screen .opponent-seat__turn-marker,
   .game-screen .opponent-seat[data-active="true"] .opponent-seat__turn-marker {
     bottom: 1px;
@@ -4533,8 +4454,6 @@ input.modern-input { font-size: 16px; }
   }
   .game-screen .opponent-strip { min-height: 44px; padding-block: 0; }
   .game-screen .opponent-seat { min-height: 42px; padding-block: 2px; }
-  .game-screen .opponent-seat__meta,
-  .game-screen .opponent-seat__hand-label { display: none; }
   .game-screen .opponent-seat__turn-marker {
     bottom: 0;
     width: 22px !important;
