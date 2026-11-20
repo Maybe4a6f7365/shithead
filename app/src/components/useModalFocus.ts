@@ -17,12 +17,17 @@ const FOCUSABLE = [
   'input:not(:disabled)',
   'select:not(:disabled)',
   'textarea:not(:disabled)',
-  '[tabindex]:not([tabindex="-1"])',
+  '[tabindex]',
 ].join(',')
 
+/**
+ * What Tab can reach inside the layer, in order. A control with tabindex -1
+ * is not a stop (a grid with one roving stop counts once), and neither is
+ * anything inside a hidden part.
+ */
 function focusablesIn(layer: HTMLElement): HTMLElement[] {
   return Array.from(layer.querySelectorAll<HTMLElement>(FOCUSABLE))
-    .filter(element => !element.hasAttribute('hidden'))
+    .filter(element => element.tabIndex >= 0 && element.closest('[hidden]') === null)
 }
 
 export interface ModalFocusOptions {

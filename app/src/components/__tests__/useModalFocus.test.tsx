@@ -49,6 +49,26 @@ describe('useModalFocus', () => {
     expect(document.activeElement).toBe(layer)
   })
 
+  it('counts a group with one roving stop once, and ignores what Tab cannot reach', () => {
+    render(
+      <Layer name="picker">
+        <button>Close</button>
+        <div role="group">
+          <button tabIndex={-1}>One</button>
+          <button tabIndex={0}>Two</button>
+          <button tabIndex={-1}>Three</button>
+        </div>
+        <div hidden><button>Tucked away</button></div>
+      </Layer>,
+    )
+    // "Two" is the last stop, although more buttons follow it in the document.
+    button('Two').focus()
+    expect(pressTab().defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(button('Close'))
+    expect(pressTab(true).defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(button('Two'))
+  })
+
   it('cycles Tab inside the layer in both directions and leaves the middle alone', () => {
     render(<Layer name="one"><button>First</button><button>Middle</button><button>Last</button></Layer>)
 

@@ -5,7 +5,6 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   useEffect,
-  useEffectEvent,
   useId,
   useRef,
   useState,
@@ -16,6 +15,7 @@ import type { BroadcastId, EmoteId } from '../engine/protocol'
 import { isValidChatText, MAX_CHAT_MESSAGE_LENGTH, normalizeChatText } from '../engine/protocol'
 import { BROADCAST_OPTIONS, REACTION_OPTIONS } from './reactionCatalog'
 import { EASE_SLIDE } from './motion'
+import { useModalFocus } from './useModalFocus'
 
 type ReactionTab = 'emoji' | 'text'
 
@@ -41,6 +41,7 @@ export function EmoteButton({
   const [composingChat, setComposingChat] = useState(false)
   const [chatText, setChatText] = useState('')
   const root = useRef<HTMLDivElement>(null)
+  const dialog = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const emojiTab = useRef<HTMLButtonElement>(null)
   const textTab = useRef<HTMLButtonElement>(null)
@@ -56,30 +57,34 @@ export function EmoteButton({
   const previousRecentMessagesKey = useRef(recentMessagesKey)
   const reduceMotion = useReducedMotion()
 
-  const closeAndReturnFocus = () => {
+  const close = () => {
     setComposingChat(false)
     setChatText('')
     setOpen(false)
-    trigger.current?.focus()
   }
+  // Focus starts on the current tab, stays inside, and goes back to the
+  // button on closing. The grids below add their own arrow-key movement.
+  useModalFocus(dialog, {
+    open,
+    initialFocus: '[role="tab"][aria-selected="true"]',
+    returnFocus: trigger,
+    onEscape: close,
+  })
 
   useEffect(() => {
     if (!open) return
     const closeOutside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) closeAndReturnFocus()
+      if (!root.current?.contains(event.target as Node)) close()
     }
     document.addEventListener('pointerdown', closeOutside)
     return () => document.removeEventListener('pointerdown', closeOutside)
   }, [open])
 
-  // On opening only: changing tab afterwards must not reset the focus.
-  const focusCurrentTab = useEffectEvent(() => {
+  // Each opening starts from the first choice of either list.
+  useEffect(() => {
+    if (!open) return
     setEmojiFocus(0)
     setTextFocus(0)
-    ;(tab === 'emoji' ? emojiTab.current : textTab.current)?.focus()
-  })
-  useEffect(() => {
-    if (open) focusCurrentTab()
   }, [open])
 
   useEffect(() => {
@@ -149,34 +154,6 @@ export function EmoteButton({
     ;(next === 'emoji' ? emojiTab.current : textTab.current)?.focus()
   }
 
-  const keepFocusInside = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      closeAndReturnFocus()
-      return
-    }
-    if (event.key !== 'Tab') return
-    type FocusableControl = HTMLButtonElement | HTMLInputElement
-    const focusable = Array.from(
-      root.current?.querySelectorAll<FocusableControl>('[data-reaction-focusable="true"]:not([tabindex="-1"])') ?? [],
-    ).filter(element => !element.disabled && element.offsetParent !== null)
-    // jsdom has no layout and reports offsetParent null. Keep the rendered
-    // controls as a deterministic fallback for accessibility tests.
-    const rendered = focusable.length > 0
-      ? focusable
-      : Array.from(root.current?.querySelectorAll<FocusableControl>('[data-reaction-focusable="true"]:not([tabindex="-1"])') ?? [])
-    if (rendered.length === 0) return
-    const first = rendered[0]
-    const last = rendered[rendered.length - 1]
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
-  }
-
   const selectTab = (next: ReactionTab) => {
     setTab(next)
     setComposingChat(false)
@@ -190,7 +167,7 @@ export function EmoteButton({
     const text = normalizeChatText(chatText)
     if (!isValidChatText(text)) return
     if (onSendChat(text) === false) return
-    closeAndReturnFocus()
+    close()
   }
 
   return (
@@ -229,7 +206,7 @@ export function EmoteButton({
               className="reaction-picker__scrim"
               aria-hidden="true"
               tabIndex={-1}
-              onClick={closeAndReturnFocus}
+              onClick={close}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -241,7 +218,7 @@ export function EmoteButton({
               aria-labelledby={titleId}
               className="emote-picker reaction-picker"
               data-tab={tab}
-              onKeyDown={keepFocusInside}
+              ref={dialog}
               initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.99 }}
@@ -255,9 +232,8 @@ export function EmoteButton({
                 <button
                   type="button"
                   className="reaction-picker__close"
-                  onClick={closeAndReturnFocus}
+                  onClick={close}
                   aria-label="Close reactions"
-                  data-reaction-focusable="true"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <path d="m7 7 10 10M17 7 7 17" />
@@ -275,7 +251,6 @@ export function EmoteButton({
                   aria-controls={emojiPanelId}
                   tabIndex={tab === 'emoji' ? 0 : -1}
                   onClick={() => selectTab('emoji')}
-                  data-reaction-focusable="true"
                 >
                   Emoji <span aria-hidden="true">{REACTION_OPTIONS.length}</span>
                 </button>
@@ -288,7 +263,6 @@ export function EmoteButton({
                   aria-controls={textPanelId}
                   tabIndex={tab === 'text' ? 0 : -1}
                   onClick={() => selectTab('text')}
-                  data-reaction-focusable="true"
                 >
                   Text <span aria-hidden="true">{BROADCAST_OPTIONS.length + recentCustomMessages.length + 1}</span>
                 </button>
@@ -310,13 +284,12 @@ export function EmoteButton({
                         className="emote-picker__item reaction-picker__emoji"
                         data-emote={option.id}
                         data-reaction-index={index}
-                        data-reaction-focusable="true"
                         tabIndex={index === emojiFocus ? 0 : -1}
                         aria-label={option.label}
                         onFocus={() => setEmojiFocus(index)}
                         onClick={() => {
                           onSend(option.id)
-                          closeAndReturnFocus()
+                          close()
                         }}
                       >
                         <img src={option.asset} alt="" aria-hidden="true" draggable="false" />
@@ -349,7 +322,6 @@ export function EmoteButton({
                         enterKeyHint="send"
                         dir="auto"
                         aria-describedby={chatCountId}
-                        data-reaction-focusable="true"
                         onChange={event => setChatText(event.target.value)}
                       />
                       <div className="reaction-picker__composer-footer">
@@ -360,8 +332,7 @@ export function EmoteButton({
                           <button
                             type="button"
                             className="reaction-picker__composer-cancel"
-                            onClick={closeAndReturnFocus}
-                            data-reaction-focusable="true"
+                            onClick={close}
                           >
                             Cancel
                           </button>
@@ -369,7 +340,6 @@ export function EmoteButton({
                             type="submit"
                             className="reaction-picker__composer-send"
                             disabled={!isValidChatText(normalizeChatText(chatText))}
-                            data-reaction-focusable="true"
                           >
                             Send
                           </button>
@@ -382,7 +352,6 @@ export function EmoteButton({
                         type="button"
                         className="reaction-picker__text reaction-picker__text--custom"
                         data-broadcast-index={0}
-                        data-reaction-focusable="true"
                         tabIndex={textFocus === 0 ? 0 : -1}
                         aria-label="Custom message"
                         onFocus={() => setTextFocus(0)}
@@ -406,14 +375,13 @@ export function EmoteButton({
                                 type="button"
                                 className="reaction-picker__text reaction-picker__text--recent"
                                 data-broadcast-index={itemIndex}
-                                data-reaction-focusable="true"
                                 tabIndex={itemIndex === textFocus ? 0 : -1}
                                 aria-label={`Send again: ${message}`}
                                 dir="auto"
                                 onFocus={() => setTextFocus(itemIndex)}
                                 onClick={() => {
                                   if (onSendChat(message) === false) return
-                                  closeAndReturnFocus()
+                                  close()
                                 }}
                               >
                                 <span className="reaction-picker__recent-copy">{message}</span>
@@ -439,14 +407,13 @@ export function EmoteButton({
                               className="reaction-picker__text"
                               data-broadcast={option.id}
                               data-broadcast-index={itemIndex}
-                              data-reaction-focusable="true"
                               tabIndex={itemIndex === textFocus ? 0 : -1}
                               aria-label={`Broadcast: ${option.label}`}
                               dir="auto"
                               onFocus={() => setTextFocus(itemIndex)}
                               onClick={() => {
                                 onSendBroadcast(option.id)
-                                closeAndReturnFocus()
+                                close()
                               }}
                             >
                               {option.text}
